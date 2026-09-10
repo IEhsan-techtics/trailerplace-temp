@@ -22,7 +22,12 @@ def qualified_state(**kwargs):
 # cheaper than it looks - the block is identical on every turn, so it is lru_cached in-process
 # AND hits the provider's prompt cache - but it is still the per-turn floor, so moving it
 # should stay a deliberate act with a reason written down.
-MAX_SYSTEM_PROMPT_CHARS = 14_000
+#
+# MEASURED UNDER THE TEST FIXTURE, which stubs the catalogue down to 6 makes. Production
+# reads 20 out of trailer_listings, and the brand block grows with it - the same prompt is
+# ~2,200 chars longer live than it is here. The headroom below absorbs that, and it is why
+# this number is not simply "current size, rounded up".
+MAX_SYSTEM_PROMPT_CHARS = 17_000
 
 
 def test_the_system_prompt_stays_short():
