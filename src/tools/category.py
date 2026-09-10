@@ -109,6 +109,13 @@ def _prune_for_new_category(state: dict) -> None:
     the customer's decision (brief S12), taken in apply.py. What must go is the per-slot
     ask/decline history: a question declined for a Dump trailer has never been put to them
     about an Equipment trailer, so it has to be askable again.
+
+    The shown-listing history goes too. It exists to keep "show me more" showing something
+    new, and it is only meaningful WITHIN a category: excluding the dump trailers they
+    already saw from a search for utility trailers narrows nothing, and it would hide those
+    trailers for good if they ever switched back. ``_apply_refined_search`` clears it the
+    same way when a requirement changes, but returns early on the category-change path -
+    which is exactly why it has to be cleared here.
     """
     required = set(state.get("required_slots") or [])
     state["asked_counts"] = {
@@ -121,6 +128,10 @@ def _prune_for_new_category(state: dict) -> None:
     state["pending_slot"] = None
     state["invalid_retry_slot"] = None
     state["invalid_retry_reason"] = None
+    state["shown_urls"] = []
+    # Nothing has been shown FOR THIS CATEGORY, so the results gate treats it as a fresh
+    # search rather than a repeat, and asks the new category's questions first.
+    state["results_shown"] = False
 
 
 # The only slots the keep-or-drop question is ever about: the trailer's configuration.

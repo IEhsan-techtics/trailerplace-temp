@@ -219,3 +219,90 @@ def test_tools_still_go_through_the_runner_preconditions():
 def test_lookup_tool_still_enforces_the_gate(args):
     tools = {t.name: t for t in build_tools(_runner())}
     assert "NO LOOKUP RAN" in tools["lookup_inventory"].invoke(args)
+
+
+# --------------------------------------------------- a second search is the NEXT page
+def test_a_second_search_in_one_loop_excludes_what_was_already_served(monkeypatch):
+    """The ping-pong guard: state["shown_urls"] only grows in compose, after the loop, so
+    the runner has to track what it served itself."""
+    from src.graph.nodes import search as search_module
+
+    catalogue = [{"title": f"T{i}", "url": f"https://x/{i}"} for i in range(6)]
+
+    def _fake_search(state):
+        excluded = set(state.get("shown_urls") or [])
+        remaining = [row for row in catalogue if row["url"] not in excluded][:3]
+        state.setdefault("turn_outcome", {}).update(
+            {"search_ran": True, "listings": remaining, "result_count": len(remaining)}
+        )
+        return state
+
+    monkeypatch.setattr(search_module, "search_node", _fake_search)
+    runner = _runner()
+
+    first = runner.call("search_inventory", "{}")
+    second = runner.call("search_inventory", "{}")
+
+    assert "T0" in first and "T2" in first
+    assert "T0" not in second, "the second page must not repeat the first"
+    assert "T3" in second and "T5" in second
+    assert len(runner.served_listings) == 6, "both pages accumulate"
+
+
+def test_running_out_tells_the_agent_to_stop_rather_than_returning_nothing(monkeypatch):
+    from src.graph.nodes import search as search_module
+
+    catalogue = [{"title": "T0", "url": "https://x/0"}]
+
+    def _fake_search(state):
+        excluded = set(state.get("shown_urls") or [])
+        state.setdefault("turn_outcome", {}).update(
+            {"search_ran": True, "listings": [r for r in catalogue if r["url"] not in excluded]}
+        )
+        return state
+
+    monkeypatch.setattr(search_module, "search_node", _fake_search)
+    runner = _runner()
+    runner.call("search_inventory", "{}")
+    assert "NO FURTHER MATCHES" in runner.call("search_inventory", "{}")
+
+
+def test_the_persisted_shown_urls_are_not_mutated_by_a_search(monkeypatch):
+    """Only what the REPLY cites counts as shown; compose records that."""
+    from src.graph.nodes import search as search_module
+
+    monkeypatch.setattr(
+        search_module,
+        "search_node",
+        lambda state: state.setdefault("turn_outcome", {}).update(
+            {"search_ran": True, "listings": [{"title": "A", "url": "https://x/1"}]}
+        )
+        or state,
+    )
+    runner = _runner(shown_urls=["https://old/1"])
+    runner.call("search_inventory", "{}")
+    assert runner.state["shown_urls"] == ["https://old/1"]
+
+
+# --------------------------------------------------- category change drops the history
+def test_changing_category_clears_the_shown_history():
+    from src.tools.category import set_trailer_category
+
+    state = {"category": "Dump", "required_slots": [], "shown_urls": ["https://x/1"],
+             "results_shown": True, "asked_counts": {}, "declined_slots": []}
+    set_trailer_category(state, "Utility")
+
+    assert state["shown_urls"] == []
+    assert state["results_shown"] is False
+
+
+def test_staying_on_the_same_category_keeps_the_shown_history():
+    """Re-selecting the category they are already on is not a change."""
+    from src.tools.category import set_trailer_category
+
+    state = {"category": "Dump", "required_slots": [], "shown_urls": ["https://x/1"],
+             "results_shown": True, "asked_counts": {}, "declined_slots": []}
+    set_trailer_category(state, "Dump")
+
+    assert state["shown_urls"] == ["https://x/1"]
+    assert state["results_shown"] is True

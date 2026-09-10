@@ -170,14 +170,16 @@ def _messages(state: dict, user_message: str) -> list:
     return messages
 
 
-def _cited_urls(state: dict, reply_text: str) -> list[str]:
+def _cited_urls(listings: list, reply_text: str) -> list[str]:
     """Which of the trailers the tools returned actually made it into the reply.
 
     Taken from the tool results rather than asked of the model: the tools know exactly what
     they handed over, so a URL here can never be one the model invented, and a trailer the
     reply never mentioned is never marked as shown.
+
+    Reads the runner's running total, not the last batch: an agent that searched twice cited
+    trailers from both pages, and only the second would survive a last-batch check.
     """
-    listings = (state.get("turn_outcome") or {}).get("listings") or []
     cited: list[str] = []
     for listing in listings:
         url = str((listing.get("url") if isinstance(listing, dict) else None) or "").strip()
@@ -204,7 +206,7 @@ def respond_with_tools(state: dict, turn: Any, user_message: str) -> ReplyOutput
         logger.error("Reply pass returned nothing usable: session=%s", state.get("session_id"))
         return None
 
-    cited = _cited_urls(state, text)
+    cited = _cited_urls(runner.served_listings, text)
     logger.info(
         "REPLY written: session=%s tools=%s cited=%d",
         state.get("session_id"), runner.ran, len(cited),

@@ -85,6 +85,30 @@ class ToolRunner:
         self.state = state
         self.turn = turn
         self.ran: list[str] = []
+        # Everything the tools have handed over THIS turn, accumulated across calls.
+        #
+        # ``state["shown_urls"]`` only grows in compose, which runs after the agent loop has
+        # finished - so without this a second search_inventory inside one loop would see the
+        # same exclusion list and return the same trailers, and the agent would ping-pong on
+        # identical results. Tracked here instead, so a second call is a genuine next page.
+        self.served_listings: list[Any] = []
+        self._served_urls: list[str] = []
+
+    def _remember(self, listings: list[Any]) -> None:
+        """Record what a tool just returned, de-duplicated, and publish the running total.
+
+        ``turn_outcome["listings"]`` becomes everything served this turn rather than only the
+        last call's batch: it is what the API response carries and what the cited-URL check
+        reads, and a first batch the reply cited would otherwise be forgotten.
+        """
+        for listing in listings:
+            url = str(_listing_get(listing, "url") or "").strip()
+            if url and url in self._served_urls:
+                continue
+            if url:
+                self._served_urls.append(url)
+            self.served_listings.append(listing)
+        self.state.setdefault("turn_outcome", {})["listings"] = list(self.served_listings)
 
     # -- preconditions ---------------------------------------------------------------
     def _search_refusal(self) -> str | None:
@@ -130,10 +154,29 @@ class ToolRunner:
         # search_node asserts on this. The gate above has established the search is warranted;
         # apply_node recomputes the flag properly on the next turn either way.
         self.state["qualification_complete"] = True
-        search_node(self.state)
+
+        # Hide what we have already handed over this turn, so a second call is the NEXT page
+        # rather than the same one again. Restored afterwards because what the customer was
+        # actually shown is decided by what the reply cites, and compose records that.
+        persisted = list(self.state.get("shown_urls") or [])
+        if self._served_urls:
+            self.state["shown_urls"] = persisted + [
+                url for url in self._served_urls if url not in persisted
+            ]
+        try:
+            search_node(self.state)
+        finally:
+            self.state["shown_urls"] = persisted
+
         self.ran.append("search_inventory")
-        listings = (self.state.get("turn_outcome") or {}).get("listings") or []
-        return listing_block(listings)
+        fresh = (self.state.get("turn_outcome") or {}).get("listings") or []
+        if not fresh and self._served_urls:
+            return (
+                "NO FURTHER MATCHES: you have already been given every trailer we have for "
+                "these requirements. Present the ones you already have and do not search again."
+            )
+        self._remember(fresh)
+        return listing_block(fresh)
 
     def _lookup_inventory(self, **identifiers: Any) -> str:
         from src.graph.nodes.inventory_lookup import inventory_lookup_node
@@ -164,7 +207,8 @@ class ToolRunner:
 
         outcome = self.state.get("turn_outcome") or {}
         status = outcome.get("inventory_match_status") or "none"
-        listings = outcome.get("listings") or []
+        listings = list(outcome.get("listings") or [])
+        self._remember(listings)
         return f"MATCH STATUS: {status}\n{listing_block(listings)}"
 
     # -- dispatch --------------------------------------------------------------------
