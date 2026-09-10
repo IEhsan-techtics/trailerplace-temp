@@ -21,6 +21,7 @@ from src.graph.nodes.search import search_node
 from src.graph.state import STATE_SCHEMA_VERSION, from_snapshot, to_snapshot
 from src.llm import usage
 from src.llm.client import analyze_turn
+from src.tools.lookup_gate import lookup_requested
 
 logger = logging.getLogger(__name__)
 
@@ -37,12 +38,9 @@ def _route(state: dict, output: Any) -> list[str]:
     if state.get("qualification_complete") and state.get("category"):
         targets.append("search")
 
-    lookup = getattr(output, "inventory_lookup", None)
-    if (
-        lookup is not None
-        and getattr(lookup, "is_lookup", False)
-        and getattr(lookup, "confidence", "low") in {"medium", "high"}
-    ):
+    # The structural gate, not just is_lookup+confidence: a bare make is a brand preference
+    # and a category word is not a model, so neither may hijack the turn with a side query.
+    if lookup_requested(output):
         targets.append("inventory_lookup")
 
     return targets

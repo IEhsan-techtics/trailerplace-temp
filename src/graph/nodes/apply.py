@@ -31,6 +31,7 @@ from src.tools.category import (
     suggest_category_from_haul_item,
 )
 from src.tools.filters import apply_extracted_fields
+from src.tools.lookup_gate import brand_is_lookup_make
 from src.tools.questions import (
     all_required_resolved,
     decline_slot,
@@ -288,6 +289,10 @@ def _apply_brand(state: dict, output: Any, user_message: str) -> None:
         return
     if brand_is_actually_a_hitch(brand, user_message):
         state.setdefault("slots", {}).setdefault("hitch_type", None)
+        return
+    if brand_is_lookup_make(output, brand):
+        # It is the make half of this turn's lookup identifier ("I'm looking for an Iron
+        # Bull DTB"), not a standing instruction to filter every later search to that make.
         return
     state["brand_preference"] = str(brand).strip()
 

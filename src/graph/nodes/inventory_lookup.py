@@ -4,6 +4,7 @@ import logging
 
 from src.config import settings
 from src.search.inventory_matcher import lookup_inventory
+from src.tools.lookup_gate import lookup_requested, usable_stock_number
 
 logger = logging.getLogger(__name__)
 
@@ -13,12 +14,11 @@ def inventory_lookup_node(state: dict) -> dict:
     turn = state.get("turn")
     lookup = turn.inventory_lookup if turn else None
     # No intent check: a lookup rides along with any intent (see build.py::_lookup_requested).
-    assert (
-        turn is not None
-        and lookup is not None
-        and lookup.is_lookup
-        and lookup.confidence in {"medium", "high"}
-    ), "inventory_lookup_node requires an approved inventory_lookup gate"
+    # One source of truth with _route and the tool handler, so the node can never run on a
+    # turn the gate would have refused.
+    assert turn is not None and lookup is not None and lookup_requested(turn), (
+        "inventory_lookup_node requires an approved inventory_lookup gate"
+    )
 
     # Side-query invariant: a lookup never touches qualification state.
     guarded_keys = ("category", "slots", "brand_preference", "skipped_slots", "declined_slots", "qualification_complete")
@@ -29,11 +29,15 @@ def inventory_lookup_node(state: dict) -> dict:
         state.get("session_id"), lookup.year, lookup.make, lookup.model_text, lookup.stock_number, lookup.confidence,
     )
 
+    # A stock number that failed the plausibility check ("7000 lbs", or a number this turn
+    # also extracted as the payload) is dropped rather than searched on: left in, it joins
+    # the fuzzy query text and nudges make/model scoring toward nothing in particular. The
+    # rest of the identifiers still run - the gate already established there are some.
     result = lookup_inventory(
         year=lookup.year,
         make=lookup.make,
         model_text=lookup.model_text,
-        stock_number=lookup.stock_number,
+        stock_number=usable_stock_number(turn),
         limit=settings.inventory_lookup_limit,
     )
     matches = result["matches"]
