@@ -453,7 +453,7 @@ def _closing_part(state: dict, output: Any) -> tuple[str, str | None]:
     # away.
     if outcome.get("wants_results") and not state.get("category"):
         if (getattr(output, "answer_to_customer_question", None) or "").strip():
-            return greeting.orientation_prompt(state), None
+            return greeting.orientation_question(state), None
         return company.website_redirect_line(), None
 
     # 3. A pending confirmation outranks a new question - it is about what they just said.
@@ -486,8 +486,6 @@ def _closing_part(state: dict, output: Any) -> tuple[str, str | None]:
                 "COMPOSE replaced a question naming too many categories: session=%s",
                 state.get("session_id"),
             )
-        if (getattr(output, "answer_to_customer_question", None) or "").strip():
-            return greeting.orientation_prompt(state), None
         return greeting.orientation_question(state), None
 
     # 5. The next required question. Python picks the slot; the model may phrase it.

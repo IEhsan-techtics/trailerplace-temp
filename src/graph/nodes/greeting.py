@@ -177,12 +177,6 @@ def completion_greeting(state: dict) -> str:
     return f"Great to have your contact info, {name}!" if name else "Great, thank you!"
 
 
-def orientation_prompt(state: dict) -> str:
-    """The follow-up when the types have just been described - so it does not name them
-    again, it only asks which one fits."""
-    return "Which of those sounds closest to what you need, or what will you be hauling?"
-
-
 def orientation_question(state: dict) -> str:
     """What follows once contact is settled and they have named no category yet."""
     return _category_menu_sentence()
