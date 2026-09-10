@@ -8,6 +8,8 @@ Someone who has just told us something went wrong is not being sold to on that t
 """
 from __future__ import annotations
 
+import re
+
 import pytest
 from factories import complete_welcome, turn_output
 
@@ -521,3 +523,47 @@ def test_an_faq_still_costs_no_second_model_call(fake_llm, no_reply_pass):
 
     assert no_reply_pass.calls == 0
     assert "trade-in" in result["assistant_text"].lower()
+
+
+# ------------------------------------------------------- what we claim has happened
+# The canned line used to say "I've passed it to our team" whatever had actually become of
+# the email. On the turn a complaint arrives we almost never have a phone number, so the
+# usual case was a promise we had not yet kept - and a customer told the job is done has no
+# reason to answer the request for details that follows.
+_CLAIMS_IT_WENT_OUT = re.compile(
+    r"(passed it to our team|shared that request with the team|has been logged)", re.IGNORECASE
+)
+
+
+@pytest.mark.parametrize("key", ["complaint", "team_request", "listing_interest"])
+def test_a_held_request_never_claims_it_has_been_sent(key):
+    answer = canned_responses.escalation_answer(key, "stashed")
+    assert not _CLAIMS_IT_WENT_OUT.search(answer), answer
+    assert canned_responses.PHONE in answer, "they still get the number"
+
+
+@pytest.mark.parametrize("key", ["complaint", "team_request", "listing_interest"])
+def test_a_declined_customer_is_promised_no_follow_up(key):
+    """They told us not to contact them. Saying someone will be in touch is both untrue and
+    the opposite of what they asked for."""
+    answer = canned_responses.escalation_answer(key, "dropped")
+    assert not _CLAIMS_IT_WENT_OUT.search(answer), answer
+    for promise in ("reach out", "follow up", "be in touch", "get back to you"):
+        assert promise not in answer.lower(), answer
+    assert canned_responses.PHONE in answer
+
+
+def test_a_sent_request_does_say_so(fake_llm):
+    answer = canned_responses.escalation_answer("complaint", "sent")
+    assert _CLAIMS_IT_WENT_OUT.search(answer)
+
+
+def test_the_fallback_reply_matches_what_became_of_the_email(fake_llm, monkeypatch):
+    """The reply the customer sees, end to end, on a turn we cannot send yet."""
+    from src.graph.build import run_turn
+
+    fake_llm.push(turn_output(intent="team_request_escalation", turn_summary="damaged trailer"))
+    text = run_turn("s1", "my trailer arrived damaged")["assistant_text"]
+
+    assert not _CLAIMS_IT_WENT_OUT.search(text), text
+    assert "name" in text.lower(), "and it asks for what is missing"

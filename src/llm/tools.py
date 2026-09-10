@@ -335,9 +335,10 @@ class ToolRunner:
             reason_line, status,
         )
 
-        answer = canned_responses.ESCALATION_ANSWERS.get(
-            canned_key, canned_responses.ESCALATION_ANSWERS["team_request"]
-        )
+        # Worded for what actually happened to the email: "I've passed it to our team" is
+        # only true when it went out, and it is the wrong thing to say either to someone we
+        # are still waiting on details from or to someone who refused to give them.
+        answer = canned_responses.escalation_answer(canned_key, status)
         return _reply_instruction(self.state, answer, status)
 
     # -- dispatch --------------------------------------------------------------------

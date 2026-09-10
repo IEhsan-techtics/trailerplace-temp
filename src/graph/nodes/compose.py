@@ -63,15 +63,36 @@ def compose_node(state: dict, output: Any) -> dict:
     closing_the_gate = greeting.contact_is_complete(contact) and not contact.get("greeted")
 
     acknowledgement = (getattr(output, "acknowledgement", "") or "").strip()
+    answer = (getattr(output, "answer_to_customer_question", None) or "").strip()
+
     if closing_the_gate:
         # The model writes this welcome too - it can use their name and react to what they
         # actually said. Checked, not trusted: the opening is the one line guaranteed to be
         # said, so if the model's words do not carry it, ours do.
-        parts.append(_opening_text(state, acknowledgement))
-    elif acknowledgement:
-        parts.append(acknowledgement)
+        opening = _opening_text(state, acknowledgement)
+        parts.append(opening)
+        # The welcome is mandatory, so here it is the ANSWER that goes if they say the same
+        # thing: "Great to have your contact info, Ibrahim! Thanks, Ibrahim - I've got your
+        # contact information."
+        if answer and _restates(answer, opening):
+            logger.info(
+                "COMPOSE dropped an answer restating the welcome: session=%s",
+                state.get("session_id"),
+            )
+            answer = ""
+    else:
+        # Nothing is mandatory here, so the shorter, poorer line goes and the richer one
+        # stays: an acknowledgement is by design a compressed version of the answer beside
+        # it, which is exactly what makes it a duplicate when both go out.
+        if acknowledgement and answer and _restates(acknowledgement, answer):
+            logger.info(
+                "COMPOSE dropped an acknowledgement restating the answer: session=%s",
+                state.get("session_id"),
+            )
+            acknowledgement = ""
+        if acknowledgement:
+            parts.append(acknowledgement)
 
-    answer = (getattr(output, "answer_to_customer_question", None) or "").strip()
     if answer:
         parts.append(answer)
 
@@ -176,6 +197,55 @@ def _repeats(parts: list[str], closing: str) -> bool:
 _FALLBACK_REASON = {"complaint": "Escalation", "team_request": "Team Request"}
 
 
+# Words that carry no meaning of their own, so two sentences sharing only these are not
+# saying the same thing. The politeness openers are in here on purpose: "Yes", "Thanks" and
+# "Great" are exactly what a restatement is padded with.
+_STOPWORDS = frozenset(
+    """a an and are as at be been being but by can could did do does for from get got had has
+    have her here his i if in into is it its just like me my no not of on or our ours out over
+    she so than that the their them then there these they this to too us was we were what when
+    which who will with would you your yes yeah sure thanks thank great glad happy okay ok
+    absolutely definitely certainly sorry also still now""".split()
+)
+
+# How much of the shorter line has to be present in the longer one before it is a restatement
+# rather than a second point. Deliberately short of 1.0: "Yes, we do offer financing" against
+# "We offer financing. Call 979-532-1486..." is a duplicate even though "yes" appears once.
+_RESTATEMENT_OVERLAP = 0.7
+
+
+def _content_words(text: str) -> set[str]:
+    return {
+        word
+        for word in re.findall(r"[a-z0-9:]+", str(text or "").lower())
+        if word not in _STOPWORDS
+    }
+
+
+def _covered_by(word: str, body: set[str]) -> bool:
+    """Is this word already in the other line, allowing for a shortened form of it?
+
+    Prefix-matched because the restatement is rarely word-for-word - "your contact info"
+    against "your contact information" is the same sentence twice.
+    """
+    if word in body:
+        return True
+    return any(
+        len(other) >= 4 and len(word) >= 4 and (other.startswith(word) or word.startswith(other))
+        for other in body
+    )
+
+
+def _restates(candidate: str, established: str) -> bool:
+    """Does ``candidate`` say only what ``established`` already says?"""
+    words = _content_words(candidate)
+    body = _content_words(established)
+    if not words or not body:
+        return False
+    covered = sum(1 for word in words if _covered_by(word, body))
+    return covered / len(words) >= _RESTATEMENT_OVERLAP
+
+
 def _person_fallback(state: dict, output: Any, outcome: dict) -> str:
     """What to say when the agent could not write the reply on a turn that needed a person.
 
@@ -191,15 +261,15 @@ def _person_fallback(state: dict, output: Any, outcome: dict) -> str:
     from src.tools import team_notify
 
     key = "complaint" if outcome.get("escalation_owns_turn") else "team_request"
-    team_notify.record(
+    status = team_notify.record(
         state,
         reason=_FALLBACK_REASON[key],
         description=(getattr(output, "turn_summary", "") or "").strip()
         or "Customer asked for something the chatbot cannot do.",
     )
 
-    answer = canned_responses.ESCALATION_ANSWERS[key]
-    if team_notify.contact_complete(state) or team_notify.declined(state):
+    answer = canned_responses.escalation_answer(key, status)
+    if status != "stashed":
         return answer
     # Acknowledge first, ask second. A customer who has just told us something went wrong is
     # answered before they are asked for anything.
