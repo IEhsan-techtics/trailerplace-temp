@@ -14,11 +14,22 @@ def qualified_state(**kwargs):
 
 
 # --------------------------------------------------------------------------- the static half
+# Raised from 12,000 when the inventory-lookup identifier rules were added: what a stock
+# number is and is not cannot be stated accurately in fewer words, and getting it wrong sends
+# a load weight to the matcher as a stock number.
+#
+# The ceiling exists to catch prompt growth nobody decided on, not to forbid growth. It is
+# cheaper than it looks - the block is identical on every turn, so it is lru_cached in-process
+# AND hits the provider's prompt cache - but it is still the per-turn floor, so moving it
+# should stay a deliberate act with a reason written down.
+MAX_SYSTEM_PROMPT_CHARS = 14_000
+
+
 def test_the_system_prompt_stays_short():
     """It is sent on every turn. A live probe showed input tokens dominating the cost, so
     length here is a running bill, not a style preference."""
     prompt = system_prompt()
-    assert len(prompt) < 12000, f"system prompt is {len(prompt)} chars"
+    assert len(prompt) < MAX_SYSTEM_PROMPT_CHARS, f"system prompt is {len(prompt)} chars"
 
 
 def test_the_system_prompt_is_cached_so_the_catalogue_is_not_re_read_per_turn():

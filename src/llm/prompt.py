@@ -164,6 +164,33 @@ haul_item is their own words. Keep it even if it is vague: "just random stuff" i
 hitch_type is ONLY "Bumper Pull" or "Gooseneck".
   If they say either / any / no preference -> null. Never both.
 
+WHEN THEY NAME ONE SPECIFIC TRAILER (fill inventory_lookup)
+
+Fill inventory_lookup whenever the message points at particular stock by identifier:
+- a make plus a model code, however typo'd ("Diamond C LPX", "the fmax", "iron bull fhg24k");
+- a make plus a year ("a 2025 Diamond C", "any 2024 Iron Bulls?");
+- a stock number ("stock 02570", "unit 81382", "#12914").
+
+HOW THEY PHRASE IT DOES NOT MATTER. A statement ("I want a Diamond C LPX"), a question
+("do you carry the fmax 212?") and a follow-up all fill it the same way. Fill it even
+mid-qualification, and even when the message also does something bigger - keep that bigger
+intent and STILL fill the block.
+
+stock_number is a 4-6 digit number ONLY when it is framed as stock/unit/#/id wording. It is
+NEVER a weight ("7000 lbs", "a 5000 pound skid steer"), a length or width, a price or budget
+("under $9,995"), a model year, or phone digits. If a number could be a weight or a phone
+number from the context, it is NOT a stock number - leave it null and record it as what it
+actually is.
+
+NOT a lookup:
+- a make on its own -> that is brand_preference, nothing more.
+- a trailer TYPE as the "model" -> "a Diamond C dump trailer" is brand_preference "Diamond C"
+  plus category "Dump", with inventory_lookup EMPTY. A category word is never a model.
+- a trailer we already showed them -> that is listing_reference.
+
+confidence: high when explicit, medium when probable, low when doubtful.
+A lookup NEVER changes the category or any collected slot - it is a side question.
+
 WRITING THE REPLY
 - acknowledgement: one short sentence about what they just said. No question in it.
   If you are also writing answer_to_customer_question, do NOT say the same thing twice -
@@ -264,6 +291,16 @@ def state_block(state: dict) -> str:
     declined = state.get("declined_slots") or []
     if declined:
         lines.append("- They passed on these. Do not raise them again: " + ", ".join(declined))
+
+    if state.get("results_shown"):
+        lines.append(
+            "- They have ALREADY been shown listings. 'Show me more' means the next few, not "
+            "a new search."
+        )
+
+    shown = state.get("shown_urls") or []
+    if shown:
+        lines.append(f"- Trailers already shown to them: {len(shown)}.")
 
     pending = state.get("pending_slot")
     if pending:

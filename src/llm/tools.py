@@ -169,14 +169,63 @@ class ToolRunner:
             self.state["shown_urls"] = persisted
 
         self.ran.append("search_inventory")
-        fresh = (self.state.get("turn_outcome") or {}).get("listings") or []
+        outcome = self.state.get("turn_outcome") or {}
+        fresh = outcome.get("listings") or []
         if not fresh and self._served_urls:
             return (
                 "NO FURTHER MATCHES: you have already been given every trailer we have for "
                 "these requirements. Present the ones you already have and do not search again."
             )
         self._remember(fresh)
-        return listing_block(fresh)
+        return "\n".join(
+            part for part in (self._match_quality(outcome, fresh), listing_block(fresh)) if part
+        )
+
+    def _match_quality(self, outcome: dict, listings: list[Any]) -> str:
+        """How well these actually match - stated with the results, not left to be inferred.
+
+        The search relaxes its filters rather than showing an empty screen, so "here are five
+        trailers" can mean three different things. Which one is a fact about THIS call, so it
+        travels with the results instead of sitting in the static prompt as a rule the agent
+        has to remember to apply.
+        """
+        if not listings:
+            seen_before = bool(self.state.get("shown_urls"))
+            reason = (
+                "they have already seen every match we have for these requirements"
+                if seen_before
+                else "nothing in our current stock matches their requirements"
+            )
+            return (
+                f"NO MATCHES: {reason}. Say exactly that in one honest, friendly sentence. Show "
+                "no cards and do not repeat or re-link any trailer already shown. Offer to "
+                "adjust a requirement - a different size, hitch or feature - to open up more "
+                "options, and give them 979-532-1486 and our website."
+            )
+
+        if outcome.get("brand_relaxed"):
+            brand = self.state.get("brand_preference") or "the brand they asked for"
+            return (
+                f"NOT {brand.upper()}: nothing from {brand} matched their requirements, so these "
+                f"are the closest we have from OTHER makes. OPEN your reply with one honest "
+                f"sentence saying we do not currently have a {brand} matching what they asked "
+                "for, and that these are close alternatives from other brands. Then show every "
+                f"card as normal. Never imply any of these IS a {brand}."
+            )
+
+        if outcome.get("filters_relaxed"):
+            dropped = ", ".join(outcome.get("relaxed_filters_dropped") or [])
+            on = f" (particularly {dropped})" if dropped else ""
+            return (
+                "ALTERNATIVES, NOT EXACT MATCHES: nothing in stock met every requirement they "
+                f"gave, so these are the closest we have{on}. OPEN your reply with one honest, "
+                "matter-of-fact sentence saying BOTH that no trailer matches all their "
+                "requirements and that these are close alternatives that could still suit them. "
+                "Then show every card as normal. Never present these as exact matches, and "
+                "never imply one meets the requirement it misses."
+            )
+
+        return ""
 
     def _lookup_inventory(self, **identifiers: Any) -> str:
         from src.graph.nodes.inventory_lookup import inventory_lookup_node

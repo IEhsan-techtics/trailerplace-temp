@@ -181,3 +181,48 @@ def test_backstop_renders_listings_when_the_reply_pass_fails(fake_llm, no_reply_
     assert no_reply_pass.calls == 1
     assert len(no_search) == 1, "the backstop must still run the search itself"
     assert "Diamond C Dump" in result["assistant_text"]
+
+
+# ------------------------------------------------------------- no-match honesty (3f)
+# These travel WITH the tool result rather than sitting in the static prompt, because how
+# well a batch matches is a fact about that call, not a rule the agent must remember.
+def _quality(outcome, listings, **state):
+    return ToolRunner(_qualified_state(**state), turn_output())._match_quality(outcome, listings)
+
+
+def test_zero_results_says_nothing_matches_and_offers_to_adjust():
+    text = _quality({"search_ran": True, "result_count": 0}, [])
+    assert "NO MATCHES" in text
+    assert "nothing in our current stock matches" in text
+    assert "adjust" in text
+    assert "979-532-1486" in text
+
+
+def test_zero_results_after_paging_says_they_have_seen_them_all():
+    """A different message: we HAVE stock, they have just already been shown it."""
+    text = _quality({"result_count": 0}, [], shown_urls=["https://x/1"])
+    assert "already seen every match" in text
+
+
+def test_brand_relaxed_opens_by_naming_the_brand_we_lack():
+    text = _quality(
+        {"result_count": 1, "brand_relaxed": True},
+        [{"title": "A", "url": "https://x/1"}],
+        brand_preference="Diamond C",
+    )
+    assert "DIAMOND C" in text.upper()
+    assert "other" in text.lower()
+    assert "Never imply" in text
+
+
+def test_filters_relaxed_names_what_was_dropped():
+    text = _quality(
+        {"result_count": 1, "filters_relaxed": True, "relaxed_filters_dropped": ["length", "hitch type"]},
+        [{"title": "A", "url": "https://x/1"}],
+    )
+    assert "ALTERNATIVES, NOT EXACT MATCHES" in text
+    assert "length, hitch type" in text
+
+
+def test_a_clean_match_adds_no_caveat():
+    assert _quality({"result_count": 1}, [{"title": "A", "url": "https://x/1"}]) == ""
