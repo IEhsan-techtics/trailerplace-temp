@@ -171,7 +171,13 @@ def run_turn(session_id: str, user_message: str) -> dict[str, Any]:
             response=response,
             contact=state.get("contact"),
             item_of_interest=conversation_store.describe_interest(state),
+            outbox_events=state["turn_outcome"].get("outbox_events"),
         )
+
+        # After the commit and off the reply path: the customer must never wait on an SMTP
+        # round trip, and a row that fails to send stays pending for the next drain.
+        if state["turn_outcome"].get("outbox_events"):
+            conversation_store.deliver_pending_outbox_async()
 
         logger.info(
             "TURN done: session=%s turn=%s calls=%d tokens=%d category=%s complete=%s",

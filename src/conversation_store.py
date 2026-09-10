@@ -19,7 +19,7 @@ from typing import Any
 
 from src import db
 from src.config import settings
-from src.db_models import ChatbotConversation, ChatbotLead, ChatbotTurn
+from src.db_models import ChatbotConversation, ChatbotLead, ChatbotOutbox, ChatbotTurn
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +127,7 @@ def save_turn(
     response: dict[str, Any],
     contact: dict[str, Any] | None = None,
     item_of_interest: str | None = None,
+    outbox_events: list[dict[str, Any]] | None = None,
 ) -> None:
     """Persist one completed turn.
 
@@ -164,21 +165,117 @@ def save_turn(
         row.state_version = (row.state_version or 0) + 1
         row.updated_at = datetime.now(timezone.utc)
 
+        # Hoisted so the outbox rows below can reference this turn.
+        turn_id = uuid.uuid4()
+
         # Appended through the relationship, not by raw FK, so the unit of work orders the
         # inserts correctly on a session's very first flush.
         row.turns.append(
             ChatbotTurn(
                 session_id=session_uuid,
-                turn_id=uuid.uuid4(),
+                turn_id=turn_id,
                 request_message=request_message[: settings.chat_max_message_chars],
                 response=response,
             )
         )
 
+        # Queued inside THIS transaction on purpose: the turn, the lead update and the mail
+        # it generated commit together or not at all. A crash can never leave the team an
+        # email about a turn the transcript does not contain, or lose one from a turn it does.
+        for event in outbox_events or []:
+            sql.add(
+                ChatbotOutbox(
+                    session_id=session_uuid,
+                    turn_id=turn_id,
+                    event_key=str(event.get("event_key") or uuid.uuid4()),
+                    event_type=str(event.get("event_type") or "team_request")[:64],
+                    payload=dict(event.get("payload") or {}),
+                )
+            )
+
         if contact or item_of_interest:
             _update_lead(sql, row.lead_id, contact or {}, item_of_interest)
 
         sql.commit()
+
+
+# ------------------------------------------------------------------------------ the outbox
+# One background worker, not a pool: sending is IO-bound and rare, and a single worker keeps
+# the drains serialised so two turns cannot claim the same row at once.
+_OUTBOX_POOL: Any = None
+# How many attempts a row gets before we stop retrying it. It stays in the table either way,
+# so a permanently failing address is visible rather than silently dropped.
+MAX_OUTBOX_ATTEMPTS = 5
+
+
+def deliver_pending_outbox(limit: int = 10) -> None:
+    """Send queued mail. Never raises: a failed send leaves the row retryable.
+
+    Runs AFTER the turn has committed and off the reply path. Draining inline put the whole
+    SMTP round trip in front of the customer's answer.
+    """
+    if not persistence_enabled():
+        return
+
+    from src.tools import email_sender
+
+    try:
+        with db.get_session_factory()() as sql:
+            rows = (
+                sql.query(ChatbotOutbox)
+                .filter(
+                    ChatbotOutbox.status == "pending",
+                    ChatbotOutbox.attempt_count < MAX_OUTBOX_ATTEMPTS,
+                )
+                .order_by(ChatbotOutbox.created_at)
+                .limit(limit)
+                .all()
+            )
+            for row in rows:
+                payload = row.payload or {}
+                row.attempt_count = (row.attempt_count or 0) + 1
+                row.claimed_at = datetime.now(timezone.utc)
+                sent = email_sender.send_email(
+                    str(payload.get("subject") or "TrailerPlace Lead"),
+                    str(payload.get("body") or ""),
+                )
+                if sent:
+                    row.status = "sent"
+                    row.last_error = None
+                    logger.info(
+                        "TOOL outbox: event=%s type=%s session=%s -> sent (attempt %d)",
+                        row.event_id, row.event_type, row.session_id, row.attempt_count,
+                    )
+                else:
+                    row.last_error = "send_email returned False"
+                    if row.attempt_count >= MAX_OUTBOX_ATTEMPTS:
+                        row.status = "failed"
+                    logger.error(
+                        "outbox_delivery_failed | event=%s type=%s attempt=%d",
+                        row.event_id, row.event_type, row.attempt_count,
+                    )
+            sql.commit()
+    except Exception:  # pragma: no cover - the bot must never fall over on mail
+        logger.exception("outbox_drain_failed")
+
+
+def deliver_pending_outbox_async(limit: int = 10) -> None:
+    """Fire and forget, so the customer never waits on an SMTP round trip.
+
+    The outbox is designed for this: a row that does not get sent stays pending, and the next
+    drain - triggered by the next turn, on any session - picks it up.
+    """
+    global _OUTBOX_POOL
+    if not persistence_enabled():
+        return
+    if _OUTBOX_POOL is None:
+        from concurrent.futures import ThreadPoolExecutor
+
+        _OUTBOX_POOL = ThreadPoolExecutor(max_workers=1, thread_name_prefix="outbox")
+    try:
+        _OUTBOX_POOL.submit(deliver_pending_outbox, limit)
+    except Exception:  # pragma: no cover - a rejected submit must not fail the turn
+        logger.exception("outbox_submit_failed")
 
 
 def _update_lead(sql, lead_id, contact: dict[str, Any], item_of_interest: str | None) -> None:
