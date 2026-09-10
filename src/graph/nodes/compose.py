@@ -32,17 +32,19 @@ def compose_node(state: dict, output: Any) -> dict:
     # them through a tool and formatted the cards itself). Nothing here reassembles it - the
     # only job left is recording which trailers the customer was actually shown.
     if outcome.get("reply_text"):
-        outcome["assistant_text"] = outcome["reply_text"]
+        outcome["assistant_text"] = _with_handoff(outcome, outcome["reply_text"])
         outcome["asked_slot"] = None
         _record_shown(state, outcome.get("cited_listing_urls") or [])
+        _note_contact_ask(state, outcome["assistant_text"])
         return state
 
     # The reply pass was meant to handle this turn and failed. Someone who has just told us
     # something went wrong must not be answered with the next qualification question, so the
     # fallback is the canned line rather than the flow.
     if outcome.get("needs_a_person"):
-        outcome["assistant_text"] = _person_fallback(state, outcome)
+        outcome["assistant_text"] = _with_handoff(outcome, _person_fallback(state, output, outcome))
         outcome["asked_slot"] = None
+        _note_contact_ask(state, outcome["assistant_text"])
         return state
 
     # The welcome turn is written entirely by greeting.py, not assembled from the model's
@@ -77,7 +79,23 @@ def compose_node(state: dict, output: Any) -> dict:
         contact["greeted"] = True
         contact["asked"] = True
 
+    # Their stashed request went out this turn. Say so before anything else we tack on: they
+    # were asked for a name and a number several turns ago and told it was so the team could
+    # follow up, and the turn that finally makes that true should not pass in silence.
+    flushed = _handoff_line(int(outcome.get("emails_flushed") or 0))
+    if flushed and not _MENTIONS_HANDOFF.search(" ".join(parts)):
+        parts.append(flushed)
+
     closing, asked_slot = _closing_part(state, output)
+    if closing and _repeats(parts, closing):
+        # The model answered the question AND proposed the same question as its next one, so
+        # the reply asked "what type of trailer are you looking for?" twice in a row. The
+        # slot is still marked asked below - it WAS asked, once.
+        logger.info(
+            "COMPOSE dropped a closing question the reply already asked: session=%s",
+            state.get("session_id"),
+        )
+        closing = ""
     if closing:
         parts.append(closing)
 
@@ -103,19 +121,88 @@ def compose_node(state: dict, output: Any) -> dict:
     return state
 
 
-def _person_fallback(state: dict, outcome: dict) -> str:
+# Ways a reply already says the request reached a person. Matched so the confirmation is not
+# appended on top of one the agent wrote in its own words.
+_MENTIONS_HANDOFF = re.compile(
+    r"(passed (it|this|that|your \w+)?\s*(on\s*)?to (our|the) team|"
+    r"(let|told) (our|the) team know|(our|the) team (has been|have been|is being) "
+    r"(notified|told|informed)|notified (our|the) team|logged your (request|interest)|"
+    r"(our|the) team will (be in touch|follow up|get back|reach out))",
+    re.IGNORECASE,
+)
+
+
+def _handoff_line(count: int) -> str:
+    """Confirmation that a stashed notification has now gone out."""
+    if count <= 0:
+        return ""
+    what = "request" if count == 1 else "requests"
+    return f"I've passed your {what} on to our team - they'll follow up with you shortly."
+
+
+def _with_handoff(outcome: dict, text: str) -> str:
+    line = _handoff_line(int(outcome.get("emails_flushed") or 0))
+    if not line or _MENTIONS_HANDOFF.search(text or ""):
+        return text
+    return f"{text} {line}".strip()
+
+
+def _note_contact_ask(state: dict, text: str) -> None:
+    """Count a contact request this node did not write itself.
+
+    ``asks_without_progress`` is what eventually stops us asking. A turn owned by the agent
+    or by the escalation fallback can carry the very same request, so it has to count the
+    same way - otherwise an escalation that asks for a name every turn never trips the cap.
+    """
+    contact = state.setdefault("contact", {})
+    if contact.get("declined") or greeting.contact_is_complete(contact):
+        return
+    if not _already_asks_for_contact(text):
+        return
+    contact["asked"] = True
+    contact["asks_without_progress"] = int(contact.get("asks_without_progress") or 0) + 1
+
+
+def _collapse(text: str) -> str:
+    return re.sub(r"\s+", " ", str(text or "").strip().lower())
+
+
+def _repeats(parts: list[str], closing: str) -> bool:
+    """Is this closing line already sitting in what the reply says?"""
+    collapsed = _collapse(closing)
+    return bool(collapsed) and collapsed in _collapse(" ".join(parts))
+
+
+_FALLBACK_REASON = {"complaint": "Escalation", "team_request": "Team Request"}
+
+
+def _person_fallback(state: dict, output: Any, outcome: dict) -> str:
     """What to say when the agent could not write the reply on a turn that needed a person.
 
     Never a qualification question: the customer asked for something we cannot do, and asking
     what they will be hauling reads as not having listened at all.
+
+    It also RAISES the request. Only the agent's escalate tool used to do that, so on any turn
+    the agent did not run - it failed, or it was never reached - the customer was told their
+    request had been passed on and the team heard nothing. The canned line promises a
+    follow-up, so something has to make that promise true.
     """
     from src.domain import canned_responses
     from src.tools import team_notify
 
     key = "complaint" if outcome.get("escalation_owns_turn") else "team_request"
+    team_notify.record(
+        state,
+        reason=_FALLBACK_REASON[key],
+        description=(getattr(output, "turn_summary", "") or "").strip()
+        or "Customer asked for something the chatbot cannot do.",
+    )
+
     answer = canned_responses.ESCALATION_ANSWERS[key]
     if team_notify.contact_complete(state) or team_notify.declined(state):
         return answer
+    # Acknowledge first, ask second. A customer who has just told us something went wrong is
+    # answered before they are asked for anything.
     return f"{answer} {team_notify.ask_for_missing(state)}"
 
 

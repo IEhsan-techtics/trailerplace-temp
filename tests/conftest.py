@@ -166,3 +166,17 @@ def no_search(monkeypatch):
 
     monkeypatch.setattr(build_module, "search_node", _fake_search)
     return calls
+
+
+@pytest.fixture(autouse=True)
+def no_real_email(monkeypatch):
+    """Nothing in the suite may reach a live mailbox.
+
+    The tests run with persistence off, and team_notify now sends inline in that mode rather
+    than dropping the notification on the floor - so without this a plain unit test would put
+    real mail in the dealership's inbox. A test that wants to observe or fail a send patches
+    send_email itself; monkeypatch applies that after this, so it still wins.
+    """
+    from src.tools import email_sender
+
+    monkeypatch.setattr(email_sender, "send_email", lambda subject, body: True)

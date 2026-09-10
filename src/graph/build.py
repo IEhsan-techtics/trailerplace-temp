@@ -72,13 +72,21 @@ _NEEDS_A_PERSON_INTENTS = {"team_request_escalation", "listing_interest"}
 
 
 def _needs_a_person(state: dict, output: Any) -> bool:
-    if getattr(output, "intent", "") not in _NEEDS_A_PERSON_INTENTS:
-        return False
-    # The opening contact ask still owns turn one. Their request is not lost - the analysis
-    # pass has recorded it, and it reaches the agent on the next turn.
-    from src.graph.nodes import greeting
+    """Deliberately NOT gated on the opening contact ask.
 
-    return not greeting.contact_gate_applies(state)
+    It used to be, on the reasoning that turn one belongs to the greeting and "the analysis
+    pass has recorded it, so it reaches the agent on the next turn". A live run disproved
+    that: "I have a complaint about my last order, the trailer arrived damaged" was answered
+    with the contact request and nothing else, the conversation moved on to financing, and
+    the complaint was never raised again - no apology, no phone number, and no email to the
+    team about a damaged trailer.
+
+    Nothing carries an unhandled intent forward, so a suppressed escalation is a lost one.
+    These turns now own themselves, and the contact request rides along with the canned
+    answer instead of replacing it: ``ask_for_missing`` asks for exactly the same details the
+    gate wanted, so nothing is given up by letting the escalation win the turn.
+    """
+    return getattr(output, "intent", "") in _NEEDS_A_PERSON_INTENTS
 
 
 def _tools_and_reply(state: dict, output: Any, user_message: str) -> None:

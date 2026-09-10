@@ -2,8 +2,10 @@
 
 Two families, and the difference decides whether an email goes out:
 
-* FAQ answers are ours to give. The customer gets a complete answer and the team hears
-  nothing - a financing question is not a lead until they ask us to DO something.
+* FAQ answers are ours to give: the customer gets a complete answer on the spot and keeps
+  their place in the qualification flow, with no second model call. The team is still told -
+  someone asking about financing is a lead worth following up - but through apply, not
+  through the escalate tool.
 * Escalation/team-request text accompanies an ``escalate`` tool call: we could not settle it,
   so a person has been told.
 
@@ -13,9 +15,15 @@ finish ourselves, so the number is the one thing the customer must not be left w
 """
 from __future__ import annotations
 
-PHONE = "979-532-1486"
-HOURS = "8:00 AM to 6:00 PM"
-WEBSITE = "https://trailerplace.com"
+from src.domain import company
+
+# Re-exported from company.py rather than restated. They had drifted: this file said
+# "https://trailerplace.com" and company.website() said "https://www.trailerplace.com", so
+# the same conversation quoted two different addresses depending on which line answered - and
+# this copy ignored the TRAILERPLACE_WEBSITE override entirely.
+PHONE = company.PHONE
+HOURS = company.HOURS
+WEBSITE = company.website()
 
 # The five things people ask that we answer from a script. Answering one is NOT an escalation.
 FAQ_ANSWERS: dict[str, str] = {

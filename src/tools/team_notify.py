@@ -151,6 +151,50 @@ def _rendered(state: dict, event: dict) -> dict[str, Any]:
     }
 
 
+def _deliver(state: dict, rendered: list[dict]) -> None:
+    """Queue for the outbox, or send now when there is no outbox to queue into.
+
+    The outbox is the right home for a notification: it commits in the same transaction as
+    the turn that produced it, and a send that fails stays pending for the next drain. But it
+    only exists when persistence does. With it off - a developer without Postgres, or, far
+    worse, a database outage in production - ``save_turn`` discards ``outbox_events`` and the
+    drain returns early, so every lead was silently lost while this function logged "queued
+    for delivery" and the customer was told their request had been passed on.
+
+    So when there is no transaction to be atomic with, we give up atomicity rather than
+    delivery and send inline. A failed send is logged and lost here, which is worse than a
+    retryable row and much better than never attempting one.
+    """
+    if not rendered:
+        return
+
+    from src import conversation_store
+
+    # Recorded on the turn either way: it is what save_turn persists, and what the tests and
+    # the logs read to see what this turn generated.
+    state.setdefault("turn_outcome", {}).setdefault("outbox_events", []).extend(rendered)
+
+    if conversation_store.persistence_enabled():
+        logger.info("team_notify | %d notification(s) queued for delivery", len(rendered))
+        return
+
+    # No outbox to queue into, so send here. run_turn's post-commit drain returns early in
+    # this mode, so there is no second attempt and nothing is sent twice.
+    from src.tools import email_sender
+
+    for item in rendered:
+        payload = item.get("payload") or {}
+        sent = email_sender.send_email(
+            str(payload.get("subject") or "TrailerPlace Lead"),
+            str(payload.get("body") or ""),
+        )
+        logger.log(
+            logging.INFO if sent else logging.ERROR,
+            "team_notify | %s sent inline (no outbox): %s",
+            item.get("event_type"), "ok" if sent else "FAILED",
+        )
+
+
 def record(state: dict, *, reason: str, description: str) -> str:
     """Note something for the team. Sends it, or stashes it until we can.
 
@@ -168,10 +212,8 @@ def record(state: dict, *, reason: str, description: str) -> str:
         return "dropped"
 
     if contact_complete(state):
-        queued = outcome.setdefault("outbox_events", [])
-        queued.extend(_rendered(state, item) for item in _dedupe([event]))
+        _deliver(state, [_rendered(state, item) for item in _dedupe([event])])
         outcome["email_status"] = f"sent: {reason}"
-        logger.info("team_notify | %s queued for delivery", reason)
         return "sent"
 
     stash = state.setdefault("pending_email_actions", [])
@@ -209,9 +251,8 @@ def flush(state: dict) -> int:
         return 0
 
     outcome = state.setdefault("turn_outcome", {})
-    queued = outcome.setdefault("outbox_events", [])
     events = _dedupe(stash)
-    queued.extend(_rendered(state, event) for event in events)
+    _deliver(state, [_rendered(state, event) for event in events])
 
     state["pending_email_actions"] = []
     state["contact_followup_pending"] = None

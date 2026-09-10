@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 from factories import complete_welcome, turn_output
 
-from src.domain import canned_responses
+from src.domain import canned_responses, company
 from src.llm.tools import ToolRunner
 
 
@@ -187,15 +187,42 @@ def test_an_faq_does_not_reach_the_reply_pass(fake_llm, no_reply_pass):
     assert "financing" in result["assistant_text"].lower()
 
 
-def test_the_contact_gate_still_owns_the_first_turn(fake_llm, no_reply_pass):
-    """A first message we cannot act on still gets the welcome, not an escalation reply."""
+def test_an_escalation_on_the_very_first_turn_is_not_swallowed_by_the_contact_gate(
+    fake_llm, no_reply_pass
+):
+    """The gate used to own turn one outright, and the request was silently dropped.
+
+    A live run: "I have a complaint about my last order, the trailer arrived damaged" was
+    answered with "Before we go on - could you please provide your name..." and nothing else.
+    No apology, no phone number, and no email to the team. Nothing carries an unhandled
+    intent forward, so when the conversation moved on the complaint was gone for good.
+
+    The escalation now owns the turn. The contact details are still asked for - the canned
+    answer carries the request - so the gate gives up nothing by losing.
+    """
     from src.graph.build import run_turn
 
     fake_llm.push(turn_output(intent="team_request_escalation"))
     text = run_turn("s1", "have someone call me")["assistant_text"]
 
-    assert no_reply_pass.calls == 0
-    assert "Thank you for contacting TrailerPlace" in text
+    assert no_reply_pass.calls == 1, "the escalation must reach the agent, gate or no gate"
+    assert company.PHONE in text, "someone we cannot help ourselves gets the number"
+    assert "name" in text.lower(), "and is still asked for the details, in the same breath"
+
+
+def test_an_escalation_before_we_have_contact_details_is_stashed_not_dropped(fake_llm):
+    """The request survives the turn it could not be sent on."""
+    from src.graph.build import run_turn
+    from src.graph.state import from_snapshot
+    from src import conversation_store
+
+    fake_llm.push(turn_output(intent="team_request_escalation"))
+    run_turn("s1", "I have a complaint about my last order")
+
+    snapshot, _conversation, _lead = conversation_store.load_session("s1")
+    state = from_snapshot("s1", snapshot)
+    assert state["pending_email_actions"], "the complaint must be waiting, not gone"
+    assert state["contact_followup_pending"] == "name, contact"
 
 
 # ------------------------------------------------------------------------- the outbox
