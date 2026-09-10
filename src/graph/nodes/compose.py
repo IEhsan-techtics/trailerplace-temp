@@ -37,6 +37,14 @@ def compose_node(state: dict, output: Any) -> dict:
         _record_shown(state, outcome.get("cited_listing_urls") or [])
         return state
 
+    # The reply pass was meant to handle this turn and failed. Someone who has just told us
+    # something went wrong must not be answered with the next qualification question, so the
+    # fallback is the canned line rather than the flow.
+    if outcome.get("needs_a_person"):
+        outcome["assistant_text"] = _person_fallback(state, outcome)
+        outcome["asked_slot"] = None
+        return state
+
     # The welcome turn is written entirely by greeting.py, not assembled from the model's
     # pieces: the wording is the dealership's, it has to read the same every time, and the
     # contact request must not have a qualification question competing with it.
@@ -93,6 +101,23 @@ def compose_node(state: dict, output: Any) -> dict:
     outcome["assistant_text"] = text
     outcome["asked_slot"] = asked_slot
     return state
+
+
+def _person_fallback(state: dict, outcome: dict) -> str:
+    """What to say when the agent could not write the reply on a turn that needed a person.
+
+    Never a qualification question: the customer asked for something we cannot do, and asking
+    what they will be hauling reads as not having listened at all.
+    """
+    from src.domain import canned_responses
+
+    key = "complaint" if outcome.get("escalation_owns_turn") else "team_request"
+    answer = canned_responses.ESCALATION_ANSWERS[key]
+    contact = state.get("contact") or {}
+    have_contact = bool(contact.get("name")) and bool(contact.get("email") or contact.get("phone"))
+    if have_contact or contact.get("declined"):
+        return answer
+    return f"{answer} {canned_responses.CONTACT_FOLLOWUP}"
 
 
 def _record_shown(state: dict, urls: list[str]) -> None:

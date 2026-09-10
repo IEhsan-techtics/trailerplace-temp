@@ -202,7 +202,7 @@ def test_all_results_of_one_tool_call_reach_a_single_agent_invocation(monkeypatc
 # ------------------------------------------------------------------------ tool schemas
 def test_tool_argument_schemas_are_preserved():
     tools = {t.name: t for t in build_tools(_runner())}
-    assert set(tools) == {"search_inventory", "lookup_inventory"}
+    assert set(tools) == {"search_inventory", "lookup_inventory", "escalate"}
     assert tools["search_inventory"].args == {}, "search takes no arguments by design"
     assert set(tools["lookup_inventory"].args) == {"year", "make", "model_text", "stock_number"}
 

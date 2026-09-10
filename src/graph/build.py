@@ -55,6 +55,32 @@ def _route(state: dict, output: Any) -> list[str]:
     return targets
 
 
+# Turns where the customer wants something only a person can do. They carry no listings, so
+# the search gate never opens for them - but they still need the agent, because handing the
+# request to a person through the escalate tool is exactly what it is for.
+#
+# Without this, a complaint fell through to the deterministic assembly and was answered with
+# the next qualification question: "I'm sorry your order arrived damaged. What material will
+# you be hauling?"
+#
+# `faq` is deliberately NOT here. The five FAQs have answers of their own, the analysis pass
+# writes them into answer_to_customer_question, and compose then still asks the pending
+# qualification question - so an interruption is answered without costing the customer their
+# place in the flow. Routing those here threw that away and emailed the team about a question
+# we can answer ourselves.
+_NEEDS_A_PERSON_INTENTS = {"team_request_escalation", "listing_interest"}
+
+
+def _needs_a_person(state: dict, output: Any) -> bool:
+    if getattr(output, "intent", "") not in _NEEDS_A_PERSON_INTENTS:
+        return False
+    # The opening contact ask still owns turn one. Their request is not lost - the analysis
+    # pass has recorded it, and it reaches the agent on the next turn.
+    from src.graph.nodes import greeting
+
+    return not greeting.contact_gate_applies(state)
+
+
 def _tools_and_reply(state: dict, output: Any, user_message: str) -> None:
     """Pull inventory and write the reply, on the turns that need it.
 
@@ -67,8 +93,12 @@ def _tools_and_reply(state: dict, output: Any, user_message: str) -> None:
     """
     outcome = state.setdefault("turn_outcome", {})
     targets = _route(state, output)
-    if not targets:
+    needs_person = _needs_a_person(state, output)
+    if not (targets or needs_person):
         return
+    # Read by compose, so a failed reply pass on one of these turns falls back to the canned
+    # line rather than to the next qualification question.
+    outcome["needs_a_person"] = needs_person
 
     reply = respond_with_tools(state, output, user_message)
     if reply is not None:

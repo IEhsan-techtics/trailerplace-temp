@@ -103,7 +103,29 @@ def build_tools(runner: Any) -> list:
             ),
         )
 
-    return [search_inventory, lookup_inventory]
+    @tool
+    def escalate(reason: str, summary: str) -> str:
+        """Hand something to a human, by emailing our team. Call this whenever the customer
+        needs something you cannot do yourself and it is not one of the FAQs you can already
+        answer: a complaint or a problem with an order, a callback, a meeting or appointment,
+        a quote or price negotiation, delivery scheduling, paperwork or titling, seeing a unit
+        in person, a question about stock that is not on the lot today, a type of trailer we
+        do not carry, or serious interest in one particular trailer.
+
+        Do NOT call it for something you can already answer - financing, trade-ins, service
+        and parts, where we are, or wanting our phone number all have answers in your
+        instructions. Call it once per request, not once per message.
+
+        Args:
+            reason: One of complaint, callback, meeting, quote, pricing, delivery, paperwork,
+                viewing, stock_question, unstocked_type, listing_interest, other.
+            summary: One line the team can act on without reading the transcript, e.g.
+                "wants best price on a dump trailer, asked us to beat $8k" or
+                "says their last order arrived damaged".
+        """
+        return runner.call("escalate", json.dumps({"reason": reason, "summary": summary}))
+
+    return [search_inventory, lookup_inventory, escalate]
 
 
 def build_model(tools: list):

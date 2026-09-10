@@ -260,6 +260,102 @@ class ToolRunner:
         self._remember(listings)
         return f"MATCH STATUS: {status}\n{listing_block(listings)}"
 
+    # -- escalation ------------------------------------------------------------------
+    # Reason -> the fixed Reason vocabulary for the email subject and body, and which canned
+    # line the customer hears back. company_and_email_scenarios.md fixes both.
+    _ESCALATION_REASONS = {
+        "complaint": ("Escalation", "complaint"),
+        "callback": ("Team Request", "team_request"),
+        "meeting": ("Team Request", "team_request"),
+        "quote": ("Team Request", "team_request"),
+        "pricing": ("Team Request", "team_request"),
+        "delivery": ("Team Request", "team_request"),
+        "paperwork": ("Team Request", "team_request"),
+        "viewing": ("Team Request", "team_request"),
+        "stock_question": ("Team Request", "team_request"),
+        "unstocked_type": ("Team Request", "team_request"),
+        "listing_interest": ("Listing Interest", "listing_interest"),
+        "other": ("Team Request", "team_request"),
+    }
+
+    def _contact(self) -> dict[str, Any]:
+        return self.state.get("contact") or {}
+
+    def _escalate(self, reason: str, summary: str) -> str:
+        """Record something for the team. This is the email.
+
+        Deliberately fires whether or not we hold contact details. New Prompt stashes the
+        request until it has a name and a way to reach them, which is right for a sales lead
+        - but a complaint the team never hears about because the customer had not introduced
+        themselves is worse than one they cannot reply to directly. We send, and we ask.
+        """
+        from src.domain import canned_responses
+        from src.tools import email_sender
+
+        key = str(reason or "other").strip().lower()
+        reason_line, canned_key = self._ESCALATION_REASONS.get(key, self._ESCALATION_REASONS["other"])
+        description = str(summary or "").strip() or "No detail given."
+
+        contact = self._contact()
+        subject = email_sender.render_subject(
+            reason=reason_line,
+            name=contact.get("name"),
+            session_id=str(self.state.get("session_id") or ""),
+        )
+        body = email_sender.render_email_body(
+            name=contact.get("name"),
+            email=contact.get("email"),
+            phone=contact.get("phone"),
+            reason=reason_line,
+            description=description,
+        )
+
+        outcome = self.state.setdefault("turn_outcome", {})
+        outcome.setdefault("outbox_events", []).append(
+            {
+                "event_key": f"{canned_key}:{len(outcome.get('outbox_events') or [])}",
+                "event_type": reason_line.lower().replace(" ", "_"),
+                "reason": reason_line,
+                "payload": {"subject": subject, "body": body},
+            }
+        )
+        outcome["escalated"] = True
+        if canned_key == "complaint":
+            # Nothing else happens this turn. Read by compose's fallback and by the gate.
+            outcome["escalation_owns_turn"] = True
+        self.ran.append("escalate")
+
+        logger.info(
+            "TOOL escalate: session=%s reason=%r summary=%r",
+            self.state.get("session_id"), reason_line, description,
+        )
+
+        # Persistence off -> send now; on -> the row is queued inside save_turn's transaction.
+        from src import conversation_store
+
+        if not conversation_store.persistence_enabled():
+            sent = email_sender.send_email(subject, body)
+            logger.info(
+                "TOOL escalate: session=%s %s", self.state.get("session_id"),
+                "sent" if sent else "FAILED (see email_sender log)",
+            )
+
+        answer = canned_responses.ESCALATION_ANSWERS.get(
+            canned_key, canned_responses.ESCALATION_ANSWERS["team_request"]
+        )
+        have_contact = bool(contact.get("name")) and bool(contact.get("email") or contact.get("phone"))
+        if have_contact or contact.get("declined"):
+            return (
+                f"RECORDED for the team. Tell them this, in your own words but keeping the "
+                f"meaning and the phone number: \"{answer}\" Ask no qualification question."
+            )
+        return (
+            f"RECORDED for the team, but we have no way to reach them. Tell them this, in your "
+            f"own words but keeping the meaning and the phone number: \"{answer}\" THEN ask, "
+            f"once and warmly, for their name and an email or phone so the team can get back "
+            f"to them - for example: \"{canned_responses.CONTACT_FOLLOWUP}\" Ask nothing else."
+        )
+
     # -- dispatch --------------------------------------------------------------------
     def call(self, name: str, arguments: str) -> str:
         """Run one tool call. Never raises - a broken tool degrades to a line the model can
@@ -272,6 +368,8 @@ class ToolRunner:
         try:
             if name == "search_inventory":
                 return self._search_inventory()
+            if name == "escalate":
+                return self._escalate(args.get("reason") or "other", args.get("summary") or "")
             if name == "lookup_inventory":
                 return self._lookup_inventory(
                     year=args.get("year"),
