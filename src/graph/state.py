@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import Any, TypedDict
 
 # Bumped when the persisted shape changes in a way an old snapshot cannot satisfy.
-STATE_SCHEMA_VERSION = 1
+STATE_SCHEMA_VERSION = 2
 
 # A required question is asked at most twice, then dropped (brief S23).
 MAX_ASKS_PER_SLOT = 2
@@ -55,6 +55,10 @@ class SessionState(TypedDict, total=False):
 
     # ---- contact / lead ----
     contact: dict[str, Any]
+    # Notifications waiting on a name and a way to reach them. Persisted, so a request made
+    # three turns ago still goes out when the customer finally hands over their number.
+    pending_email_actions: list[dict[str, Any]]
+    contact_followup_pending: str | None
 
     turn_index: int
     # Whether listings have been put in front of them at least once. It changes what a
@@ -101,6 +105,8 @@ def new_state(session_id: str) -> SessionState:
             # Whether the "great to have your details" line has already been said.
             "greeted": False,
         },
+        pending_email_actions=[],
+        contact_followup_pending=None,
         turn_index=0,
         results_shown=False,
     )

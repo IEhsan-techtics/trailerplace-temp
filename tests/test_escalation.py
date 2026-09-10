@@ -109,19 +109,33 @@ def test_the_reply_instruction_carries_the_phone_number():
     assert "Ask no qualification question" in result
 
 
-def test_it_asks_for_contact_details_when_we_have_none():
+def test_it_asks_for_both_when_we_have_neither():
     runner = _runner(name=None, email=None, phone=None)
     result = _escalate(runner)
-    assert canned_responses.CONTACT_FOLLOWUP in result
+    assert "your name and an email or phone number" in result
+    assert "follow up" in result
+
+
+def test_it_asks_only_for_the_name_when_that_is_all_that_is_missing():
+    """Asking for a number they already gave reads as not having listened."""
+    result = _escalate(_runner(name=None, email="d@x.ai"))
+    assert "Could I take your name" in result
+    assert "email or phone number so our team" not in result
+
+
+def test_it_asks_only_for_a_number_when_that_is_all_that_is_missing():
+    result = _escalate(_runner(name="Dave", email=None, phone=None))
+    assert "Could I take an email or phone number" in result
 
 
 def test_it_does_not_chase_someone_who_declined():
-    runner = _runner(name=None, email=None, phone=None, declined=True)
-    assert canned_responses.CONTACT_FOLLOWUP not in _escalate(runner)
+    result = _escalate(_runner(name=None, email=None, phone=None, declined=True))
+    assert "Could I take" not in result
+    assert "declined" in result
 
 
 def test_it_does_not_ask_again_when_we_already_have_them():
-    assert canned_responses.CONTACT_FOLLOWUP not in _escalate(_runner())
+    assert "Could I take" not in _escalate(_runner())
 
 
 # ------------------------------------------------------------------------- routing
@@ -318,3 +332,165 @@ def test_save_turn_accepts_outbox_events_on_the_memory_path():
         response={},
         outbox_events=[{"event_key": "k", "event_type": "escalation", "payload": {}}],
     )
+
+
+# ------------------------------------------------------- the contact gate on sending
+# Nothing goes out until we hold a name AND an email or phone. Short of that the request is
+# stashed, never dropped, and every stashed request flushes on the turn they become reachable.
+def _state(**contact):
+    return {
+        "session_id": "s1",
+        "contact": {"name": None, "email": None, "phone": None, "declined": False, **contact},
+        "turn_outcome": {},
+    }
+
+
+def test_nothing_is_sent_without_a_name():
+    from src.tools import team_notify
+
+    state = _state(email="d@x.ai")
+    assert team_notify.record(state, reason="Escalation", description="x") == "stashed"
+    assert state["turn_outcome"].get("outbox_events") is None
+    assert len(state["pending_email_actions"]) == 1
+
+
+def test_nothing_is_sent_without_a_way_to_reach_them():
+    from src.tools import team_notify
+
+    state = _state(name="Dave")
+    assert team_notify.record(state, reason="Escalation", description="x") == "stashed"
+    assert len(state["pending_email_actions"]) == 1
+
+
+def test_it_sends_once_both_pieces_are_present():
+    from src.tools import team_notify
+
+    state = _state(name="Dave", phone="979-555-0100")
+    assert team_notify.record(state, reason="Escalation", description="x") == "sent"
+    assert len(state["turn_outcome"]["outbox_events"]) == 1
+    assert not state.get("pending_email_actions")
+
+
+def test_several_stashed_requests_all_go_out_together():
+    """Five requests made across five turns become five emails on the turn we can reach them."""
+    from src.tools import team_notify
+
+    state = _state()
+    for reason, description in [
+        ("FAQ - financing", "asked about financing"),
+        ("Team Request", "wants a callback"),
+        ("Escalation", "order arrived damaged"),
+        ("Listing Interest", "likes the Iron Bull DTB"),
+        ("FAQ - trade_in", "asked about trade-ins"),
+    ]:
+        team_notify.record(state, reason=reason, description=description)
+    assert len(state["pending_email_actions"]) == 5
+
+    state["contact"].update({"name": "Dave", "email": "d@x.ai"})
+    assert team_notify.flush(state) == 5
+    assert len(state["turn_outcome"]["outbox_events"]) == 5
+    assert state["pending_email_actions"] == []
+    assert state["contact_followup_pending"] is None
+
+
+def test_a_flushed_email_carries_the_contact_details_we_finally_got():
+    """Rendered at flush time - the details we were waiting for are the ones in the body."""
+    from src.tools import team_notify
+
+    state = _state()
+    team_notify.record(state, reason="Escalation", description="order arrived damaged")
+    state["contact"].update({"name": "Dave", "email": "d@x.ai"})
+    team_notify.flush(state)
+
+    body = state["turn_outcome"]["outbox_events"][0]["payload"]["body"]
+    assert "Full Name: Dave" in body
+    assert "Email: d@x.ai" in body
+    assert "Not provided" in body  # the phone, which they never gave
+
+
+def test_half_the_details_is_still_not_enough_to_flush():
+    from src.tools import team_notify
+
+    state = _state()
+    team_notify.record(state, reason="Escalation", description="x")
+    state["contact"]["name"] = "Dave"
+    assert team_notify.flush(state) == 0
+    assert len(state["pending_email_actions"]) == 1
+    assert state["contact_followup_pending"] == "contact"
+
+
+def test_a_refusal_drops_the_stash_and_stops_the_asking():
+    from src.tools import team_notify
+
+    state = _state()
+    team_notify.record(state, reason="Escalation", description="x")
+    state["contact"]["declined"] = True
+    assert team_notify.flush(state) == 0
+    assert state["pending_email_actions"] == []
+    assert team_notify.record(state, reason="Team Request", description="y") == "dropped"
+
+
+def test_the_same_request_re_raised_is_not_emailed_twice():
+    """The agent re-words a request every time it raises it, so keying on wording double-sent."""
+    from src.tools import team_notify
+
+    state = _state()
+    team_notify.record(state, reason="Team Request", description="wants a callback about a dump trailer")
+    team_notify.record(state, reason="Team Request", description="Wants a callback about a dump trailer!")
+    assert len(state["pending_email_actions"]) == 1
+
+
+def test_two_genuinely_different_requests_both_survive():
+    from src.tools import team_notify
+
+    state = _state()
+    team_notify.record(state, reason="Team Request", description="wants a callback")
+    team_notify.record(state, reason="Team Request", description="asked us to beat $8,000 on a dump trailer")
+    assert len(state["pending_email_actions"]) == 2
+
+
+# ------------------------------------------------------------------- FAQs notify too
+def test_every_faq_notifies_the_team(fake_llm, no_reply_pass):
+    from src.graph.build import run_turn
+    from src.graph.state import from_snapshot
+    from src import conversation_store
+
+    complete_welcome(fake_llm)  # gives us name + phone
+    fake_llm.push(turn_output(
+        intent="faq",
+        faq_key="financing",
+        user_question_to_answer="do you offer financing?",
+        answer_to_customer_question="We offer financing. Call 979-532-1486.",
+    ))
+    run_turn("s1", "do you offer financing?")
+
+    snapshot, _c, _l = conversation_store.load_session("s1")
+    state = from_snapshot("s1", snapshot)
+    # Contact was complete, so it went straight out rather than into the stash.
+    assert state.get("pending_email_actions") in (None, [])
+
+
+def test_an_faq_before_we_have_contact_details_is_stashed(fake_llm, no_reply_pass):
+    from src.graph.nodes.apply import apply_node
+    from src.graph.state import new_state
+
+    state = new_state("s1")
+    apply_node(state, turn_output(intent="faq", faq_key="financing"), "do you offer financing?")
+
+    assert len(state["pending_email_actions"]) == 1
+    assert state["pending_email_actions"][0]["reason"] == "FAQ - financing"
+
+
+def test_an_faq_still_costs_no_second_model_call(fake_llm, no_reply_pass):
+    """Notifying the team must not cost the customer their place in the flow."""
+    from src.graph.build import run_turn
+
+    complete_welcome(fake_llm)
+    fake_llm.push(turn_output(category_mentioned="Dump"))
+    run_turn("s1", "I need a dump trailer")
+    fake_llm.push(turn_output(intent="faq", faq_key="trade_in",
+                              answer_to_customer_question="Our sales team handles trade-in appraisals."))
+    result = run_turn("s1", "do you take trade-ins?")
+
+    assert no_reply_pass.calls == 0
+    assert "trade-in" in result["assistant_text"].lower()

@@ -205,8 +205,18 @@ def test_the_model_is_told_to_write_the_greeting():
     assert "FIRST message only" in prompt
 
 
-def test_it_refuses_to_invent_opening_hours():
-    """The reference document has no hours, so there are none to state."""
+def test_it_states_the_opening_hours_it_was_given():
+    """The hours are a fact now, so the bot may state them."""
     prompt = system_prompt()
-    assert "state none" in prompt
-    assert "opening hours" in prompt
+    assert "8:00 AM to 6:00 PM" in prompt
+
+
+def test_it_refuses_to_invent_which_days_we_open():
+    """We were given the times and nothing else. "Mon-Sat" is exactly the kind of plausible
+    detail that gets a customer driving to a closed lot."""
+    prompt = system_prompt()
+    assert "never name days" in prompt.lower()
+    for day in ("Monday", "Saturday", "Sunday", "weekday"):
+        assert day not in prompt
+
+

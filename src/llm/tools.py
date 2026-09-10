@@ -74,6 +74,34 @@ def listing_block(listings: list[Any]) -> str:
     return "\n".join(lines)
 
 
+def _reply_instruction(state: dict, answer: str, status: str) -> str:
+    """What to tell the customer, given whether the notification went out or is waiting.
+
+    Two sentences in the stashed case, and the order matters: the canned line FIRST, so they
+    know their request landed, then the ask, so it reads as the reason we need the detail
+    rather than a toll gate in front of the answer.
+    """
+    from src.tools import team_notify
+
+    if status == "stashed":
+        return (
+            f'RECORDED, but we cannot send it to the team until we can reach them. Say TWO '
+            f'things, in this order, in your own words but keeping the meaning and the phone '
+            f'number: (1) "{answer}" (2) "{team_notify.ask_for_missing(state)}" '
+            "Ask for nothing else and ask no qualification question."
+        )
+    if status == "dropped":
+        return (
+            f'They declined to share contact details, so nothing was sent and we do not ask '
+            f'again. Answer them helpfully and give them the number: "{answer}" Do NOT ask '
+            "for their details and do not imply anyone will call them back."
+        )
+    return (
+        f'PASSED TO THE TEAM. Tell them this, in your own words but keeping the meaning and '
+        f'the phone number: "{answer}" Ask no qualification question.'
+    )
+
+
 class ToolRunner:
     """Executes one turn's tool calls against the session state.
 
@@ -282,43 +310,20 @@ class ToolRunner:
         return self.state.get("contact") or {}
 
     def _escalate(self, reason: str, summary: str) -> str:
-        """Record something for the team. This is the email.
+        """Record something for the team, under the contact gate.
 
-        Deliberately fires whether or not we hold contact details. New Prompt stashes the
-        request until it has a name and a way to reach them, which is right for a sales lead
-        - but a complaint the team never hears about because the customer had not introduced
-        themselves is worse than one they cannot reply to directly. We send, and we ask.
+        Nothing is sent until we hold a name AND an email or phone. Short of that the request
+        is STASHED - never dropped - and goes out the moment they tell us how to reach them.
+        The customer still gets their answer this turn either way; only the email waits.
         """
         from src.domain import canned_responses
-        from src.tools import email_sender
+        from src.tools import team_notify
 
         key = str(reason or "other").strip().lower()
         reason_line, canned_key = self._ESCALATION_REASONS.get(key, self._ESCALATION_REASONS["other"])
-        description = str(summary or "").strip() or "No detail given."
 
-        contact = self._contact()
-        subject = email_sender.render_subject(
-            reason=reason_line,
-            name=contact.get("name"),
-            session_id=str(self.state.get("session_id") or ""),
-        )
-        body = email_sender.render_email_body(
-            name=contact.get("name"),
-            email=contact.get("email"),
-            phone=contact.get("phone"),
-            reason=reason_line,
-            description=description,
-        )
-
+        status = team_notify.record(self.state, reason=reason_line, description=summary)
         outcome = self.state.setdefault("turn_outcome", {})
-        outcome.setdefault("outbox_events", []).append(
-            {
-                "event_key": f"{canned_key}:{len(outcome.get('outbox_events') or [])}",
-                "event_type": reason_line.lower().replace(" ", "_"),
-                "reason": reason_line,
-                "payload": {"subject": subject, "body": body},
-            }
-        )
         outcome["escalated"] = True
         if canned_key == "complaint":
             # Nothing else happens this turn. Read by compose's fallback and by the gate.
@@ -326,35 +331,14 @@ class ToolRunner:
         self.ran.append("escalate")
 
         logger.info(
-            "TOOL escalate: session=%s reason=%r summary=%r",
-            self.state.get("session_id"), reason_line, description,
+            "TOOL escalate: session=%s reason=%r status=%s", self.state.get("session_id"),
+            reason_line, status,
         )
-
-        # Persistence off -> send now; on -> the row is queued inside save_turn's transaction.
-        from src import conversation_store
-
-        if not conversation_store.persistence_enabled():
-            sent = email_sender.send_email(subject, body)
-            logger.info(
-                "TOOL escalate: session=%s %s", self.state.get("session_id"),
-                "sent" if sent else "FAILED (see email_sender log)",
-            )
 
         answer = canned_responses.ESCALATION_ANSWERS.get(
             canned_key, canned_responses.ESCALATION_ANSWERS["team_request"]
         )
-        have_contact = bool(contact.get("name")) and bool(contact.get("email") or contact.get("phone"))
-        if have_contact or contact.get("declined"):
-            return (
-                f"RECORDED for the team. Tell them this, in your own words but keeping the "
-                f"meaning and the phone number: \"{answer}\" Ask no qualification question."
-            )
-        return (
-            f"RECORDED for the team, but we have no way to reach them. Tell them this, in your "
-            f"own words but keeping the meaning and the phone number: \"{answer}\" THEN ask, "
-            f"once and warmly, for their name and an email or phone so the team can get back "
-            f"to them - for example: \"{canned_responses.CONTACT_FOLLOWUP}\" Ask nothing else."
-        )
+        return _reply_instruction(self.state, answer, status)
 
     # -- dispatch --------------------------------------------------------------------
     def call(self, name: str, arguments: str) -> str:

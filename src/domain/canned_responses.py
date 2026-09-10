@@ -14,6 +14,7 @@ finish ourselves, so the number is the one thing the customer must not be left w
 from __future__ import annotations
 
 PHONE = "979-532-1486"
+HOURS = "8:00 AM to 6:00 PM"
 WEBSITE = "https://trailerplace.com"
 
 # The five things people ask that we answer from a script. Answering one is NOT an escalation.
@@ -28,8 +29,8 @@ FAQ_ANSWERS: dict[str, str] = {
     "trade_in": f"Our sales team handles trade-in appraisals. Call {PHONE}.",
     "service_parts": f"Our service and parts team can help. Reach them at {PHONE}.",
     "store_info": (
-        f"We're located in Wharton, TX. Call {PHONE} or visit {WEBSITE}. We also offer "
-        "financing and delivery."
+        f"We're located in Wharton, TX and open {HOURS}. Call {PHONE} or visit {WEBSITE}. "
+        "We also offer financing and delivery."
     ),
 }
 
@@ -54,10 +55,7 @@ ESCALATION_ANSWERS: dict[str, str] = {
     ),
 }
 
-# Appended when we have recorded something for the team but hold no way to reach the customer.
-# Asked once, warmly, and never pressed - see the escalate tool.
-CONTACT_FOLLOWUP = (
-    "Could I take your name and an email or phone number so the team can get back to you?"
-)
+# The request for a missing name / phone / email lives in src/tools/team_notify.py, which
+# words it around the piece we are actually missing rather than asking for both every time.
 
 CANNED_RESPONSES = {**FAQ_ANSWERS, **ESCALATION_ANSWERS}

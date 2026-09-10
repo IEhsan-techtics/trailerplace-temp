@@ -197,6 +197,17 @@ class ChatbotTurnOutput(StrictBaseModel):
     user_question_to_answer: str | None = Field(
         description="A question of theirs that needs answering this turn, verbatim; else null."
     )
+    faq_key: Literal[
+        "contact_human", "financing", "trade_in", "service_parts", "store_info"
+    ] | None = Field(
+        description=(
+            "Which of the five standard questions they asked, when they asked one: wanting a "
+            "person (contact_human), financing, a trade-in, service or parts, or where we are "
+            "and when we are open (store_info). Null when the message asks none of them. Set "
+            "it whenever they ask, even alongside something bigger - the team is told about "
+            "every one of these."
+        )
+    )
     listing_reference: int | None = Field(description="1-based shown-listing reference, if any.")
     dropped_fields: list[str] = Field(description="Fields the customer asked to drop.")
 

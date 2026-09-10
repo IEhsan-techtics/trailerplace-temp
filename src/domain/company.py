@@ -15,6 +15,10 @@ from src.config import settings
 NAME = "TrailerPlace"
 LOCATION = "Wharton, TX"
 PHONE = "979-532-1486"
+# Stated to customers, so it is a fact and not a guess. Days are deliberately not asserted:
+# we were given the times and nothing else, and inventing "Mon-Sat" would be exactly the kind
+# of plausible detail that gets a customer driving to a closed lot.
+HOURS = "8:00 AM to 6:00 PM"
 
 SERVICES = (
     "trailer sales",
@@ -42,6 +46,7 @@ def company_facts_block() -> str:
             f"- Name: {NAME}",
             f"- Location: {LOCATION}",
             f"- Phone: {PHONE}",
+            f"- Opening hours: {HOURS}",
             f"- Website: {website()}",
             f"- Services: {', '.join(SERVICES)}",
             "",
@@ -49,6 +54,8 @@ def company_facts_block() -> str:
             f"Answer those with the phone number ({PHONE}) rather than details.",
             "Never state a price, a delivery date, a restock date or a stock level that is "
             "not in a listing you were given this turn.",
+            f"Our hours are {HOURS}. State the TIMES only - we have not been told which days, "
+            "so never name days of the week.",
         ]
     )
 

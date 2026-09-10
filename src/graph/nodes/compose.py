@@ -110,14 +110,13 @@ def _person_fallback(state: dict, outcome: dict) -> str:
     what they will be hauling reads as not having listened at all.
     """
     from src.domain import canned_responses
+    from src.tools import team_notify
 
     key = "complaint" if outcome.get("escalation_owns_turn") else "team_request"
     answer = canned_responses.ESCALATION_ANSWERS[key]
-    contact = state.get("contact") or {}
-    have_contact = bool(contact.get("name")) and bool(contact.get("email") or contact.get("phone"))
-    if have_contact or contact.get("declined"):
+    if team_notify.contact_complete(state) or team_notify.declined(state):
         return answer
-    return f"{answer} {canned_responses.CONTACT_FOLLOWUP}"
+    return f"{answer} {team_notify.ask_for_missing(state)}"
 
 
 def _record_shown(state: dict, urls: list[str]) -> None:

@@ -31,6 +31,7 @@ from src.tools.category import (
     suggest_category_from_haul_item,
 )
 from src.tools.filters import apply_extracted_fields
+from src.tools import team_notify
 from src.tools.lookup_gate import brand_is_lookup_make
 from src.tools.questions import (
     all_required_resolved,
@@ -53,6 +54,11 @@ def apply_node(state: dict, output: Any, user_message: str = "") -> dict:
     state["invalid_retry_reason"] = None
 
     _apply_contact(state, output)
+    # Straight after the contact merge, so a turn that hands over the missing piece sends
+    # everything that was waiting on it - and before the FAQ below, so a question asked on
+    # that same turn joins the same batch.
+    team_notify.flush(state)
+    _apply_faq_notification(state, output)
     handled = _apply_pending_confirmations(state, output, user_message)
     _apply_gooseneck(state, output, user_message)
     if not handled:
@@ -113,6 +119,26 @@ def _apply_contact(state: dict, output: Any) -> None:
     # compose knows, and setting it from this side meant a first message that named a
     # category ("looking for a 20ft livestock trailer") skipped the question entirely while
     # recording that it had been put - so the lead was lost with no way to notice.
+
+
+def _apply_faq_notification(state: dict, output: Any) -> None:
+    """Every one of the five standard questions is worth telling the team about.
+
+    Handled here rather than through the escalate tool because an FAQ must NOT cost the
+    customer their place in the qualification flow: the analysis pass writes the answer, and
+    compose still asks the pending question afterwards. Routing these to the agent threw that
+    away. The notification is the only part that needs adding, and it goes through the same
+    contact gate as everything else - so it waits, and it batches, exactly like an escalation.
+    """
+    faq_key = getattr(output, "faq_key", None)
+    if not faq_key:
+        return
+    question = (getattr(output, "user_question_to_answer", None) or "").strip()
+    team_notify.record(
+        state,
+        reason=f"FAQ - {faq_key}",
+        description=question or f"asked about {str(faq_key).replace('_', ' ')}",
+    )
 
 
 # --------------------------------------------------------------- 2. pending confirmations
