@@ -28,6 +28,15 @@ def compose_node(state: dict, output: Any) -> dict:
     """Build ``turn_outcome["assistant_text"]`` and record what was asked."""
     outcome = state.setdefault("turn_outcome", {})
 
+    # The reply pass already wrote this turn (it had listings to present, so the model saw
+    # them through a tool and formatted the cards itself). Nothing here reassembles it - the
+    # only job left is recording which trailers the customer was actually shown.
+    if outcome.get("reply_text"):
+        outcome["assistant_text"] = outcome["reply_text"]
+        outcome["asked_slot"] = None
+        _record_shown(state, outcome.get("cited_listing_urls") or [])
+        return state
+
     # The welcome turn is written entirely by greeting.py, not assembled from the model's
     # pieces: the wording is the dealership's, it has to read the same every time, and the
     # contact request must not have a qualification question competing with it.
@@ -84,6 +93,23 @@ def compose_node(state: dict, output: Any) -> dict:
     outcome["assistant_text"] = text
     outcome["asked_slot"] = asked_slot
     return state
+
+
+def _record_shown(state: dict, urls: list[str]) -> None:
+    """Mark the trailers the reply actually cited as shown.
+
+    Recorded from what the model CITED, not from what the search returned: a "show me more"
+    must exclude what the customer has seen, and locking out trailers that never reached the
+    reply would hide them for the rest of the conversation.
+    """
+    if not urls:
+        return
+    state["results_shown"] = True
+    shown = state.setdefault("shown_urls", [])
+    for url in urls:
+        cleaned = str(url or "").strip()
+        if cleaned and cleaned not in shown:
+            shown.append(cleaned)
 
 
 CONTACT_ASK = "Also - who am I speaking with, and what's the best email or phone to reach you on?"

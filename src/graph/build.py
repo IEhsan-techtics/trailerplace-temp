@@ -1,12 +1,20 @@
 """The LangGraph wiring and the public entry point.
 
-    load_state -> analyze -> apply -> route -> [search | inventory_lookup | neither]
-                                            -> compose -> persist -> END
+    load_state -> analyze -> apply -> respond -> compose -> persist -> END
+                                        |
+                                        +-- tools: search_inventory / lookup_inventory
 
-``analyze`` holds the ONLY model call, and nothing downstream returns to it - the graph is
-a straight line with one fan-out, never a loop (brief S31). The fan-out is how several
-tools run in one turn: ``_route`` returns a LIST of node names and LangGraph runs them all
-without re-invoking the model.
+``analyze`` is one model call and reads the message; it never sees inventory, because it
+runs before ``apply`` has folded this turn's answers into the slots.
+
+``respond`` is the second, and it only happens on a turn the gate has opened - one with
+inventory to talk about. It is where the model calls a tool, receives the top matches and
+writes the cards. Every other turn costs exactly one model call, and compose assembles the
+reply from the analysis pass's own pieces.
+
+Search deliberately runs from INSIDE respond rather than as its own node: it has to happen
+after ``apply``, or it filters on last turn's slots and misses the "make it 24 ft" the
+customer just said.
 """
 from __future__ import annotations
 
@@ -21,6 +29,7 @@ from src.graph.nodes.search import search_node
 from src.graph.state import STATE_SCHEMA_VERSION, from_snapshot, to_snapshot
 from src.llm import usage
 from src.llm.client import analyze_turn
+from src.llm.respond import respond_with_tools
 from src.tools.lookup_gate import lookup_requested
 
 logger = logging.getLogger(__name__)
@@ -46,6 +55,42 @@ def _route(state: dict, output: Any) -> list[str]:
     return targets
 
 
+def _tools_and_reply(state: dict, output: Any, user_message: str) -> None:
+    """Pull inventory and write the reply, on the turns that need it.
+
+    One function, called by both ``run_turn`` and ``build_graph``, so the two can never
+    describe different pipelines.
+
+    The gate decides WHETHER we are in a position to show trailers; the model decides whether
+    this customer wants to see them, by calling the tool or not. On every other turn there is
+    no second model call at all and compose assembles the reply exactly as before.
+    """
+    outcome = state.setdefault("turn_outcome", {})
+    targets = _route(state, output)
+    if not targets:
+        return
+
+    reply = respond_with_tools(state, output, user_message)
+    if reply is not None:
+        outcome["reply_text"] = reply.assistant_text
+        outcome["cited_listing_urls"] = list(reply.cited_listing_urls or [])
+        return
+
+    # Backstop: the reply pass failed. Pull the inventory ourselves and let compose render it
+    # deterministically - a model failure is a flatter reply, never a customer who asked to
+    # see trailers and was shown none. Guarded on the *_ran flags because the pass may have
+    # got as far as running a tool before it fell over.
+    for target in targets:
+        if target == "search" and not outcome.get("search_ran"):
+            search_node(state)
+        elif target == "inventory_lookup" and not outcome.get("inventory_lookup_ran"):
+            state["turn"] = output
+            try:
+                inventory_lookup_node(state)
+            finally:
+                state.pop("turn", None)
+
+
 def run_turn(session_id: str, user_message: str) -> dict[str, Any]:
     """One complete turn: load, analyze, apply, tools, compose, persist.
 
@@ -67,16 +112,11 @@ def run_turn(session_id: str, user_message: str) -> dict[str, Any]:
         # ---- deterministic ----
         apply_node(state, output, user_message)
 
-        for target in _route(state, output):
-            if target == "search":
-                search_node(state)
-            elif target == "inventory_lookup":
-                state["turn"] = output
-                try:
-                    inventory_lookup_node(state)
-                finally:
-                    state.pop("turn", None)
-
+        # ---- the reply pass, only when there is inventory to talk about ----
+        # The gate decides WHETHER we are in a position to show trailers; the model decides
+        # whether this customer wants to see them, by calling the tool or not. On every other
+        # turn there is no second call at all and compose assembles the reply as before.
+        _tools_and_reply(state, output, user_message)
         compose_node(state, output)
 
         assistant_text = state["turn_outcome"].get("assistant_text", "")
@@ -146,30 +186,19 @@ def build_graph():
     def _compose(state: dict) -> dict:
         return compose_node(state, (state.get("turn_outcome") or {}).get("output"))
 
-    def _search(state: dict) -> dict:
-        return search_node(state)
-
-    def _lookup(state: dict) -> dict:
-        state["turn"] = (state.get("turn_outcome") or {}).get("output")
-        try:
-            return inventory_lookup_node(state)
-        finally:
-            state.pop("turn", None)
+    def _respond(state: dict) -> dict:
+        outcome = state.get("turn_outcome") or {}
+        _tools_and_reply(state, outcome.get("output"), outcome.get("user_message", ""))
+        return state
 
     graph.add_node("analyze", _analyze)
     graph.add_node("apply", _apply)
-    graph.add_node("search", _search)
-    graph.add_node("inventory_lookup", _lookup)
+    graph.add_node("respond", _respond)
     graph.add_node("compose", _compose)
 
     graph.add_edge(START, "analyze")
     graph.add_edge("analyze", "apply")
-    graph.add_conditional_edges(
-        "apply",
-        lambda state: _route(state, (state.get("turn_outcome") or {}).get("output")) or ["compose"],
-        ["search", "inventory_lookup", "compose"],
-    )
-    graph.add_edge("search", "compose")
-    graph.add_edge("inventory_lookup", "compose")
+    graph.add_edge("apply", "respond")
+    graph.add_edge("respond", "compose")
     graph.add_edge("compose", END)
     return graph.compile()

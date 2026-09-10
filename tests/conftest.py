@@ -108,6 +108,40 @@ def fake_llm(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def no_reply_pass(monkeypatch):
+    """Keep the reply pass off the network.
+
+    Autouse and returning None by default: None is the "reply pass did not run" signal, so
+    every turn falls through to the deterministic backstop - which is exactly the behaviour
+    the suite was written against. A test that wants the model to write the reply pushes an
+    output onto ``queue``.
+    """
+    from src.graph import build as build_module
+
+    class ReplyRecorder:
+        def __init__(self):
+            self.queue = []
+            self.calls = 0
+
+        def push(self, reply):
+            self.queue.append(reply)
+            return reply
+
+        def __call__(self, state, turn, user_message):
+            self.calls += 1
+            if not self.queue:
+                return None
+            from src.llm import usage
+
+            usage.record_completion("gpt-5.6-luna", 100, 20, purpose="reply")
+            return self.queue.pop(0)
+
+    recorder = ReplyRecorder()
+    monkeypatch.setattr(build_module, "respond_with_tools", recorder)
+    return recorder
+
+
+@pytest.fixture(autouse=True)
 def no_search(monkeypatch):
     """Keep search_node off the live catalogue; record what it was asked for.
 
