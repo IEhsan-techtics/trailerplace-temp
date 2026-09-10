@@ -12,23 +12,23 @@ time this runs, the turn has been folded in and the filters are current.
 The model reaches the listings by CALLING A TOOL (src/llm/tools.py) rather than being handed
 them, so a turn that needs no inventory costs no search - and the tool's own preconditions
 are Python's, not the model's.
+
+This module owns the PROMPT and the state translation. The loop itself is
+``src/graph/agent.py``: one agent node that calls tools and reads their results until it has
+an answer. There is no second model, and no separate node for summarising or formatting what
+a tool returned - the same agent does all of it, deciding from the messages which job it is
+on.
 """
 from __future__ import annotations
 
 import logging
 from typing import Any
 
-from src.config import settings
 from src.domain import brands, categories, company
-from src.llm import usage
 from src.llm.schemas import ReplyOutput
-from src.llm.tools import TOOL_SPECS, ToolRunner
+from src.llm.tools import ToolRunner
 
 logger = logging.getLogger(__name__)
-
-# One round is the normal case: the model calls search_inventory, reads the result, writes the
-# cards. Two allows a follow-up (a lookup that came back ambiguous). Past that it is looping.
-MAX_TOOL_ROUNDS = 2
 
 
 _CARD_FORMAT = """
@@ -120,10 +120,17 @@ def build_system_prompt(state: dict, turn: Any) -> str:
             f"You are the sales assistant for {company.NAME}, a trailer dealership in "
             f"{company.LOCATION}. Write the next reply to this customer.",
             "",
-            "You have tools. Call search_inventory when they want to see trailers that match "
+            "You have tools. Call search_inventory when they want to see trailers matching "
             "what they have told us, and lookup_inventory when they name one specific trailer "
             "(a stock number, a year and make, or a make and model code). Call a tool BEFORE "
             "writing your reply - you have no other way to know what is on the lot.",
+            "",
+            "WHEN A TOOL RETURNS RESULTS, you are shown them and you keep going in the same "
+            "turn. Read ALL of them and write the whole reply at once - if it returns ten "
+            "trailers, all ten get their card and their own one-line pitch in THIS reply. "
+            "Never handle them one at a time and never ask for the same search twice. Call "
+            "another tool ONLY if you genuinely still need something you were not given; "
+            "otherwise write the final answer now.",
             "",
             _CARD_FORMAT.strip(),
             "",
@@ -141,86 +148,65 @@ def build_system_prompt(state: dict, turn: Any) -> str:
     )
 
 
-def _messages(state: dict, turn: Any, user_message: str) -> list[Any]:
-    messages: list[Any] = [{"role": "system", "content": build_system_prompt(state, turn)}]
+def _messages(state: dict, user_message: str) -> list:
+    """The conversation the agent starts from.
+
+    NO system message here - ``call_model`` prepends it on every iteration instead, so the
+    prompt is as present on the agent's third pass as on its first.
+    """
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    messages: list = []
     for entry in (state.get("messages") or [])[-8:]:
         role = entry.get("role")
         content = entry.get("content")
-        if role in {"user", "assistant"} and content:
-            messages.append({"role": role, "content": str(content)})
-    messages.append({"role": "user", "content": user_message})
+        if not content:
+            continue
+        if role == "user":
+            messages.append(HumanMessage(content=str(content)))
+        elif role == "assistant":
+            messages.append(AIMessage(content=str(content)))
+    messages.append(HumanMessage(content=user_message))
     return messages
 
 
-def _record(response: Any) -> None:
-    tokens = getattr(response, "usage", None)
-    usage.record_completion(
-        settings.chat_model,
-        prompt_tokens=getattr(tokens, "input_tokens", 0) or 0,
-        completion_tokens=getattr(tokens, "output_tokens", 0) or 0,
-        purpose="reply",
-    )
+def _cited_urls(state: dict, reply_text: str) -> list[str]:
+    """Which of the trailers the tools returned actually made it into the reply.
+
+    Taken from the tool results rather than asked of the model: the tools know exactly what
+    they handed over, so a URL here can never be one the model invented, and a trailer the
+    reply never mentioned is never marked as shown.
+    """
+    listings = (state.get("turn_outcome") or {}).get("listings") or []
+    cited: list[str] = []
+    for listing in listings:
+        url = str((listing.get("url") if isinstance(listing, dict) else None) or "").strip()
+        if url and url in reply_text and url not in cited:
+            cited.append(url)
+    return cited
 
 
 def respond_with_tools(state: dict, turn: Any, user_message: str) -> ReplyOutput | None:
-    """Write the reply, letting the model pull inventory through the tools.
+    """Write the reply, letting the agent pull inventory through the tools.
+
+    One graph invocation. LangGraph runs agent -> tools -> agent internally for as many
+    rounds as the agent asks for, and the loop ends when it stops asking.
 
     Returns None on any failure, which is the signal to fall back to the deterministic
     assembly in ``compose_node`` - a flat reply, never a broken turn.
     """
-    from src.llm.client import get_client
+    from src.graph.agent import run_agent
 
     runner = ToolRunner(state, turn)
-    messages = _messages(state, turn, user_message)
+    text = run_agent(runner, build_system_prompt(state, turn), _messages(state, user_message))
 
-    try:
-        response = get_client().responses.parse(
-            model=settings.chat_model,
-            input=messages,
-            tools=TOOL_SPECS,
-            text_format=ReplyOutput,
-            reasoning={"effort": settings.chat_reasoning_effort},
-        )
-        _record(response)
-
-        for _round in range(MAX_TOOL_ROUNDS):
-            calls = [item for item in (response.output or []) if getattr(item, "type", "") == "function_call"]
-            if not calls:
-                break
-            # Echo the model's own call items back before their results, which is what lets it
-            # match each result to the call that asked for it.
-            messages.extend(response.output)
-            for call in calls:
-                logger.info(
-                    "TOOL call: session=%s name=%s args=%s",
-                    state.get("session_id"), call.name, call.arguments,
-                )
-                messages.append(
-                    {
-                        "type": "function_call_output",
-                        "call_id": call.call_id,
-                        "output": runner.call(call.name, call.arguments),
-                    }
-                )
-            response = get_client().responses.parse(
-                model=settings.chat_model,
-                input=messages,
-                tools=TOOL_SPECS,
-                text_format=ReplyOutput,
-                reasoning={"effort": settings.chat_reasoning_effort},
-            )
-            _record(response)
-    except Exception:
-        logger.exception("Reply pass failed: session=%s", state.get("session_id"))
-        return None
-
-    reply = getattr(response, "output_parsed", None)
-    if reply is None or not (reply.assistant_text or "").strip():
+    if not text:
         logger.error("Reply pass returned nothing usable: session=%s", state.get("session_id"))
         return None
 
+    cited = _cited_urls(state, text)
     logger.info(
         "REPLY written: session=%s tools=%s cited=%d",
-        state.get("session_id"), runner.ran, len(reply.cited_listing_urls or []),
+        state.get("session_id"), runner.ran, len(cited),
     )
-    return reply
+    return ReplyOutput(assistant_text=text, cited_listing_urls=cited)

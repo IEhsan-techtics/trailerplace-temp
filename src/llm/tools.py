@@ -6,7 +6,9 @@ fired from there would filter on stale values and miss the "make it 24 ft" the c
 just said. By the time this pass runs, apply has folded the turn in and the filters are
 current.
 
-Two rules shape the tool definitions:
+The tool SCHEMAS live on the ``@tool`` functions in src/graph/agent.py, which is the single
+place they are declared. This module is the implementation behind them, and two rules shape
+it:
 
 * ``search_inventory`` takes NO arguments. The filters are built from state by
   ``search_node``'s own ``_build_metadata_filters``; letting the model pass them would let
@@ -22,53 +24,6 @@ import logging
 from typing import Any
 
 logger = logging.getLogger(__name__)
-
-
-TOOL_SPECS: list[dict[str, Any]] = [
-    {
-        "type": "function",
-        "name": "search_inventory",
-        "description": (
-            "Search our trailer inventory for the trailers that match what this customer has "
-            "told us so far, and return the top matches, already filtered and ranked. Call this "
-            "when the customer wants to see trailers. Takes no arguments - the requirements we "
-            "have collected are applied automatically."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {},
-            "required": [],
-            "additionalProperties": False,
-        },
-    },
-    {
-        "type": "function",
-        "name": "lookup_inventory",
-        "description": (
-            "Look up specific stock by identifier when the customer names a particular trailer: "
-            "a stock number, a year plus a make, or a make plus a model code. NOT for category "
-            "shopping - a make on its own is a brand preference, and a trailer type "
-            "('dump trailer') is not a model."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "year": {"type": ["integer", "null"], "description": "Model year, never a stock number."},
-                "make": {"type": ["string", "null"], "description": "Manufacturer, e.g. 'Diamond C'."},
-                "model_text": {
-                    "type": ["string", "null"],
-                    "description": "Model code exactly as the customer typed it, e.g. 'LPX', 'fmax 212'.",
-                },
-                "stock_number": {
-                    "type": ["string", "null"],
-                    "description": "Explicit stock/unit number only. Never a weight, size, price, year or phone number.",
-                },
-            },
-            "required": ["year", "make", "model_text", "stock_number"],
-            "additionalProperties": False,
-        },
-    },
-]
 
 
 def _listing_get(listing: Any, key: str, default: Any = "") -> Any:
