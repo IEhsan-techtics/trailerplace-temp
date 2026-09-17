@@ -27,7 +27,11 @@ def qualified_state(**kwargs):
 # reads 20 out of trailer_listings, and the brand block grows with it - the same prompt is
 # ~2,200 chars longer live than it is here. The headroom below absorbs that, and it is why
 # this number is not simply "current size, rounded up".
-MAX_SYSTEM_PROMPT_CHARS = 17_000
+#
+# Raised from 17,000 for the one-question rule. That rule took the LIVE prompt to 17,034 -
+# over the old ceiling - while this fixture measured well under it, which is exactly the gap
+# the paragraph above warns about.
+MAX_SYSTEM_PROMPT_CHARS = 19_000
 
 
 def test_the_system_prompt_stays_short():

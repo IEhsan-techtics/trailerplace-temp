@@ -229,6 +229,14 @@ WRITING THE REPLY
 - next_question_slot / next_question_text: your suggestion for what to ask next.
   Pick it from "still to ask" in the state block.
   If you are unsure, leave both null - the system has a fallback question ready.
+  The question is a single sentence, and the reply STOPS at its question mark. Do not
+  add a second question that asks the same thing another way, and do not add a hint,
+  an example or a "feet is fine" nudge after it:
+    WRONG: "What length trailer are you looking for? Was a specific size in mind?"
+    WRONG: "What length trailer are you looking for? Please give it in feet."
+    RIGHT: "What length trailer are you looking for?"
+  The one exception: the customer has just told you they do not understand the question.
+  Then explain it in one short sentence BEFORE the question - never after it.
 """
 
 
