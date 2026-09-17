@@ -4,6 +4,8 @@ Only two things open the gate: an explicit request, or every required question r
 """
 from __future__ import annotations
 
+import pytest
+
 from src.conversation_store import load_session
 from src.graph.build import run_turn
 from src.graph.state import from_snapshot
@@ -368,20 +370,44 @@ def test_the_written_welcome_takes_over_when_the_model_does_not_greet(fake_llm, 
     assert "Thank you for contacting TrailerPlace, Ibrahim!" in result["assistant_text"]
 
 
-def test_a_later_completion_keeps_both_the_thanks_and_the_acknowledgement(fake_llm):
-    """Mid-conversation there is no opening to guarantee, so nothing is discarded."""
+@pytest.mark.parametrize(
+    "acknowledgement",
+    [
+        "Thanks, Ibrahim—we have your email.",  # the live duplicate
+        "Noted your number.",
+        "Perfect, Ibrahim.",
+    ],
+)
+def test_a_later_completion_does_not_thank_them_twice(fake_llm, acknowledgement):
+    """The model's line already thanks them for the details, so ours is not put in front of
+    it. A live run said "Great to have your contact info, Ibrahim! Thanks, Ibrahim—we have
+    your email." - the first sentence was the fixed one."""
     fake_llm.push(turn_output(intent="smalltalk_other"))
     run_turn("s1", "hi")
 
     fake_llm.push(
         turn_output(intent="contact_info_provided", name="Ibrahim", phone="0330",
-                    acknowledgement="Noted your number.")
+                    acknowledgement=acknowledgement)
     )
-    result = run_turn("s1", "Ibrahim, 0330")
+    text = run_turn("s1", "Ibrahim, 0330")["assistant_text"]
 
-    text = result["assistant_text"]
+    assert acknowledgement in text
+    assert "Great to have your contact info" not in text
+
+
+def test_a_later_completion_still_acknowledges_details_the_model_ignored(fake_llm):
+    """A line about something else leaves the details unacknowledged, so ours is kept."""
+    fake_llm.push(turn_output(intent="smalltalk_other"))
+    run_turn("s1", "hi")
+
+    fake_llm.push(
+        turn_output(intent="contact_info_provided", name="Ibrahim", phone="0330",
+                    acknowledgement="Livestock trailers are a solid choice.")
+    )
+    text = run_turn("s1", "Ibrahim, 0330, I want livestock")["assistant_text"]
+
     assert "Great to have your contact info, Ibrahim!" in text
-    assert "Noted your number." in text
+    assert "Livestock trailers are a solid choice." in text
 
 
 def test_a_friendly_but_non_standard_welcome_does_not_replace_the_opening(fake_llm):

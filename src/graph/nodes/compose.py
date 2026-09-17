@@ -369,15 +369,34 @@ def _opening_text(state: dict, acknowledgement: str) -> str:
     first_turn = _is_first_turn(state)
     if written and _welcomes_them(written, first_turn=first_turn):
         return written
+    if written and not first_turn and _acknowledges_details(written, state):
+        # Not in the welcome vocabulary, but it already thanks them for the details. Adding
+        # ours in front produced "Great to have your contact info, Ibrahim! Thanks, Ibrahim -
+        # we have your email." - the same thank-you twice, the first half ours.
+        return written
     fallback = greeting.completion_greeting(state)
     if written and not first_turn:
-        # Not a welcome, but still their acknowledgement - keep both.
+        # About something else entirely, so the details still need acknowledging - keep both.
         return f"{fallback} {written}"
     logger.info(
         "COMPOSE used the written welcome: session=%s model_welcomed=%s",
         state.get("session_id"), bool(written),
     )
     return fallback
+
+
+# A later-turn line that already does the fixed welcome's job: it thanks them, or it names
+# the details they just gave.
+_THANKS_RE = re.compile(r"\b(thanks|thank you|appreciate|got it|noted)\b", re.IGNORECASE)
+_DETAILS_RE = re.compile(
+    r"\b(e-?mail|phone|number|contact|details|info(rmation)?)\b", re.IGNORECASE
+)
+
+
+def _acknowledges_details(text: str, state: dict) -> bool:
+    name = str((state.get("contact") or {}).get("name") or "").strip()
+    uses_name = bool(name) and name.lower() in text.lower()
+    return bool(_THANKS_RE.search(text)) or bool(_DETAILS_RE.search(text)) or uses_name
 
 
 def _is_first_turn(state: dict) -> bool:
