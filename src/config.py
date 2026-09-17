@@ -35,11 +35,14 @@ class Settings:
     # The ONE conversational call per turn (see src/graph/nodes/analyze.py). Separate from
     # analyze_model, which belongs to the older two-call stack this repo was extracted from.
     chat_model: str = "gpt-5.6-luna"
-    chat_reasoning_effort: str = "low"
+    # "none", not "minimal": gpt-5.6-luna rejects minimal with a 400, and its lowest
+    # setting is none. Checked against the live API.
+    chat_reasoning_effort: str = "none"
     search_max_recommendations: int = 5
     feature_llm_rerank_enabled: bool = True
     feature_rerank_model: str = "gpt-5-nano-2025-08-07"
-    feature_rerank_reasoning_effort: str = "medium"
+    # gpt-5-nano is the reverse: it rejects "none", and "minimal" is its lowest.
+    feature_rerank_reasoning_effort: str = "minimal"
     feature_rerank_timeout_seconds: float = 60.0
     feature_rerank_batch_size: int = 20
     feature_rerank_max_parallel_batches: int = 4
@@ -103,7 +106,7 @@ class Settings:
             analyze_model=os.getenv("ANALYZE_MODEL", "gpt-5-mini"),
             analyze_reasoning_effort=os.getenv("ANALYZE_REASONING_EFFORT", "minimal"),
             chat_model=os.getenv("CHAT_MODEL", "gpt-5.6-luna"),
-            chat_reasoning_effort=os.getenv("CHAT_REASONING_EFFORT", "low"),
+            chat_reasoning_effort=os.getenv("CHAT_REASONING_EFFORT", "none"),
             search_max_recommendations=_int(os.getenv("SEARCH_MAX_RECOMMENDATIONS"), 5),
             feature_llm_rerank_enabled=_bool(os.getenv("FEATURE_LLM_RERANK_ENABLED"), True),
             feature_rerank_model=os.getenv("FEATURE_RERANK_MODEL", "gpt-5-nano-2025-08-07"),

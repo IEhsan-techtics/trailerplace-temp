@@ -198,6 +198,7 @@ def run_turn(session_id: str, user_message: str) -> dict[str, Any]:
             **response,
             "session_id": session_id,
             "slots": dict(state.get("slots") or {}),
+            "contact": dict(state.get("contact") or {}),
             "state_schema_version": STATE_SCHEMA_VERSION,
             "usage": turn_usage.as_dict(),
         }

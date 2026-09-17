@@ -14,3 +14,6 @@ wheels/
 
 # Test/tooling caches
 .pytest_cache/
+
+# Daily log files written by src/log_setup.py
+logs/

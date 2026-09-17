@@ -145,7 +145,7 @@ def compose_node(state: dict, output: Any) -> dict:
 # Ways a reply already says the request reached a person. Matched so the confirmation is not
 # appended on top of one the agent wrote in its own words.
 _MENTIONS_HANDOFF = re.compile(
-    r"(passed (it|this|that|your \w+)?\s*(on\s*)?to (our|the) team|"
+    r"\b(passed (it|this|that|your \w+)?\s*(on\s*)?to (our|the) team|"
     r"(let|told) (our|the) team know|(our|the) team (has been|have been|is being) "
     r"(notified|told|informed)|notified (our|the) team|logged your (request|interest)|"
     r"(our|the) team will (be in touch|follow up|get back|reach out))",

@@ -278,6 +278,59 @@ def deliver_pending_outbox_async(limit: int = 10) -> None:
         logger.exception("outbox_submit_failed")
 
 
+# ------------------------------------------------------------------------ tester feedback
+_FEEDBACK_POOL: Any = None
+
+
+def save_user_feedback(session_id: str, turn_idx: int, text: str, timestamp_iso: str) -> None:
+    """Attach a tester's note to one of the bot's replies.
+
+    ``turn_idx`` counts the bot's replies from zero - app.py derives it from the reply's
+    position in its own message list. It is resolved against the ASSISTANT entries here, not
+    used as a raw index: this table stores every message in one list, user and assistant
+    alternating, so the index New Prompt used would land on the wrong message (and half the
+    time on the customer's).
+    """
+    if not persistence_enabled():
+        return
+    try:
+        with db.get_session_factory()() as sql:
+            row = sql.get(ChatbotConversation, _as_uuid(session_id))
+            if row is None or not isinstance(row.conversation, list):
+                return
+            conversation = list(row.conversation)
+            replies = [i for i, entry in enumerate(conversation)
+                       if isinstance(entry, dict) and entry.get("role") == "assistant"]
+            if not 0 <= turn_idx < len(replies):
+                logger.warning(
+                    "FEEDBACK skipped: session=%s reply %d of %d", session_id, turn_idx, len(replies)
+                )
+                return
+            position = replies[turn_idx]
+            conversation[position] = {
+                **conversation[position],
+                "feedback": text or None,
+                "feedback_at": timestamp_iso,
+            }
+            # A new list, so SQLAlchemy sees the JSON column change.
+            row.conversation = conversation
+            sql.commit()
+    except Exception:  # pragma: no cover - a note must never break the chat
+        logger.exception("Feedback persistence failed: session=%s", session_id)
+
+
+def enqueue_save_user_feedback(session_id: str, turn_idx: int, text: str, timestamp_iso: str) -> None:
+    """``save_user_feedback`` off the UI thread - the name app.py imports."""
+    global _FEEDBACK_POOL
+    if not persistence_enabled():
+        return
+    if _FEEDBACK_POOL is None:
+        from concurrent.futures import ThreadPoolExecutor
+
+        _FEEDBACK_POOL = ThreadPoolExecutor(max_workers=1, thread_name_prefix="feedback")
+    _FEEDBACK_POOL.submit(save_user_feedback, session_id, turn_idx, text, timestamp_iso)
+
+
 def _update_lead(sql, lead_id, contact: dict[str, Any], item_of_interest: str | None) -> None:
     """Fill in what we have learned about who this is.
 

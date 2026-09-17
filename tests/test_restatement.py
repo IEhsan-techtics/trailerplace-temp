@@ -63,3 +63,36 @@ def test_an_empty_line_restates_nothing():
     assert not _restates("", "We offer financing.")
     assert not _restates("We offer financing.", "")
     assert not _restates("Thanks!", "Sure, okay.")
+
+
+# ------------------------------------------------------------ the handoff confirmation
+# The pattern that spots "the agent already said it" was written with a backspace character
+# where its word boundary belonged, so it matched nothing and the confirmation was appended to
+# every reply that already carried one.
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "Thanks, Dave - I've passed it on to our team.",
+        "I've passed your request to the team.",
+        "Our team will reach out shortly.",
+        "I've notified our team about the damaged trailer.",
+        "I've logged your interest in that trailer.",
+    ],
+)
+def test_a_reply_that_already_confirms_the_handoff_is_left_alone(reply):
+    from src.graph.nodes.compose import _with_handoff
+
+    assert _with_handoff({"emails_flushed": 1}, reply) == reply
+
+
+def test_a_reply_that_does_not_mention_it_gets_the_confirmation():
+    from src.graph.nodes.compose import _with_handoff
+
+    text = _with_handoff({"emails_flushed": 2}, "What type of trailer are you after?")
+    assert "I've passed your requests on to our team" in text
+
+
+def test_nothing_is_confirmed_when_nothing_went_out():
+    from src.graph.nodes.compose import _with_handoff
+
+    assert _with_handoff({}, "Hello.") == "Hello."

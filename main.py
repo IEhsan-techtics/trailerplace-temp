@@ -1,98 +1,304 @@
-"""FastAPI surface for the chatbot.
+"""FastAPI surface for the chatbot, shaped for the Streamlit frontend in app.py.
 
-Deliberately small: the turn is ``run_turn`` and nothing here reimplements any part of it.
-No streaming and no thinking-agent endpoints - those belong to the Streamlit stack in
-app.py, which is out of scope for this build.
+The turn is ``run_turn`` and nothing here reimplements any part of it. What this file does
+is speak app.py's contract, which was written against New Prompt's API:
+
+    GET  /health                           {"status": "ok"} once the backend can serve a turn
+    POST /chat                             one turn, blocking
+    POST /chat/stream                      the same turn as Server-Sent Events
+    GET  /session/{id}                     200 with exists=false for a session never seen
+    GET  /session/{id}/turn-status         {"search_status_message": ...} while a turn runs
+    POST /session/reset                    a fresh session id
+
+Run with the project venv:
+    .venv\\Scripts\\python.exe main.py
 """
 from __future__ import annotations
 
+import contextvars
+import json
 import logging
+import os
+import re
+import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+from dotenv import load_dotenv
 
-from src import conversation_store, turn_status
-from src.config import settings
-from src.graph.build import run_turn
-from src.graph.state import from_snapshot
+load_dotenv()
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s | %(message)s",
-)
+from fastapi import FastAPI, HTTPException, Response  # noqa: E402
+from fastapi.responses import StreamingResponse  # noqa: E402
+from pydantic import BaseModel, ConfigDict, Field  # noqa: E402
+
+from src import conversation_store, turn_status  # noqa: E402
+from src.config import settings  # noqa: E402
+from src.domain.reply_chunks import split_reply_into_chunks  # noqa: E402
+from src.graph.build import run_turn  # noqa: E402
+from src.graph.state import from_snapshot  # noqa: E402
+from src.log_setup import configure_trailerplace_logging  # noqa: E402
+
+configure_trailerplace_logging()
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="TrailerPlace chatbot", version="1.0")
 
 
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name) or default)
+    except ValueError:
+        return default
+
+
+# Streaming is typing, not token streaming: the reply is produced whole by run_turn, then sent
+# the way a person would send it - the intro, one message per trailer, then the question.
+STREAM_ENABLED = (os.getenv("CHAT_STREAM_ENABLED") or "1").strip().lower() in {"1", "true", "yes", "on"}
+STREAM_WORDS_PER_DELTA = int(_env_float("CHAT_STREAM_WORDS_PER_DELTA", 3))
+STREAM_DELTA_SECONDS = _env_float("CHAT_STREAM_DELTA_SECONDS", 0.02)
+STREAM_CHUNK_PAUSE_SECONDS = _env_float("CHAT_STREAM_CHUNK_PAUSE_SECONDS", 0.35)
+STREAM_STATUS_POLL_SECONDS = 0.3
+
+# Turns run here so the stream can keep forwarding the search line while one is in progress.
+_STREAM_EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="chat_stream")
+
+
 class ChatRequest(BaseModel):
+    # app.py also sends turn_id, sales_phase, onboarding_api_messages, customer_* and
+    # already_shown_listing_urls. They are New Prompt's; Luna keeps all of that in the session
+    # state, so they are accepted and ignored rather than rejected.
+    model_config = ConfigDict(extra="ignore")
+
     message: str = Field(min_length=1)
     session_id: str | None = None
+    turn_id: str | None = None
+
+
+def _require_uuid(value: str | None, name: str) -> str:
+    """Session ids are UUID columns. A bad one is a 422 now, not a 500 halfway through."""
+    try:
+        return str(uuid.UUID(str(value)))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail=f"{name} must be a UUID")
+
+
+def _contact_fields(contact: dict[str, Any] | None) -> dict[str, Any]:
+    contact = contact or {}
+    return {
+        "customer_full_name": contact.get("name"),
+        "customer_email": contact.get("email"),
+        "customer_phone": contact.get("phone"),
+    }
+
+
+def _chat(request: ChatRequest) -> dict[str, Any]:
+    if len(request.message) > settings.chat_max_message_chars:
+        raise HTTPException(status_code=413, detail="Message too long.")
+    session_id = _require_uuid(request.session_id or str(uuid.uuid4()), "session_id")
+
+    # Cleared at both ends: at the start so a poll can never show the PREVIOUS turn's search
+    # line, and at the end so the status dict does not keep one entry per session forever.
+    turn_status.clear(session_id)
+    try:
+        result = run_turn(session_id, request.message)
+    except Exception:
+        # The turn degrades internally on a model failure, so reaching here means something
+        # structural. The customer gets a message rather than a stack trace.
+        logger.exception("Turn failed: session=%s", session_id)
+        raise HTTPException(status_code=500, detail="Something went wrong on our side.")
+    finally:
+        turn_status.clear(session_id)
+
+    return {
+        **result,
+        **_contact_fields(result.get("contact")),
+        "turn_id": request.turn_id,
+        # app.py has an onboarding phase of its own. Luna's contact gate lives in the graph,
+        # so the UI is always in the main phase and simply renders what the bot says.
+        "sales_phase": "main",
+    }
 
 
 @app.post("/chat")
-def chat(request: ChatRequest) -> dict:
-    """One turn. Exactly one model call happens inside."""
-    if len(request.message) > settings.chat_max_message_chars:
-        raise HTTPException(status_code=413, detail="Message too long.")
+def chat(request: ChatRequest) -> dict[str, Any]:
+    return _chat(request)
 
-    session_id = request.session_id or str(uuid.uuid4())
+
+# ----------------------------------------------------------------------------- streaming
+# Events: status | chunk_start | delta | chunk_end | done | error - the set app.py reads.
+# `done` carries exactly what POST /chat returns, plus `chunks`.
+_WORD_RE = re.compile(r"\S+\s*")
+
+
+def _sse(event: str, data: dict[str, Any]) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
+
+
+def _typing_deltas(chunk: str) -> list[str]:
+    """The chunk in keystroke-sized pieces that join back into it exactly."""
+    words = _WORD_RE.findall(chunk)
+    if not words:
+        return [chunk] if chunk else []
+    step = max(1, STREAM_WORDS_PER_DELTA)
+    return ["".join(words[i:i + step]) for i in range(0, len(words), step)]
+
+
+def _chat_event_stream(request: ChatRequest, session_id: str):
+    # ThreadPoolExecutor does not carry contextvars across, and the turn's usage scope lives
+    # in one - the copy keeps it request-scoped.
+    context = contextvars.copy_context()
+    future = _STREAM_EXECUTOR.submit(context.run, _chat, request)
+    last_note: str | None = None
+    while not future.done():
+        time.sleep(STREAM_STATUS_POLL_SECONDS)
+        note = turn_status.peek(session_id)
+        if note and note != last_note:
+            last_note = note
+            yield _sse("status", {"search_status_message": note})
+
     try:
-        return run_turn(session_id, request.message)
-    except Exception:
-        # The turn already degrades internally on a model failure, so reaching here means
-        # something structural. The customer gets a reply rather than a stack trace.
-        logger.exception("Turn failed: session=%s", session_id)
-        raise HTTPException(status_code=500, detail="Something went wrong on our side.")
+        body = future.result()
+    except HTTPException as exc:
+        # The response has already started, so the status code is spent; the client reads the
+        # failure off the event instead.
+        yield _sse("error", {"status_code": exc.status_code, "detail": str(exc.detail)})
+        return
+    except Exception as exc:  # a stream must end with an event, never a traceback
+        logger.exception("Streaming turn failed: session=%s", session_id)
+        yield _sse("error", {"status_code": 500, "detail": str(exc)})
+        return
+
+    # _chat clears the live line on its way out, so a search that finished between two polls
+    # was never forwarded. The response still carries it.
+    note = (body.get("search_status_message") or "").strip()
+    if note and note != last_note:
+        yield _sse("status", {"search_status_message": note})
+
+    chunks = split_reply_into_chunks(body.get("assistant_text") or "")
+    body["chunks"] = chunks
+    for index, chunk in enumerate(chunks):
+        yield _sse("chunk_start", {"index": index, "total": len(chunks)})
+        for delta in _typing_deltas(chunk):
+            yield _sse("delta", {"index": index, "text": delta})
+            if STREAM_DELTA_SECONDS:
+                time.sleep(STREAM_DELTA_SECONDS)
+        yield _sse("chunk_end", {"index": index, "text": chunk})
+        if STREAM_CHUNK_PAUSE_SECONDS and index < len(chunks) - 1:
+            time.sleep(STREAM_CHUNK_PAUSE_SECONDS)
+    yield _sse("done", body)
 
 
+@app.post("/chat/stream")
+def chat_stream(request: ChatRequest) -> StreamingResponse:
+    if not STREAM_ENABLED:
+        # app.py treats 404 as "no streaming here" and runs the turn through POST /chat.
+        raise HTTPException(status_code=404, detail="Streaming is disabled.")
+    # Validated before the first byte: after that the status code can no longer change.
+    session_id = _require_uuid(request.session_id, "session_id")
+    request = request.model_copy(update={"session_id": session_id})
+    return StreamingResponse(
+        _chat_event_stream(request, session_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            # Without this a proxy in front buffers the whole stream and nothing appears until
+            # the last event.
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ------------------------------------------------------------------------------ sessions
 @app.get("/session/{session_id}")
-def get_session(session_id: str) -> dict:
+def get_session(session_id: str) -> dict[str, Any]:
+    """The conversation so far, for app.py to redraw after a reload.
+
+    A session with no history is a 200 with exists=false, not a 404: app.py opens every new
+    chat by asking for its session, and treats any error as "could not restore".
+    """
+    session_id = _require_uuid(session_id, "session_id")
     snapshot, conversation, lead_id = conversation_store.load_session(session_id)
-    if snapshot is None and not conversation:
-        raise HTTPException(status_code=404, detail="No such session.")
+    exists = snapshot is not None or bool(conversation)
     state = from_snapshot(session_id, snapshot)
+    messages = [
+        {**entry, "listings": None}
+        for entry in (conversation or [])
+        if isinstance(entry, dict) and entry.get("role") in {"user", "assistant"}
+    ]
+    slots = state.get("slots") or {}
+    declined = state.get("declined_slots") or []
     return {
         "session_id": session_id,
+        "exists": exists,
+        "closed": False,
+        "messages": messages,
+        "sales_phase": "main",
+        **_contact_fields(state.get("contact")),
+        # Not read by app.py; kept for inspecting a session by hand.
         "lead_id": lead_id,
         "category": state.get("category"),
-        "slots": state.get("slots"),
-        "declined_slots": state.get("declined_slots"),
+        "slots": slots,
+        "declined_slots": declined,
         "required_remaining": [
             slot for slot in (state.get("required_slots") or [])
-            if slot not in (state.get("slots") or {})
-            and slot not in (state.get("declined_slots") or [])
+            if slot not in slots and slot not in declined
         ],
         "qualification_complete": state.get("qualification_complete"),
         "contact": state.get("contact"),
-        "messages": conversation,
     }
 
 
 @app.post("/session/reset")
-def reset_session() -> dict:
-    """Hand back a fresh session id. Existing rows are left alone - a conversation is a
-    record, and starting a new one is not a reason to delete the old one."""
+def reset_session() -> dict[str, str]:
+    """A fresh session id. Existing rows are left alone - a conversation is a record, and
+    starting a new one is not a reason to delete the old one."""
     return {"session_id": str(uuid.uuid4())}
 
 
 @app.get("/session/{session_id}/turn-status")
-def get_turn_status(session_id: str) -> dict:
-    """What the turn is doing right now, for a UI that is mid-wait."""
-    return {"session_id": session_id, "status": turn_status.peek(session_id)}
+def get_turn_status(session_id: str) -> dict[str, Any]:
+    """What the running turn is doing, for a UI that is mid-wait. Takes no lock: it reads the
+    line the search node publishes, while /chat is still busy with that very turn."""
+    note = turn_status.peek(session_id)
+    return {"session_id": session_id, "search_status_message": note, "status": note}
 
 
+# -------------------------------------------------------------------------------- health
 @app.get("/health")
-def health() -> dict:
+def health(response: Response) -> dict[str, Any]:
+    """"ok" only when a turn could actually be served.
+
+    app.py waits on this before letting anyone type, and retries on any non-ok answer, so a
+    503 while the database is unreachable is safe - and far better than an input box that
+    fails on the first message.
+    """
+    from sqlalchemy import text
+
     from src import db
 
-    return {
-        "ok": True,
+    body: dict[str, Any] = {
+        "status": "ok",
         "model": settings.chat_model,
+        "reasoning_effort": settings.chat_reasoning_effort,
         "database": db.database_enabled(),
         "persistence": conversation_store.persistence_enabled(),
     }
+    if not settings.openai_api_key:
+        body["status"] = "error"
+        body["error"] = "OPENAI_API_KEY is not set."
+    elif conversation_store.persistence_enabled():
+        try:
+            with db.get_engine().connect() as connection:
+                connection.execute(text("SELECT 1"))
+        except Exception as exc:  # reported, not raised: this endpoint must always answer
+            body["status"] = "error"
+            body["error"] = f"Database unreachable: {type(exc).__name__}"
+    if body["status"] != "ok":
+        response.status_code = 503
+    return body
 
 
 if __name__ == "__main__":
