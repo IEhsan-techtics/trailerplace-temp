@@ -74,6 +74,80 @@ def listing_block(listings: list[Any]) -> str:
     return "\n".join(lines)
 
 
+# What each lookup status means and what the reply has to do with it. Ported from New Prompt's
+# reply prompt (src/llm/respond.py), where the same four statuses come out of the same matcher.
+#
+# Sent WITH the result rather than sitting in the system prompt: the model reads the meaning
+# right beside the listings it applies to, and the turns with no lookup - most of them - pay
+# nothing for it. Before this the model was handed "MATCH STATUS: no_exact" and left to work
+# out from the word alone that the trailers under it were substitutes.
+_LOOKUP_GUIDANCE = {
+    "exact": (
+        "WHAT THIS MEANS: these are the trailer(s) they asked about. Present them warmly as "
+        "full cards, then ask whether they're interested in any of them."
+    ),
+    "no_exact": (
+        "WHAT THIS MEANS: we do NOT currently show {label}. The listings below are the closest "
+        "alternatives, not the trailer they asked for. OPEN with one honest sentence saying we "
+        "don't currently show {label}, then present these as close alternatives. Never present "
+        "any of them as the one they asked about, and never invent a spec to make one fit."
+    ),
+    "ambiguous": (
+        "WHAT THIS MEANS: we carry SEVERAL models matching what they asked, and nothing says "
+        "which one they mean. Open with one short line saying so, show EVERY listing below as a "
+        "full card, and END with ONE question asking which of these they mean or are most "
+        "interested in. That question REPLACES the usual closing - never end this reply with "
+        '"Do any of these look like a fit, or would you like to see more options?".'
+    ),
+    # New Prompt has no rule for this one. The search wording ("do not say anything about our
+    # stock levels") is wrong for a lookup: the customer asked whether we have a specific
+    # trailer, and being forbidden to say we can't find it leaves the question unanswered.
+    "none": (
+        "WHAT THIS MEANS: we can't find {label} in our current inventory, and there is nothing "
+        "close enough to offer instead. Say that plainly in one friendly sentence - show no "
+        "cards and invent nothing. Give them 979-532-1486 and our website so the team can check "
+        "for them, and offer to help them find something similar if they tell you what they "
+        "need it for."
+    ),
+}
+
+
+_GENERIC_LOOKUP_LABEL = "that exact trailer"
+
+
+def _lookup_label(turn: Any, outcome: dict) -> str:
+    """How the rule names what they asked for.
+
+    The matcher builds its label from year, make and model only, so a stock-number lookup
+    came back as "that exact trailer" and the rule read "we can't find that exact trailer".
+    The stock number is the thing they typed, so it is the thing to name. Taken through the
+    plausibility gate, so a weight that slipped into the field is never quoted back.
+    """
+    from src.tools.lookup_gate import usable_stock_number
+
+    label = (outcome.get("inventory_result") or {}).get("requested_label") or ""
+    if label and label != _GENERIC_LOOKUP_LABEL:
+        return label
+    stock = usable_stock_number(turn)
+    return f"stock #{stock}" if stock else _GENERIC_LOOKUP_LABEL
+
+
+def lookup_guidance(status: str, label: str) -> str:
+    """The reply rule for one lookup result. An unknown status is treated as no match."""
+    template = _LOOKUP_GUIDANCE.get(status, _LOOKUP_GUIDANCE["none"])
+    return template.format(label=label or "that trailer")
+
+
+# Also from New Prompt. They came with a specific trailer in mind, and the general invitation
+# to leave their details gets in the way of the answer. A request they made us ACT on is
+# different - if an escalation this turn asked for their details, that ask still stands.
+_LOOKUP_CONTACT_RULE = (
+    "Do NOT invite them to share their name, email or phone in this reply - they asked about a "
+    "specific trailer, so answer that. (If an escalation this turn told you to ask for their "
+    "details, that request still stands.)"
+)
+
+
 def _reply_instruction(state: dict, answer: str, status: str) -> str:
     """What to tell the customer, given whether the notification went out or is waiting.
 
@@ -285,8 +359,19 @@ class ToolRunner:
         outcome = self.state.get("turn_outcome") or {}
         status = outcome.get("inventory_match_status") or "none"
         listings = list(outcome.get("listings") or [])
+        label = _lookup_label(turn, outcome)
         self._remember(listings)
-        return f"MATCH STATUS: {status}\n{listing_block(listings)}"
+
+        # The matcher reports a stock number that does not exist as no_exact with NO rows - it
+        # found nothing to offer as an alternative either. The no_exact rule talks about "the
+        # listings below", so the rule is chosen by what actually came back, not the label.
+        rule = status if listings else "none"
+        parts = [f"MATCH STATUS: {status}", lookup_guidance(rule, label)]
+        if listings:
+            parts.append(listing_block(listings))
+        if outcome.get("contact_invite_suppressed"):
+            parts.append(_LOOKUP_CONTACT_RULE)
+        return "\n".join(parts)
 
     # -- escalation ------------------------------------------------------------------
     # Reason -> the fixed Reason vocabulary for the email subject and body, and which canned

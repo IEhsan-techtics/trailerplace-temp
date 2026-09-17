@@ -432,6 +432,11 @@ def _contact_ask_is_due(state: dict) -> bool:
         return False
     if any(contact.get(field) for field in ("name", "email", "phone")):
         return False
+    # Set by the inventory lookup: they asked about a specific trailer, and the invitation
+    # would crowd out the answer. The agent is told the same in the tool result; this holds
+    # the deterministic path to it.
+    if (state.get("turn_outcome") or {}).get("contact_invite_suppressed"):
+        return False
     # The opener is a first-message courtesy. Later on it reads as an interruption.
     return int(state.get("turn_index") or 0) <= 1
 
