@@ -224,11 +224,14 @@ def run_agent(runner: Any, system_prompt: str, messages: list) -> str | None:
         text = content
     text = str(text or "").strip()
 
-    _record_usage(result["messages"])
+    # Only what THIS invocation produced. result["messages"] opens with the chat history we
+    # passed in, and earlier bot replies are AIMessages too - counting them billed a model
+    # call for every past reply in the window. A live lookup turn made 3 requests and was
+    # reported as 4. add_messages appends, so the new messages are everything past the input.
+    produced = result["messages"][len(messages):]
+    _record_usage(produced)
 
-    tool_calls_made = sum(
-        1 for message in result["messages"] if getattr(message, "tool_calls", None)
-    )
+    tool_calls_made = sum(1 for message in produced if getattr(message, "tool_calls", None))
     logger.info(
         "AGENT loop done: messages=%d tool_rounds=%d chars=%d",
         len(result["messages"]), tool_calls_made, len(text),

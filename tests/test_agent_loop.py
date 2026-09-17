@@ -130,6 +130,52 @@ def test_messages_accumulate_across_iterations(monkeypatch):
     assert result["messages"][-1].content == "1. [A](https://x/1)"
 
 
+def test_past_bot_replies_in_the_history_are_not_counted_as_model_calls(monkeypatch):
+    """The history we pass in contains earlier bot replies as AIMessages. They were counted
+    as calls, so a live lookup turn that made 3 requests was reported as 4 - and the error
+    grew with every reply in the window."""
+    from src.graph import agent as agent_module
+    from src.graph.nodes import inventory_lookup as lookup_module
+    from src.llm import usage
+
+    monkeypatch.setattr(
+        lookup_module,
+        "lookup_inventory",
+        lambda **kw: {"match_status": "exact", "matches": [], "requested_label": "x"},
+    )
+
+    class FakeModel:
+        def __init__(self):
+            self.calls = 0
+
+        def invoke(self, messages):
+            self.calls += 1
+            if self.calls == 1:
+                return AIMessage(
+                    content="",
+                    tool_calls=[{"name": "lookup_inventory",
+                                 "args": {"stock_number": "15300"}, "id": "call_1"}],
+                )
+            return AIMessage(content="Here it is.")
+
+    fake = FakeModel()
+    monkeypatch.setattr(agent_module, "build_model", lambda tools: fake)
+
+    history = [
+        HumanMessage(content="hi"),
+        AIMessage(content="Thank you for contacting TrailerPlace."),
+        HumanMessage(content="I'm Dave"),
+        AIMessage(content="Great to have your details, Dave!"),
+        HumanMessage(content="do you have stock 15300?"),
+    ]
+    with usage.usage_scope() as turn_usage:
+        text = agent_module.run_agent(_runner(), "SYSTEM", history)
+
+    assert text == "Here it is."
+    assert fake.calls == 2
+    assert turn_usage.chat_completions == 2, "two past replies in the history are not calls"
+
+
 def test_the_same_system_prompt_leads_every_iteration(monkeypatch):
     from src.graph import agent as agent_module
     from src.graph.nodes import search as search_module
