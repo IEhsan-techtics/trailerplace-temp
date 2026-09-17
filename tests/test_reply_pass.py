@@ -226,3 +226,97 @@ def test_filters_relaxed_names_what_was_dropped():
 
 def test_a_clean_match_adds_no_caveat():
     assert _quality({"result_count": 1}, [{"title": "A", "url": "https://x/1"}]) == ""
+
+
+# ------------------------------------------------------------------- pitch material
+# The pitch used to be written from the bullet fields alone, so all it could do was repeat
+# them. The tool line now carries material, floor and features for it - separately labelled so
+# they never become bullets of their own.
+def test_the_tool_line_carries_pitch_material_the_card_does_not_show():
+    from src.llm.tools import listing_line
+
+    line = listing_line(1, {
+        "title": "2026 Galyean Cattle Trailer - 15079",
+        "url": "https://x/15079",
+        "length": "32 ft 0 in",
+        "trailer_material": "STEEL",
+        "floor": "CLEATED RUBBER FLOOR",
+        "features": ["Torsion suspension", "10 LED dome light with toggle switch"],
+    })
+    assert "Length: 32 ft 0 in" in line
+    pitch = line.split("FOR THE PITCH ONLY (never a bullet): ", 1)[1]
+    assert "cleated rubber floor" in pitch
+    assert "Torsion suspension" in pitch
+    assert "material steel" in pitch
+
+
+def test_pitch_material_is_capped_and_skips_placeholders():
+    from src.llm.tools import listing_line
+    from src.search.listing_search import PITCH_FEATURE_CHARS as _PITCH_FEATURE_CHARS
+    from src.search.listing_search import PITCH_FEATURES as _PITCH_FEATURES
+
+    features = [f"Feature number {i} " + "x" * 200 for i in range(20)] + ["None", ""]
+    line = listing_line(1, {
+        "title": "T", "url": "https://x/1",
+        "trailer_material": "Unspecified", "floor": None, "features": features,
+    })
+    pitch = line.split("FOR THE PITCH ONLY (never a bullet): ", 1)[1]
+    kept = pitch.removeprefix("features: ").split("; ")
+    assert len(kept) == _PITCH_FEATURES
+    assert all(len(item) <= _PITCH_FEATURE_CHARS for item in kept)
+    assert "material" not in pitch and "None" not in pitch
+
+
+def test_a_listing_with_nothing_extra_has_no_pitch_part():
+    from src.llm.tools import listing_line
+
+    line = listing_line(1, {"title": "T", "url": "https://x/1", "features": []})
+    assert "FOR THE PITCH ONLY" not in line
+
+
+def test_the_prompt_forbids_repeating_card_values_in_the_pitch():
+    from src.llm.respond import _CARD_FORMAT
+
+    assert "THE PITCH NEVER REPEATS THE CARD" in _CARD_FORMAT
+    # The example pitch must itself obey the rule - the old one restated the axle bullet.
+    example = [l for l in _CARD_FORMAT.splitlines() if l.startswith("   - ")][-1]
+    assert not any(ch.isdigit() for ch in example), example
+
+
+def test_search_results_keep_a_capped_feature_list_for_the_pitch(monkeypatch):
+    """search_listings strips the full features list - which silently emptied the pitch
+    material on every real search. A capped slice now survives the strip."""
+    from types import SimpleNamespace
+
+    from src.search import listing_search
+
+    raw = {"title": "T", "url": "https://x/1", "match_evidence_text": "long evidence",
+           "features": ["Long Arm Tarp System", "Long Arm Tarp System", "None", "LED lights"]}
+    monkeypatch.setattr(
+        listing_search, "search_listing_result",
+        lambda **kw: SimpleNamespace(listings=[raw]),
+    )
+    [item] = listing_search.search_listings(category="Dump", slots={}, metadata_filters={})
+    assert "features" not in item and "match_evidence_text" not in item
+    assert item["pitch_features"] == ["Long Arm Tarp System", "LED lights"]
+
+
+def test_search_names_the_material_field_material():
+    """The key search uses. Reading only trailer_material found nothing."""
+    from src.llm.tools import listing_line
+
+    line = listing_line(1, {"title": "T", "url": "https://x/1", "material": "Aluminum",
+                            "pitch_features": []})
+    assert "material aluminum" in line
+
+
+@pytest.mark.parametrize("empty", [None, float("nan"), 3, ""])
+def test_pitch_features_treats_anything_but_a_list_as_none(empty):
+    """A DataFrame cell with no features is NaN, and iterating a float raises."""
+    import numpy as np
+
+    from src.search.listing_search import pitch_features
+
+    assert pitch_features(empty) == []
+    assert pitch_features(np.float64("nan")) == []
+    assert pitch_features(np.array(["Tarp kit", "Ramps"], dtype=object)) == ["Tarp kit", "Ramps"]

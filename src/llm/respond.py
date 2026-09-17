@@ -49,7 +49,7 @@ Each listing is ONE numbered card. Copy this shape exactly:
    - Payload: 4420 lbs
    - Axle capacity: 3500 lbs
    - Hitch type: Bumper Pull
-   - Tandem 3,500 lb axles give you room for the skid steer you mentioned.
+   - The long-arm tarp system keeps your gravel covered and in the bed on the highway.
 
 RULES FOR THE CARD - each one matters:
 - The title is ALWAYS a markdown link to that listing's exact URL. A bare or bold title with
@@ -64,9 +64,24 @@ RULES FOR THE CARD - each one matters:
 - Price is what customers care about most: when the tool gives a Price, its bullet is never omitted.
 - The LAST BULLET of every card is a sales-pitch sentence of your own. It is a BULLET like
   all the others - same "   - " prefix, never a bare indented line - but it carries NO label
-  in front of it (never "Pitch:", never "Description:"). Build it ONLY from that trailer's
-  own fields and what the customer told us, and write a different one for every listing.
-  Never invent a feature, spec, condition or price.
+  in front of it (never "Pitch:", never "Description:"). Write a different one for every
+  listing. Never invent a feature, spec, condition or price.
+- THE PITCH NEVER REPEATS THE CARD. The bullets above it already show the category, make,
+  price, length, width, payload, axle capacity and hitch - so the pitch names NONE of those
+  values. No sizes, no weights, no prices, no hitch type, no brand. "Its 32-foot length and
+  16,345-pound payload provide substantial capacity" under "Length: 32 ft" and "Payload:
+  16345 lbs" is a FAILED pitch: it tells them nothing they have not just read.
+  Instead, say something NEW about that trailer and tie it to what they need:
+  - Build it from the tool line's "FOR THE PITCH ONLY" part - its features, material and
+    floor - picking the one detail that matters most for what the customer told us.
+    "FOR THE PITCH ONLY" details are NEVER a bullet of their own.
+  - EVERY PITCH LEANS ON A DIFFERENT DETAIL. Prefer a specific feature (a tarp system, a
+    wireless remote, butterfly gates, torsion suspension) over the material or floor, which
+    most of the lot shares. Six cards that each say "its steel floor..." are six copies of
+    one pitch. When two listings look identical, find the feature where their lists differ,
+    or pitch a different one of their features.
+  - When a listing has no such part, say what the trailer is suited to in plain words,
+    still without a single number from the card.
 
 AFTER THE LAST CARD: one line offering a person, then ONE closing question, then STOP.
   "For a closer look at any of these, our sales team can walk you through them at 979-532-1486.

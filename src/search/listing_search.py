@@ -1444,9 +1444,50 @@ def search_listings(
     )
     return [
         {
-            key: value
-            for key, value in item.items()
-            if key not in {"match_evidence_text", "features"}
+            **{
+                key: value
+                for key, value in item.items()
+                if key not in {"match_evidence_text", "features"}
+            },
+            # The full list stays behind, but a short slice of it is what the reply's pitch
+            # sentence is written from - without it the pitch had nothing to say that the
+            # card's own bullets had not already said.
+            "pitch_features": pitch_features(item.get("features")),
         }
         for item in result.listings
     ]
+
+
+# Sized from the catalogue: a listing carries 15 features at the median and 19 at p75, about
+# 28 characters each, stored alphabetically. At 8 the cut fell mid-alphabet, so the Diamond C
+# LPT208's "Long Arm Tarp System" - feature 17 of 21 - never reached the pitch. At 20 a typical
+# search turn adds roughly 700 input tokens across six trailers.
+PITCH_FEATURES = 20
+PITCH_FEATURE_CHARS = 80
+
+
+def pitch_features(features: Any) -> list[str]:
+    """At most PITCH_FEATURES distinct features, each clipped, placeholders dropped.
+
+    Anything that is not a list is treated as no features - the lookup path reads them out of
+    a DataFrame, where an empty cell is NaN, and iterating a float raises.
+    """
+    if isinstance(features, str):
+        features = [features]
+    elif hasattr(features, "tolist") and isinstance(features.tolist(), list):
+        features = features.tolist()  # a numpy array; a numpy NaN's tolist() is a float
+    elif not isinstance(features, (list, tuple)):
+        features = []
+    kept: list[str] = []
+    seen: set[str] = set()
+    for feature in features or []:
+        text = " ".join(str(feature or "").split())
+        if not text or text.lower() in {"none", "null", "n/a", "unspecified"}:
+            continue
+        if text.lower() in seen:
+            continue
+        seen.add(text.lower())
+        kept.append(text[:PITCH_FEATURE_CHARS].rstrip())
+        if len(kept) >= PITCH_FEATURES:
+            break
+    return kept

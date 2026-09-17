@@ -62,7 +62,51 @@ def listing_line(index: int, listing: Any) -> str:
         if text and text.lower() not in {"none", "null", "n/a"}:
             parts.append(f"{label}: {text}")
     parts.append(f"URL: {str(_listing_get(listing, 'url') or '').strip()}")
+    pitch_material = _pitch_material(listing)
+    if pitch_material:
+        parts.append(f"FOR THE PITCH ONLY (never a bullet): {pitch_material}")
     return " | ".join(parts)
+
+
+# What the pitch sentence is written FROM. The model used to see only the fields that become
+# bullets, so the one thing it could say about a trailer was a bullet it had just printed -
+# "Its 32-foot length and 16,345-pound payload provide substantial capacity" under Length:
+# 32 ft and Payload: 16345 lbs. 182 of the 258 rows carry a features list that says what the
+# trailer is actually like.
+def _clean(value: Any) -> str:
+    text = str(value or "").strip()
+    return "" if text.lower() in {"", "none", "null", "n/a", "unspecified"} else text
+
+
+def _pitch_material(listing: Any) -> str:
+    """A capped slice of the features, then material and floor - never a value on the card.
+
+    Features come FIRST. The model takes the first detail it is given, and material and floor
+    are the same on most of the lot: with them in front, five steel dump trailers were each
+    pitched on their "steel floor" while one of them had a long-arm tarp system nobody
+    mentioned.
+
+    Search results carry ``pitch_features`` - it strips the full ``features`` list before
+    results leave it, so reading ``features`` alone found nothing on the path that matters
+    most. ``features`` is still read for any caller that hands over a raw row.
+    """
+    from src.search.listing_search import pitch_features
+
+    bits: list[str] = []
+    kept = _listing_get(listing, "pitch_features", None)
+    if kept is None:
+        kept = pitch_features(_listing_get(listing, "features"))
+    if kept:
+        bits.append("features: " + "; ".join(kept))
+
+    # Search names it "material"; the table column is trailer_material.
+    material = _clean(_listing_get(listing, "material") or _listing_get(listing, "trailer_material"))
+    if material:
+        bits.append(f"material {material.lower()}")
+    floor = _clean(_listing_get(listing, "floor"))
+    if floor and floor.lower() != material.lower():
+        bits.append(f"floor {floor.lower()}")
+    return ", ".join(bits)
 
 
 def listing_block(listings: list[Any]) -> str:

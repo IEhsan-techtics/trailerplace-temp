@@ -272,6 +272,14 @@ def _inventory_match_evidence_text(row: pd.Series | dict[str, Any]) -> str:
     return evidence[:_INVENTORY_EVIDENCE_MAX_CHARS]
 
 
+def _pitch_features(value: Any) -> list[str]:
+    # Imported here, as fetch_listings is above: listing_search is the heavier module and
+    # this one is loaded on its own by the lookup path.
+    from src.search.listing_search import pitch_features
+
+    return pitch_features(value)
+
+
 def _row_to_listing(row: pd.Series | dict[str, Any], score: float | None = None) -> dict[str, Any]:
     get = row.get
     price = _clean_scalar(get("price"))
@@ -300,6 +308,9 @@ def _row_to_listing(row: pd.Series | dict[str, Any], score: float | None = None)
         "material": _clean_scalar(get("trailer_material")),
         "floor": _clean_scalar(get("floor")),
         "match_evidence_text": _inventory_match_evidence_text(row),
+        # Same slice search results carry, so a looked-up trailer's pitch has something to
+        # say beyond its own card.
+        "pitch_features": _pitch_features(get("features")),
     }
     if score is not None:
         listing["relevance_score"] = round(float(score), 4)
