@@ -1,9 +1,8 @@
 """The category tool: choose one, change one, or suggest a better one. No LLM calls.
 
 ``set_trailer_category`` is the deterministic tool the brief asks for (S8): it validates
-the category, stores it, and pulls that category's required questions out of the existing
-``trailer_fields`` spec. It never invents a category and never invents a question - both
-come from the single sources of truth already in ``src/domain``.
+the category, stores it, and pulls that category's required questions out of the
+question rules (``src/rules``). It never invents a category and never invents a question.
 """
 from __future__ import annotations
 
@@ -17,6 +16,8 @@ from src.domain.categories import (
     resolve_category_matches,
 )
 from src.domain.trailer_fields import get_trailer_fields_as_dict
+from src.rules.engine import apply_rules
+from src.rules.store import current_rules
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +88,15 @@ def set_trailer_category(state: dict, category: str) -> dict[str, Any]:
     state["optional_slots"] = list(spec.get("optional_slots") or [])
     state["slot_questions"] = dict(spec.get("questions") or {})
 
-    if previous and previous != canonical:
+    changed = bool(previous and previous != canonical)
+    if changed:
+        # Where an injected question sat in the old category's list means nothing in the new one.
+        state["rule_ask_anchors"] = {}
+        state["pending_slot"] = None
+    # The rules decide the final list: skipped questions out, injected ones in, defaults set.
+    apply_rules(state, current_rules())
+
+    if changed:
         _prune_for_new_category(state)
 
     logger.info(

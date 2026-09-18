@@ -152,11 +152,28 @@ def all_required_resolved(state: dict) -> bool:
     """
     if not state.get("category"):
         return False
-    if not state.get("required_slots"):
+    if not state.get("required_slots") and not state.get("rule_skipped"):
+        # An empty list is only "done" when the rules emptied it - every question skipped
+        # for this customer. Otherwise it means the category's questions were never loaded.
         return False
     return not required_remaining(state)
 
 
 def question_text(state: dict, slot: str) -> str:
-    """The canonical wording for a slot, from the category's own field spec."""
+    """The canonical wording for a slot.
+
+    Read from the live rules rather than the copy taken when the category was set, so a
+    question reworded in the control panel is worded that way in conversations already
+    under way. The category's own wording first, then an ask rule's, then that copy.
+    """
+    from src.rules.store import current_rules
+
+    rules = current_rules()
+    if state.get("category"):
+        wording = rules.category_spec(state["category"]).questions.get(slot)
+        if wording:
+            return wording
+    for rule in rules.rules:
+        if rule.action == "ask_question" and rule.slot == slot and (rule.question or "").strip():
+            return rule.question.strip()
     return (state.get("slot_questions") or {}).get(slot) or f"Could you tell me the {slot.replace('_', ' ')}?"

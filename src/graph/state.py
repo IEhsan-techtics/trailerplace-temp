@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import Any, TypedDict
 
 # Bumped when the persisted shape changes in a way an old snapshot cannot satisfy.
-STATE_SCHEMA_VERSION = 2
+STATE_SCHEMA_VERSION = 3
 
 # A required question is asked at most twice, then dropped (brief S23).
 MAX_ASKS_PER_SLOT = 2
@@ -44,6 +44,18 @@ class SessionState(TypedDict, total=False):
     pending_slot: str | None
     invalid_retry_slot: str | None
     invalid_retry_reason: str | None
+
+    # ---- question rules (src/rules) ----
+    # Trait keys the model reported for the cargo named ("lightweight", "large_or_heavy").
+    cargo_traits: list[str]
+    # slot -> "default" | "user". Tells a value a rule filled in from one the customer gave.
+    slot_sources: dict[str, str]
+    # Defaults currently applied: slot -> {"value", "reason"}.
+    rule_defaults: dict[str, dict[str, Any]]
+    # Required questions a rule removed for this customer: slot -> reason.
+    rule_skipped: dict[str, str]
+    # Where each injected question sits: slot -> the slot it goes in front of (None = last).
+    rule_ask_anchors: dict[str, str | None]
 
     # ---- pending confirmations ----
     pending_keep_filters: dict[str, Any] | None
@@ -93,6 +105,11 @@ def new_state(session_id: str) -> SessionState:
         pending_slot=None,
         invalid_retry_slot=None,
         invalid_retry_reason=None,
+        cargo_traits=[],
+        slot_sources={},
+        rule_defaults={},
+        rule_skipped={},
+        rule_ask_anchors={},
         pending_keep_filters=None,
         pending_category_switch=None,
         rejected_switches=[],
