@@ -74,44 +74,6 @@ _SYNONYMS: dict[str, list[str]] = {
     if _NAMING_TERMS.get(category) or _CARGO_TERMS.get(category)
 }
 
-# Categories that NEVER get the dynamically-injected width question, however big the cargo.
-# Either the trailer's width is not a real choice (a livestock or dump body comes as it comes,
-# and asking a customer how wide their cattle are is nonsense), or the category already asks for
-# size its own way. What is left — Car Hauler, Equipment, Tilt — is where a wide load genuinely
-# decides whether the trailer works.
-#
-# Single source of truth: the injection gate in apply_analysis and the needs_width_question rule
-# in the Analyze prompt both read this, so the model is never asked to judge width for a category
-# the code would refuse to ask about anyway.
-WIDTH_EXCLUDED_CATEGORIES = frozenset({
-    "Aluminum",
-    # Like Enclosed, which it is built on: the box comes as it comes, and the spec asks for
-    # the build size its own way.
-    "Concession",
-    "Diesel Tank",
-    "Dump",
-    "Enclosed",
-    "Fiber",
-    "Flatbed",
-    "Livestock",
-    "Race Trailer",
-    "Roll Off",
-    "Utility",
-})
-
-
-def width_excluded_categories_line() -> str:
-    """Comma-joined width-exempt categories, for the Analyze prompt."""
-    return ", ".join(sorted(WIDTH_EXCLUDED_CATEGORIES))
-
-
-def width_eligible_categories_line() -> str:
-    """Comma-joined categories that CAN take the injected width question."""
-    return ", ".join(
-        category for category in _advertised_categories() if category not in WIDTH_EXCLUDED_CATEGORIES
-    )
-
-
 _OFFICE_TERMS = ("office trailer", "cooldown trailer", "cool down trailer")
 _FIBER_CONTEXT_TERMS = ("fiber", "telecom", "splicing", "fiber optic")
 _GENERAL_OFFICE_TERMS = ("general office", "office only", "jobsite office", "site office")
