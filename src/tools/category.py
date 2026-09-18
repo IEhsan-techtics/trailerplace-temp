@@ -16,7 +16,7 @@ from src.domain.categories import (
     resolve_category_matches,
 )
 from src.domain.trailer_fields import get_trailer_fields_as_dict
-from src.rules.engine import apply_rules
+from src.rules.engine import apply_rules, is_default
 from src.rules.store import current_rules
 
 logger = logging.getLogger(__name__)
@@ -163,13 +163,14 @@ def meaningful_filters(state: dict) -> dict[str, Any]:
 
     Only configuration slots, and only those holding a real value. A None, an empty list
     and a declined slot are all "nothing was collected here", and offering to keep them
-    would be noise.
+    would be noise. So is a value a rule filled in: the customer never gave it.
     """
     slots = state.get("slots") or {}
     kept: dict[str, Any] = {}
     for slot in KEEP_QUESTION_SLOTS:
         value = slots.get(slot)
-        if value is None:
+        if value is None or is_default(state, slot):
+            # A rule's default is not something they told us, so it is not theirs to keep.
             continue
         if isinstance(value, (list, str)) and not value:
             continue

@@ -4,7 +4,7 @@ Every business rule in the brief is enforced here or in ``src/tools/``. The mode
 is read as EVIDENCE about what the customer said, never as an instruction about what to do
 - which is why a bad classification degrades a reply rather than corrupting a session.
 
-The order of the eight steps is load-bearing:
+The order of the steps is load-bearing:
 
 1. contact         - independent of everything, so it cannot be lost to an early return
 2. confirmations   - a pending yes/no is about the PREVIOUS turn and must be read before
@@ -12,6 +12,7 @@ The order of the eight steps is load-bearing:
 3. gooseneck       - decides whether "gooseneck" is a hitch or a make, before either is stored
 4. category        - may open a keep-filters question instead of switching immediately
 5. filters         - runs with the category settled, so per-category parsing applies
+5b. question rules - needs this turn's cargo and values; decides the questions steps 7-8 read
 6. haul suggestion - needs the haul_item that step 5 just stored
 7. attempts        - needs to know what steps 5 and 6 resolved
 8. results gate    - needs everything above
@@ -30,12 +31,15 @@ from src.tools.category import (
     set_trailer_category,
     suggest_category_from_haul_item,
 )
+from src.rules.engine import apply_rules
+from src.rules.store import current_rules
 from src.tools.filters import apply_extracted_fields
 from src.tools import team_notify
 from src.tools.lookup_gate import brand_is_lookup_make
 from src.tools.questions import (
     all_required_resolved,
     decline_slot,
+    is_answered,
     record_no_preference,
     resolve_pending_slot,
     sweep_exhausted_slots,
@@ -71,6 +75,7 @@ def apply_node(state: dict, output: Any, user_message: str = "") -> dict:
         state["invalid_retry_reason"] = result.invalid_reason
     record_no_preference(state, result.no_preference)
 
+    _apply_question_rules(state, output)
     _apply_haul_item_suggestion(state, result)
     _apply_attempts(state, output, result)
     _apply_refined_search(state, output, result)
@@ -321,6 +326,26 @@ def _apply_brand(state: dict, output: Any, user_message: str) -> None:
         # Bull DTB"), not a standing instruction to filter every later search to that make.
         return
     state["brand_preference"] = str(brand).strip()
+
+
+# ---------------------------------------------------------------- 5b. question rules
+def _apply_question_rules(state: dict, output: Any) -> None:
+    """Record what the cargo is like, then let the rules settle this turn's questions.
+
+    The model's traits describe the cargo it matched THIS turn, so they replace the old
+    ones. A turn that names no cargo leaves them alone - unless what they are hauling has
+    been dropped (a category change, keep-filters "none"), which takes its traits with it.
+
+    Run every turn rather than only when something changed: the rules themselves may have
+    changed since the last message, and the conversation should follow them.
+    """
+    haul = getattr(output, "haul_classification", None)
+    matched = str(getattr(haul, "haul_item_matched", None) or "").strip()
+    if matched:
+        state["cargo_traits"] = list(dict.fromkeys(getattr(haul, "cargo_traits", None) or []))
+    elif not is_answered(state, "haul_item"):
+        state["cargo_traits"] = []
+    apply_rules(state, current_rules())
 
 
 # ------------------------------------------------------------- 6. haul-item suggestion

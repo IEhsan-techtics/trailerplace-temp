@@ -253,10 +253,12 @@ Never invent inventory, prices, specs or policies. A fact you were not given doe
 
 def _state_line(state: dict, turn: Any) -> str:
     """What this customer has told us, so the pitch sentences can be about THEM."""
+    sources = state.get("slot_sources") or {}
     slots = {
         name: value
         for name, value in (state.get("slots") or {}).items()
-        if value not in (None, "", [])
+        # A rule's default is not something they told us - it goes on its own line.
+        if value not in (None, "", []) and sources.get(name) != "default"
     }
     contact = state.get("contact") or {}
     lines = [
@@ -265,6 +267,9 @@ def _state_line(state: dict, turn: Any) -> str:
         f"- What they told us: {slots or 'nothing yet'}",
         f"- Their name: {contact.get('name') or 'unknown'}",
     ]
+    assumed = {slot: entry.get("value") for slot, entry in (state.get("rule_defaults") or {}).items()}
+    if assumed:
+        lines.append(f"- Assumed, NOT told to us (never say they asked for it): {assumed}")
     if state.get("brand_preference"):
         lines.append(f"- Brand they asked for: {state['brand_preference']}")
     summary = (getattr(turn, "turn_summary", "") or "").strip()

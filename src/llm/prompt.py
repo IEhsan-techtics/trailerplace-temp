@@ -342,10 +342,11 @@ def state_block(state: dict) -> str:
     category = state.get("category")
     lines.append(f"- Category: {category}" if category else "- Category: not chosen yet")
 
+    sources = state.get("slot_sources") or {}
     known = {
         slot: value
         for slot, value in (state.get("slots") or {}).items()
-        if value is not None and value != [] and value != ""
+        if value is not None and value != [] and value != "" and sources.get(slot) != "default"
     }
     if known:
         lines.append("- Already known (NEVER ask about these again):")
@@ -358,6 +359,25 @@ def state_block(state: dict) -> str:
         remaining = required_remaining(state)
         lines.append(
             "- Still to ask: " + (", ".join(remaining) if remaining else "nothing, all done")
+        )
+
+    skipped = state.get("rule_skipped") or {}
+    if category and skipped:
+        lines.append(
+            "- Not needed for this customer (do not ask): "
+            + "; ".join(f"{slot} - {reason}" for slot, reason in skipped.items())
+        )
+
+    assumed = state.get("rule_defaults") or {}
+    if category and assumed:
+        lines.append(
+            "- Assumed unless they say otherwise: "
+            + "; ".join(
+                f"{slot} = {_format_value(entry.get('value'))}"
+                + (f" ({entry['reason']})" if entry.get("reason") else "")
+                for slot, entry in assumed.items()
+            )
+            + ". Never present these as something they told you."
         )
 
     declined = state.get("declined_slots") or []

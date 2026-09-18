@@ -21,6 +21,8 @@ import logging
 from typing import Any
 
 from src.domain import slot_map
+from src.rules.engine import is_default, mark_user_value
+from src.rules.store import current_rules
 from src.domain.slot_map import (
     axle_count_out_of_range,
     is_impossible_measurement,
@@ -54,6 +56,16 @@ _MEASUREMENT_SLOTS = frozenset(
 _SLOT_TARGETS = frozenset(_EXTRACTED_TO_SLOT.values()) | {
     "payload_lbs", "bin_size", "cargo_size", "trailer_size", "base_category",
 }
+
+
+def _writable_slots() -> frozenset[str]:
+    """The fixed targets plus every slot the live question rules can ask about.
+
+    A question added in the control panel has to be answerable: without this its answer
+    would arrive in slot_answers and be thrown away as an unknown slot name. A name the
+    rules do not ask about is still ignored, exactly as before.
+    """
+    return _SLOT_TARGETS | current_rules().question_slots()
 
 
 class FieldApplication:
@@ -131,14 +143,17 @@ def _apply_one(state: dict, slot: str, raw: Any, category: str, result: FieldApp
     # guard there rejected every update to haul_item once one existed, and a customer
     # correcting "actually it's dirt, not gravel" was silently ignored.
     existing = (state.get("slots") or {}).get(slot)
+    # A rule's default is not the customer's answer, so anything they say replaces it.
     if (
         existing is not None
+        and not is_default(state, slot)
         and slot_map.slot_value_kind(slot) is not None
         and not slot_map.is_recognized_slot_value(slot, value)
     ):
         return
 
     state.setdefault("slots", {})[slot] = value
+    mark_user_value(state, slot)
     result.stored[slot] = value
 
 
@@ -169,8 +184,9 @@ def _apply_features(state: dict, extracted: Any) -> None:
     state["non_metadata_features"] = kept
     # "gooseneck" arriving as a feature is a hitch preference in disguise; only fill the
     # slot when it is still empty, so an explicit answer is never overwritten.
-    if hitch and not (state.get("slots") or {}).get("hitch_type"):
+    if hitch and (not (state.get("slots") or {}).get("hitch_type") or is_default(state, "hitch_type")):
         state.setdefault("slots", {})["hitch_type"] = hitch
+        mark_user_value(state, "hitch_type")
 
 
 def apply_extracted_fields(state: dict, output: Any) -> FieldApplication:
@@ -183,10 +199,11 @@ def apply_extracted_fields(state: dict, output: Any) -> FieldApplication:
     category = state.get("category") or ""
     extracted = getattr(output, "extracted", None)
     raw_by_slot = raw_text_for_slots(output)
+    writable = _writable_slots()
 
     # 1. Raw text wins. Anything the customer worded themselves is parsed from their words.
     for slot, raw in raw_by_slot.items():
-        if slot in _SLOT_TARGETS:
+        if slot in writable:
             _apply_one(state, slot, raw, category, result)
 
     # 2. The model's converted numbers fill only the gaps.
@@ -202,7 +219,7 @@ def apply_extracted_fields(state: dict, output: Any) -> FieldApplication:
 
         # Slots the model itself flagged as "they stated no preference" (brief S18).
         for slot in getattr(extracted, "numeric_no_preference", None) or []:
-            if slot in _SLOT_TARGETS and slot not in result.stored:
+            if slot in writable and slot not in result.stored:
                 if slot not in result.no_preference:
                     result.no_preference.append(slot)
 
