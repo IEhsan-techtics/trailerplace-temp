@@ -96,6 +96,12 @@ class Settings:
     chat_stream_chunk_pause_seconds: float = 0.45
     # Append-only JSONL of per-turn records; scripts/cost_report.py reads it (M9).
     turn_log_path: str = ""
+    # Question rules (src/rules). How often a process checks the DB for a newly activated
+    # version - an admin save takes effect in the process that made it at once, and in
+    # every other process within this many seconds.
+    rules_refresh_seconds: float = 30.0
+    # Shared secret for the /admin/rules API. Empty means the API is not mounted at all.
+    admin_api_token: str = ""
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -158,6 +164,8 @@ class Settings:
             chat_stream_delta_seconds=_float(os.getenv("CHAT_STREAM_DELTA_SECONDS"), 0.035),
             chat_stream_chunk_pause_seconds=_float(os.getenv("CHAT_STREAM_CHUNK_PAUSE_SECONDS"), 0.45),
             turn_log_path=os.getenv("TURN_LOG_PATH", ""),
+            rules_refresh_seconds=_float(os.getenv("RULES_REFRESH_SECONDS"), 30.0),
+            admin_api_token=os.getenv("ADMIN_API_TOKEN", ""),
         )
 
 

@@ -180,3 +180,18 @@ def no_real_email(monkeypatch):
     from src.tools import email_sender
 
     monkeypatch.setattr(email_sender, "send_email", lambda subject, body: True)
+
+
+@pytest.fixture(autouse=True)
+def rules_from_seed(monkeypatch):
+    """Serve the question rules from src/rules/seed.json, never from the live database.
+
+    .env carries real credentials, so without this every turn a test drives would ask Azure
+    which rules version is active. Tests that exercise the store itself point it at SQLite.
+    """
+    from src.rules import store
+
+    store.reset()
+    monkeypatch.setattr(store, "_enabled", lambda: False)
+    yield
+    store.reset()

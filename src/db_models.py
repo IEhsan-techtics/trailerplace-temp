@@ -6,6 +6,8 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
+    JSON,
+    Boolean,
     CheckConstraint,
     DateTime,
     Float,
@@ -17,6 +19,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -193,4 +196,34 @@ class ChatbotOutbox(Base):
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ChatbotQuestionRules(Base):
+    """Versions of the question-rules document (src/rules). Every save is a new row.
+
+    Exactly one row is active - enforced by the partial unique index, so two admins saving
+    at once cannot leave the bot with two live documents. An empty table is normal: the
+    bot then serves src/rules/seed.json.
+
+    The document column is JSONB on Postgres and plain JSON elsewhere, which is only so the
+    store's SQL can be exercised against SQLite in the tests.
+    """
+
+    __tablename__ = "chatbot_question_rules"
+    __table_args__ = (
+        Index(
+            "uq_chatbot_question_rules_one_active",
+            "is_active",
+            unique=True,
+            postgresql_where=text("is_active"),
+            sqlite_where=text("is_active"),
+        ),
+    )
+
+    version: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    document: Mapped[dict[str, Any]] = mapped_column(JSON().with_variant(JSONB(), "postgresql"), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
