@@ -45,6 +45,13 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="TrailerPlace chatbot", version="1.0")
 
+# The question-rules admin API (src/api/admin_rules.py), for the control panel. Mounted only
+# when a token is configured, so a deploy without one has no admin surface at all.
+if settings.admin_api_token:
+    from src.api.admin_rules import router as admin_rules_router  # noqa: E402
+
+    app.include_router(admin_rules_router)
+
 
 def _env_float(name: str, default: float) -> float:
     try:
