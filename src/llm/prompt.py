@@ -335,7 +335,7 @@ def state_block(state: dict) -> str:
     remembered by the model, which is what lets a conversation resume mid-flow after a
     restart with no loss.
     """
-    from src.tools.questions import required_remaining
+    from src.tools.questions import question_text, required_remaining
 
     lines: list[str] = ["WHERE THIS CONVERSATION IS NOW"]
 
@@ -360,6 +360,14 @@ def state_block(state: dict) -> str:
         lines.append(
             "- Still to ask: " + (", ".join(remaining) if remaining else "nothing, all done")
         )
+        if remaining:
+            # The wording is admin-edited (src/rules). Without it here the model phrases each
+            # question itself and an edit in the control panel never reaches the customer.
+            # Every remaining one, not just the first: this block describes the state BEFORE
+            # the message is applied, so the question the reply asks is often the second.
+            lines.append("- When you ask one of these, use exactly these words:")
+            for slot in remaining:
+                lines.append(f'    {slot}: "{question_text(state, slot)}"')
 
     skipped = state.get("rule_skipped") or {}
     if category and skipped:

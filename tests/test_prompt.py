@@ -255,3 +255,13 @@ def test_a_new_rules_version_rebuilds_the_prompt_once():
     after = system_prompt()
     assert "- livestock: Live animals." in after and "- livestock:" not in before
     assert system_prompt() is after
+
+
+def test_the_configured_wording_of_every_remaining_question_is_given():
+    """Live test: without this the model phrased questions itself, and a rewording saved in
+    the control panel never reached a customer."""
+    state = qualified_state()
+    state["slots"] = {"haul_item": "gravel"}
+    block = state_block(state)
+    assert "use exactly these words" in block
+    assert "payload_capacity: \"What's the rough haul weight per load?\"" in block
