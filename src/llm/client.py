@@ -62,10 +62,7 @@ def empty_output(reason: str = "") -> ChatbotTurnOutput:
             is_lookup=False, year=None, make=None, model_text=None,
             stock_number=None, wants=None, confidence="low",
         ),
-        haul_classification=HaulClassification(
-            is_lightweight_utility_load=False, needs_width_question=False,
-            haul_item_matched=None,
-        ),
+        haul_classification=HaulClassification(cargo_traits=[], haul_item_matched=None),
         keep_fields_answer=None,
         kept_fields=[],
         category_confirm_answer=None,

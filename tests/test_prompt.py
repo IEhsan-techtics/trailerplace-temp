@@ -31,7 +31,12 @@ def qualified_state(**kwargs):
 # Raised from 17,000 for the one-question rule. That rule took the LIVE prompt to 17,034 -
 # over the old ceiling - while this fixture measured well under it, which is exactly the gap
 # the paragraph above warns about.
-MAX_SYSTEM_PROMPT_CHARS = 19_000
+#
+# Raised from 19,000 for the CARGO TRAITS section (~1,100 chars), which the question rules
+# render from their trait definitions. It replaces a model judgement that used to be spread
+# through the prompt as category-specific rules, and it grows with every trait an admin
+# adds - which is exactly the growth this ceiling should catch.
+MAX_SYSTEM_PROMPT_CHARS = 20_500
 
 
 def test_the_system_prompt_stays_short():
@@ -224,3 +229,29 @@ def test_it_refuses_to_invent_which_days_we_open():
         assert day not in prompt
 
 
+
+
+# ------------------------------------------------------------------ the question rules
+def test_it_lists_the_cargo_traits_from_the_rules():
+    prompt = system_prompt()
+    assert "CARGO TRAITS" in prompt
+    assert "- lightweight:" in prompt and "golf cart" in prompt
+    assert "- large_or_heavy:" in prompt and "skid steer" in prompt
+
+
+def test_a_new_rules_version_rebuilds_the_prompt_once():
+    import json
+
+    from src.rules import store
+    from src.rules.models import validate_document
+
+    raw = json.loads(store.SEED_PATH.read_text(encoding="utf-8"))
+    raw["cargo_traits"].append({"key": "livestock", "label": "Animals", "definition": "Live animals.",
+                                "examples": ["cattle", "goats"]})
+    doc, errors = validate_document(raw)
+    assert doc is not None, errors
+    before = system_prompt()
+    store.set_override(doc, version=42)
+    after = system_prompt()
+    assert "- livestock: Live animals." in after and "- livestock:" not in before
+    assert system_prompt() is after

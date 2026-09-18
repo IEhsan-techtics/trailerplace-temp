@@ -25,6 +25,7 @@ from functools import lru_cache
 from typing import Any
 
 from src.domain import brands, categories, company
+from src.rules.store import current_rules, rules_version
 
 # The behaviour rules. Ordered by how often they are needed, not by importance, because a
 # model skimming at low effort weights the top of a list.
@@ -240,14 +241,19 @@ WRITING THE REPLY
 """
 
 
-@lru_cache(maxsize=1)
 def system_prompt() -> str:
     """The static half. Identical every turn, so it caches.
 
-    Cached for the life of the process rather than rebuilt per turn: the category and brand
-    blocks each read the catalogue, and doing that on every message would put a database
-    round trip in the latency path of every reply.
+    Cached per rules version rather than rebuilt per turn: the category and brand blocks
+    each read the catalogue, and doing that on every message would put a database round
+    trip in the latency path of every reply. A newly activated rules version changes the
+    CARGO TRAITS section, so it rebuilds the prompt once - and only then.
     """
+    return _system_prompt_for(rules_version())
+
+
+@lru_cache(maxsize=2)
+def _system_prompt_for(version: int) -> str:
     return "\n".join(
         [
             f"You are the sales assistant for {company.NAME}, a trailer dealership in "
@@ -258,6 +264,8 @@ def system_prompt() -> str:
             _SITUATIONS.strip(),
             "",
             _FIELDS.strip(),
+            "",
+            cargo_traits_block(),
             "",
             company.company_facts_block(),
             "",
@@ -271,6 +279,33 @@ def system_prompt() -> str:
             brands.make_prompt_block(),
         ]
     )
+
+
+system_prompt.cache_clear = _system_prompt_for.cache_clear  # type: ignore[attr-defined]
+
+
+def cargo_traits_block() -> str:
+    """How to fill haul_classification, from the traits the live rules define.
+
+    The model only DESCRIBES the cargo. What a trait changes - a question skipped, one
+    added - is decided in Python by the rules, which is why nothing here mentions a
+    category or a question.
+    """
+    lines = [
+        "CARGO TRAITS (fill haul_classification)",
+        "When they name SPECIFIC cargo (\"a golf cart\", \"my Bobcat S70\"), put it in "
+        "haul_item_matched in their words, and list in cargo_traits every trait below that "
+        "cargo has. Judge by the definition - the examples are a guide, not the whole list.",
+    ]
+    for trait in current_rules().cargo_traits:
+        examples = f" e.g. {', '.join(trait.examples)}." if trait.examples else ""
+        lines.append(f"- {trait.key}: {trait.definition}{examples}")
+    lines += [
+        "No specific cargo named -> haul_item_matched null and cargo_traits empty.",
+        "A trailer category, a feature or a hitch is never cargo.",
+        "Traits never change what you ask. The state block says what is still to ask.",
+    ]
+    return "\n".join(lines)
 
 
 def _unstocked_section() -> str:

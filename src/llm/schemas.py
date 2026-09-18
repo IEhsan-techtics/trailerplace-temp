@@ -74,8 +74,10 @@ class ExtractedFields(StrictBaseModel):
 
 
 class HaulClassification(StrictBaseModel):
-    is_lightweight_utility_load: bool = Field(description="True only for Utility cargo at or below ~1500 lbs (a WEIGHT judgment). Signals the load is light, so the weight question is skipped.")
-    needs_width_question: bool = Field(description="True for large, wide, heavy-duty, or vehicle cargo (a SIZE judgment). Signals the trailer must be wide enough, so the width question is asked.")
+    # Plain strings, not an enum: the trait list is admin-edited data (src/rules), and the
+    # response schema has to stay fixed for the provider to cache it. Python drops any key
+    # the live rules do not define.
+    cargo_traits: list[str] = Field(description="Keys from CARGO TRAITS that the named cargo has. Empty when no specific cargo was named.")
     haul_item_matched: str | None = Field(description="Specific cargo grounded in user words, or null.")
 
 
@@ -110,7 +112,7 @@ class TurnAnalysis(StrictBaseModel):
         "inventory_lookup", "contact_info_provided", "contact_declined", "smalltalk_other",
     ] = Field(description="Dominant user intent for routing.")
     email_triggers: list[EmailTrigger] = Field(description="Every email-worthy request in message order.")
-    haul_classification: HaulClassification = Field(description="Cargo weight/size classification for width logic.")
+    haul_classification: HaulClassification = Field(description="Which cargo traits the named cargo has.")
     inventory_lookup: InventoryLookup = Field(description="Specific-inventory lookup identifiers.")
     category_mentioned: str | None = Field(description="Canonical category mentioned or null.")
     is_category_info_only: bool = Field(description="True for category information questions, not selection.")
@@ -177,7 +179,7 @@ class ChatbotTurnOutput(StrictBaseModel):
     )
     contact: ContactInfo = Field(description="Contact details stated in this message.")
     inventory_lookup: InventoryLookup = Field(description="Specific-inventory lookup identifiers.")
-    haul_classification: HaulClassification = Field(description="Cargo weight/size classification.")
+    haul_classification: HaulClassification = Field(description="Which cargo traits the named cargo has.")
     keep_fields_answer: Literal["all", "none", "some"] | None = Field(
         description="Only when a keep-filters question is pending; null otherwise."
     )
