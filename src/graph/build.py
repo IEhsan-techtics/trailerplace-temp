@@ -194,9 +194,9 @@ def run_turn(session_id: str, user_message: str) -> dict[str, Any]:
             conversation_store.deliver_pending_outbox_async()
 
         logger.info(
-            "TURN done: session=%s turn=%s calls=%d tokens=%d category=%s complete=%s",
+            "TURN done: session=%s turn=%s calls=%d tokens=%d cached=%d category=%s complete=%s",
             session_id, state["turn_index"], turn_usage.chat_completions,
-            turn_usage.total_tokens, state.get("category"),
+            turn_usage.total_tokens, turn_usage.cached_tokens, state.get("category"),
             state.get("qualification_complete"),
         )
 

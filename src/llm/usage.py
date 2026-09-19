@@ -30,6 +30,13 @@ class TurnUsage:
     embeddings: int = 0
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    # Input tokens the provider served from its prompt cache - billed at a discount. A
+    # static prompt that stops being cached shows up here first.
+    cached_tokens: int = 0
+    # Wall time of the model calls, split by pass, so a latency change can be pinned on the
+    # analysis call or the reply pass rather than on the turn as a whole.
+    analysis_seconds: float = 0.0
+    reply_seconds: float = 0.0
     models: list[str] = field(default_factory=list)
 
     @property
@@ -67,6 +74,7 @@ def record_completion(
     completion_tokens: int = 0,
     *,
     purpose: str | None = None,
+    cached_tokens: int = 0,
 ) -> None:
     usage = _current.get()
     if usage is None:
@@ -76,6 +84,7 @@ def record_completion(
         usage.feature_reranks += 1
     usage.prompt_tokens += int(prompt_tokens or 0)
     usage.completion_tokens += int(completion_tokens or 0)
+    usage.cached_tokens += int(cached_tokens or 0)
     if model and model not in usage.models:
         usage.models.append(model)
 
@@ -88,3 +97,14 @@ def record_embedding(model: str, prompt_tokens: int = 0) -> None:
     usage.prompt_tokens += int(prompt_tokens or 0)
     if model and model not in usage.models:
         usage.models.append(model)
+
+
+def record_seconds(purpose: str, seconds: float) -> None:
+    """Add a model call's wall time to the turn, under "analysis" or "reply"."""
+    usage = _current.get()
+    if usage is None:
+        return
+    if purpose == "analysis":
+        usage.analysis_seconds += seconds
+    elif purpose == "reply":
+        usage.reply_seconds += seconds

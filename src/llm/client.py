@@ -12,6 +12,7 @@ guarantees two things:
 from __future__ import annotations
 
 import logging
+import time
 from functools import lru_cache
 from typing import Any
 
@@ -27,6 +28,8 @@ from src.llm.schemas import (
 )
 
 logger = logging.getLogger(__name__)
+
+ANALYSIS_CACHE_KEY = "luna-analysis"
 
 
 @lru_cache(maxsize=1)
@@ -86,18 +89,24 @@ def analyze_turn(state: dict, user_message: str) -> ChatbotTurnOutput:
     ``apply.py`` is what acts on it.
     """
     messages = build_messages(state, user_message)
+    started = time.perf_counter()
     try:
         response = get_client().responses.parse(
             model=settings.chat_model,
             input=messages,
             reasoning={"effort": settings.chat_reasoning_effort},
             text_format=ChatbotTurnOutput,
+            # Every session shares one static prefix; the key routes them all to the same
+            # cache instead of leaving it to the provider's hashing.
+            prompt_cache_key=ANALYSIS_CACHE_KEY,
         )
     except Exception as exc:  # noqa: BLE001 - any failure degrades the same way
         logger.exception(
             "LLM call failed: session=%s model=%s", state.get("session_id"), settings.chat_model
         )
         return empty_output(f"The model call failed: {type(exc).__name__}.")
+    finally:
+        usage.record_seconds("analysis", time.perf_counter() - started)
 
     _record_usage(response)
 
@@ -123,9 +132,11 @@ def analyze_turn(state: dict, user_message: str) -> ChatbotTurnOutput:
 def _record_usage(response: Any) -> None:
     """Count the call so test_single_call can assert exactly one happened."""
     tokens = getattr(response, "usage", None)
+    details = getattr(tokens, "input_tokens_details", None)
     usage.record_completion(
         settings.chat_model,
         prompt_tokens=getattr(tokens, "input_tokens", 0) or 0,
         completion_tokens=getattr(tokens, "output_tokens", 0) or 0,
         purpose="chat_turn",
+        cached_tokens=getattr(details, "cached_tokens", 0) or 0,
     )

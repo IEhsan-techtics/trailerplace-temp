@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Annotated, Any, TypedDict
 
 from langchain_core.messages import AIMessage, SystemMessage
@@ -31,6 +32,7 @@ from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 
 from src.config import settings
+from src.llm import usage
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +44,9 @@ logger = logging.getLogger(__name__)
 # because "this is iteration 2".
 MAX_TOOL_ROUNDS = 3
 RECURSION_LIMIT = 2 * MAX_TOOL_ROUNDS + 1
+
+# One key for every reply pass, so they all hit the same prompt cache (see src/llm/client.py).
+REPLY_CACHE_KEY = "luna-reply"
 
 
 class AgentState(TypedDict):
@@ -140,7 +145,9 @@ def build_model(tools: list):
     }
     if settings.chat_reasoning_effort:
         kwargs["reasoning"] = {"effort": settings.chat_reasoning_effort}
-    return ChatOpenAI(**kwargs).bind_tools(tools)
+    # Bound per call rather than set on the client: it is a request parameter, and binding
+    # it here puts it on every iteration of the loop.
+    return ChatOpenAI(**kwargs).bind_tools(tools, prompt_cache_key=REPLY_CACHE_KEY)
 
 
 def should_continue(state: AgentState) -> str:
@@ -168,7 +175,11 @@ def build_agent_graph(runner: Any, system_prompt: str):
         """The single agent node. Every iteration enters here."""
         # Prepended fresh each time, so iteration five is still bound by the same rules as
         # iteration one - including how to format listings the tools have just returned.
-        response = model.invoke([SystemMessage(content=system_prompt), *state["messages"]])
+        started = time.perf_counter()
+        try:
+            response = model.invoke([SystemMessage(content=system_prompt), *state["messages"]])
+        finally:
+            usage.record_seconds("reply", time.perf_counter() - started)
         return {"messages": [response]}
 
     builder = StateGraph(AgentState)
@@ -246,7 +257,6 @@ def _record_usage(messages: list) -> None:
     rather than incremented at a call site - which keeps ``usage.chat_completions`` an
     honest answer to "how many times did we invoke the model this turn?".
     """
-    from src.llm import usage
 
     for message in messages:
         if not isinstance(message, AIMessage):
@@ -257,4 +267,5 @@ def _record_usage(messages: list) -> None:
             prompt_tokens=tokens.get("input_tokens", 0) or 0,
             completion_tokens=tokens.get("output_tokens", 0) or 0,
             purpose="reply",
+            cached_tokens=(tokens.get("input_token_details") or {}).get("cache_read", 0) or 0,
         )

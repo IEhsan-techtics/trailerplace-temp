@@ -130,6 +130,7 @@ class Turn:
     pending: str | None
     slots: dict[str, Any]
     note: str = ""
+    usage: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -211,11 +212,13 @@ def run_one(base_url: str, category: str, scenario: str, index: int, log_lock: t
         started = time.time()
         response = http.post(f"{base_url}/chat", json={"message": text, "session_id": session_id})
         response.raise_for_status()
+        seconds = time.time() - started  # the /chat call only, not the state read below
         body = response.json()
         state = _state(session_id)
         result.turns.append(
-            Turn(text, body.get("assistant_text") or "", time.time() - started,
-                 state.get("pending_slot"), dict(state.get("slots") or {}), note)
+            Turn(text, body.get("assistant_text") or "", seconds,
+                 state.get("pending_slot"), dict(state.get("slots") or {}), note,
+                 body.get("usage") or {})
         )
         return state
 
@@ -517,11 +520,13 @@ def run_script(base_url: str, script: Script, log_lock: threading.Lock) -> Resul
         started = time.time()
         response = http.post(f"{base_url}/chat", json={"message": text, "session_id": session_id})
         response.raise_for_status()
+        seconds = time.time() - started  # the /chat call only, not the state read below
         body = response.json()
         state = _state(session_id)
         result.turns.append(
-            Turn(text, body.get("assistant_text") or "", time.time() - started,
-                 state.get("pending_slot"), dict(state.get("slots") or {}), note)
+            Turn(text, body.get("assistant_text") or "", seconds,
+                 state.get("pending_slot"), dict(state.get("slots") or {}), note,
+                 body.get("usage") or {})
         )
         return state
 
@@ -606,6 +611,56 @@ def _check_script(result: Result, script: Script, state: dict[str, Any], repeats
         add(("no duplicate emails", dupes == 0, summary if dupes else ""))
 
 
+def _pct(values: list[float], q: float) -> float:
+    """Nearest-rank percentile; 0 for an empty list."""
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    return ordered[min(len(ordered) - 1, max(0, round(q * (len(ordered) - 1))))]
+
+
+def _performance(results: list[Result]) -> list[str]:
+    """Latency, tokens and prompt-cache hits, split by whether the reply pass ran.
+
+    A turn with ``reply_seconds`` ran the tool-using reply pass (listings, a lookup or an
+    escalation); every other turn is the single analysis call. The two have very different
+    costs, so one blended number would hide which of them changed.
+    """
+    turns = [t for r in results for t in r.turns if t.usage]
+    if not turns:
+        return []
+    groups = {
+        "Q&A turns (one call)": [t for t in turns if not t.usage.get("reply_seconds")],
+        "Reply-pass turns (listings / tools)": [t for t in turns if t.usage.get("reply_seconds")],
+        "All turns": turns,
+    }
+    lines = [
+        "",
+        "## Performance",
+        "",
+        "| Turns | n | Latency median | p90 | max | Analysis call median | Reply pass median "
+        "| Input tokens / turn | Output tokens / turn | Cached share of input |",
+        "|---|---|---|---|---|---|---|---|---|---|",
+    ]
+    for name, group in groups.items():
+        if not group:
+            continue
+        secs = [t.seconds for t in group]
+        analysis = [t.usage.get("analysis_seconds", 0.0) for t in group]
+        reply = [t.usage.get("reply_seconds", 0.0) for t in group if t.usage.get("reply_seconds")]
+        inp = sum(t.usage.get("prompt_tokens", 0) for t in group)
+        out = sum(t.usage.get("completion_tokens", 0) for t in group)
+        cached = sum(t.usage.get("cached_tokens", 0) for t in group)
+        lines.append(
+            f"| {name} | {len(group)} | {_pct(secs, 0.5):.1f}s | {_pct(secs, 0.9):.1f}s "
+            f"| {max(secs):.1f}s | {_pct(analysis, 0.5):.1f}s "
+            f"| {(f'{_pct(reply, 0.5):.1f}s' if reply else '-')} "
+            f"| {inp / len(group):,.0f} | {out / len(group):,.0f} "
+            f"| {(cached / inp * 100 if inp else 0):.0f}% |"
+        )
+    return lines
+
+
 def _write_log(results: list[Result], path: Path, started: datetime, seconds: float) -> None:
     passed = sum(r.passed for r in results)
     turns = sum(len(r.turns) for r in results)
@@ -619,6 +674,7 @@ def _write_log(results: list[Result], path: Path, started: datetime, seconds: fl
         "| Category | Scenario | Result | Turns | Failed checks |",
         "|---|---|---|---|---|",
     ]
+    lines += _performance(results)
     for r in results:
         failed = "; ".join(f"{name} ({detail})" for name, ok, detail in r.checks if not ok) or (r.error or "")
         lines.append(f"| {r.category} | {r.scenario} | {'PASS' if r.passed else 'FAIL'} | {len(r.turns)} | {failed} |")
