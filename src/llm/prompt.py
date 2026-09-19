@@ -355,8 +355,9 @@ def state_block(state: dict) -> str:
     if held:
         lines.append(
             f"- You asked whether {_format_value(held.get('value'))} lbs is per axle or the total "
-            "across all axles. They are answering that now: set axle_capacity_basis from their "
-            "words, and do not call the number either one until they have."
+            "across all axles. They are answering that now (record it in axle_capacity_basis). "
+            "Until they choose, call the number neither one; if they are unsure, just say that is "
+            "fine - in plain words, never a field name."
         )
     if state.get("pending_axle_count"):
         lines.append(

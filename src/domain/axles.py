@@ -50,7 +50,10 @@ def infer_basis(text: str, model_basis: str | None) -> str | None:
     if _PER_AXLE_REPLY_RE.search(words) or _TOTAL_REPLY_RE.search(words):
         return model_basis
     if _PER_AXLE_WORDING_RE.search(words):
-        return model_basis
+        # Conventional per-axle wording, so a model that calls it unclear is not asked to be
+        # believed: live, "5k axles" came back unclear and was held for a question it never
+        # needed.
+        return "per_axle" if model_basis in (None, "unclear") else model_basis
     if _BARE_CAPACITY_WORDING_RE.search(words):
         return "unclear"
     return model_basis

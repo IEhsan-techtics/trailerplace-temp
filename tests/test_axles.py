@@ -282,3 +282,9 @@ def test_show_me_lets_go_of_a_held_capacity(fake_llm):
     state = state_after()
     assert state["pending_axle_basis"] is None
     assert "axle_capacity" not in state["slots"]
+
+
+def test_conventional_per_axle_wording_is_per_axle_even_when_the_model_says_unclear():
+    """Live: "5k axles" came back unclear and was held for a question it never needed."""
+    assert axles.infer_basis("5k axles", "unclear") == "per_axle"
+    assert axles.infer_basis("7,000 lb axles", None) == "per_axle"
