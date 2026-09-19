@@ -125,7 +125,7 @@ def compose_node(state: dict, output: Any) -> dict:
         parts.append(flushed)
 
     closing, asked_slot = _closing_part(state, output)
-    if closing and _repeats(parts, closing):
+    if closing and _repeats(parts, closing, asked_slot):
         # The model answered the question AND proposed the same question as its next one, so
         # the reply asked "what type of trailer are you looking for?" twice in a row. The
         # slot is still marked asked below - it WAS asked, once.
@@ -201,14 +201,65 @@ def _note_contact_ask(state: dict, text: str) -> None:
     contact["asks_without_progress"] = int(contact.get("asks_without_progress") or 0) + 1
 
 
+# The model writes typographic punctuation ("what’s", "—") and the configured wording uses
+# plain ASCII ("what's", "-"). Left as they are, the same question compares as two different
+# strings - which is exactly how a live run sent "…what’s the approximate weight of the
+# load? What's the approximate weight of the load?".
+_TYPOGRAPHY = str.maketrans({
+    "’": "'", "‘": "'", "“": '"', "”": '"',
+    "–": "-", "—": "-", " ": " ",
+})
+
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+
+
 def _collapse(text: str) -> str:
-    return re.sub(r"\s+", " ", str(text or "").strip().lower())
+    return re.sub(r"\s+", " ", str(text or "").translate(_TYPOGRAPHY).strip().lower())
 
 
-def _repeats(parts: list[str], closing: str) -> bool:
-    """Is this closing line already sitting in what the reply says?"""
+# What a question about each slot is recognisably ABOUT. Word overlap alone cannot tell that
+# "what's the rough weight?" and "What's the approximate weight of the load?" are one
+# question - they share barely half their words - but both are plainly about the weight.
+# Matched as word prefixes, so "weigh" covers "weight" and "weighs".
+_SLOT_TOPICS: dict[str, tuple[str, ...]] = {
+    "haul_item": ("haul", "carry", "carrying", "transport", "using it for", "use it for"),
+    "payload_capacity": ("weigh", "pound", "lbs", "heavy", "ton", "payload"),
+    "axle_capacity": ("axle",),
+    "total_axle_capacity_lbs": ("axle",),
+    "axle_count": ("axle",),
+    "length": ("long", "length"),
+    "width": ("wide", "width"),
+    "height": ("tall", "height", "high"),
+    "hitch_type": ("hitch", "gooseneck", "bumper pull"),
+    "cargo_size": ("size", "dimension"),
+    "trailer_size": ("size", "dimension"),
+    "bin_size": ("bin", "yard"),
+    "base_category": ("type of trailer", "kind of trailer", "type of aluminum"),
+}
+
+
+def _is_about(question: str, slot: str) -> bool:
+    return any(re.search(rf"\b{re.escape(term)}", question) for term in _SLOT_TOPICS[slot])
+
+
+def _repeats(parts: list[str], closing: str, slot: str | None = None) -> bool:
+    """Is this closing question already asked somewhere in the reply?
+
+    Word for word first. Then question by question: the model often re-asks in its own words
+    inside an answer ("If you're not sure, that's okay - what's the rough weight?"), and a
+    question about the same slot is the same question, however it is phrased. Slots without
+    a topic list (a question added in the rules panel) fall back to word overlap.
+    """
     collapsed = _collapse(closing)
-    return bool(collapsed) and collapsed in _collapse(" ".join(parts))
+    if not collapsed:
+        return False
+    body = _collapse(" ".join(parts))
+    if collapsed in body:
+        return True
+    questions = [sentence for sentence in _SENTENCE_END.split(body) if sentence.rstrip().endswith("?")]
+    if slot in _SLOT_TOPICS:
+        return any(_is_about(question, slot) for question in questions)
+    return any(_restates(collapsed, question) for question in questions)
 
 
 _FALLBACK_REASON = {"complaint": "Escalation", "team_request": "Team Request"}

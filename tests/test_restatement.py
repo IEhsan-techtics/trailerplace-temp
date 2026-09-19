@@ -96,3 +96,43 @@ def test_nothing_is_confirmed_when_nothing_went_out():
     from src.graph.nodes.compose import _with_handoff
 
     assert _with_handoff({}, "Hello.") == "Hello."
+
+
+# ------------------------------------------------------------ a question asked twice
+from src.graph.nodes.compose import _repeats  # noqa: E402
+
+# Live, Tilt: the answer re-asked with a curly apostrophe, the closing had a straight one.
+_TILT_ANSWER = (
+    "It helps us match the trailer’s capacity to your load so we don’t recommend one that’s "
+    "under-rated. If you’re not sure, that’s okay—what’s the approximate weight of the load?"
+)
+
+
+def test_the_same_question_with_different_apostrophes_is_one_question():
+    assert _repeats([_TILT_ANSWER], "What's the approximate weight of the load?", "payload_capacity")
+
+
+def test_typography_alone_is_enough_even_without_a_slot():
+    assert _repeats([_TILT_ANSWER], "What's the approximate weight of the load?")
+
+
+@pytest.mark.parametrize("reworded, slot, closing", [
+    ("No problem - what's the rough weight?", "payload_capacity", "What's the approximate weight of the load?"),
+    ("Roughly how heavy is a full load?", "payload_capacity", "What's the rough haul weight per load?"),
+    ("And how long is the longest piece?", "length", "About how long is the load (or what deck length do you need)?"),
+    ("Would a gooseneck or bumper pull suit you?", "hitch_type", "Do you prefer a bumper pull or gooseneck hitch?"),
+    ("So what are you planning to haul?", "haul_item", "What will you be hauling on the flatbed?"),
+])
+def test_a_reworded_re_ask_is_caught(reworded, slot, closing):
+    assert _repeats([f"Good question. {reworded}"], closing, slot)
+
+
+@pytest.mark.parametrize("parts, slot, closing", [
+    # A statement about weight is not a question about it.
+    (["Gravel is heavy, so payload matters."], "payload_capacity", "What's the rough haul weight per load?"),
+    # A question about something else leaves ours standing.
+    (["Would you like our financing number?"], "payload_capacity", "What's the rough haul weight per load?"),
+    (["What will you be hauling?"], "length", "What length trailer are you looking for?"),
+])
+def test_a_different_question_is_kept(parts, slot, closing):
+    assert not _repeats(parts, closing, slot)
