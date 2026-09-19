@@ -257,3 +257,28 @@ def test_the_axle_question_replaces_the_pending_slot_question(fake_llm):
     say(fake_llm, "5k axles", extracted={"axle_capacity": 5000.0, "axle_capacity_basis": "per_axle"})
 
     assert state_after()["pending_slot"] is None, "the count question went out, not the weight"
+
+
+def test_show_me_skips_the_open_count_question_and_shows_results(fake_llm, no_search):
+    """Live: "Can you show me what you have?" got "Sorry, I didn't catch that" and the
+    count question again."""
+    dump_trailer(fake_llm)
+    say(fake_llm, "gravel, and I want 7,000 lb axles",
+        slots={"haul_item": "gravel"},
+        extracted={"axle_capacity": 7000.0, "axle_capacity_basis": "per_axle"})
+    result = say(fake_llm, "Can you show me what you have?", intent="skip_all_show_results")
+
+    state = state_after()
+    assert "axle_count" in state["declined_slots"]
+    assert "didn't catch" not in result["assistant_text"]
+    assert len(no_search) == 1
+
+
+def test_show_me_lets_go_of_a_held_capacity(fake_llm):
+    dump_trailer(fake_llm)
+    say(fake_llm, "I need 14,000 lbs of axle capacity", extracted={"axle_capacity": 14000.0})
+    say(fake_llm, "just show me what you have", intent="skip_all_show_results")
+
+    state = state_after()
+    assert state["pending_axle_basis"] is None
+    assert "axle_capacity" not in state["slots"]

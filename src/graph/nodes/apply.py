@@ -396,6 +396,20 @@ def _apply_axles(state: dict, output: Any, user_message: str, result: Any) -> No
     extracted = getattr(output, "extracted", None)
     model_basis = getattr(extracted, "axle_capacity_basis", None)
 
+    if getattr(output, "intent", "") in _SHOW_RESULTS_INTENTS:
+        # "Just show me what you have" skips our open axle question like any other: the
+        # count becomes no preference, and a capacity we could not place is let go. Live, the
+        # count question was asked again with "Sorry, I didn't catch that".
+        if state.get("pending_axle_count"):
+            record_no_preference(state, ["axle_count"])
+            state["pending_axle_count"] = None
+            if state.get("invalid_retry_slot") == "axle_count":
+                state["invalid_retry_slot"] = state["invalid_retry_reason"] = None
+        if state.get("pending_axle_basis"):
+            logger.info("AXLE capacity dropped: they asked to see results: session=%s", state.get("session_id"))
+            state["pending_axle_basis"] = None
+        return
+
     held = state.get("pending_axle_basis")
     if held:
         _resolve_held_capacity(state, held, user_message, model_basis, result)
