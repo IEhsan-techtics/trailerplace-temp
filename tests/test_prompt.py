@@ -40,7 +40,11 @@ def qualified_state(**kwargs):
 # Lowered from 20,500 by the prompt rewrite: every rule stated once as situation -> action,
 # the scripted answers shared with the reply prompt, and the category term lists dropped
 # (Python maps the customer's words itself). Live it measured 12,630.
-MAX_SYSTEM_PROMPT_CHARS = 13_500
+#
+# Raised from 13,500 for the non_metadata_features rule (~580 chars). Without it the model
+# filed cargo and uses as features ("scissor lift", "mobile coffee business"), and each one
+# sent every candidate listing to the gpt-5-nano reranker for a ranking nothing could match.
+MAX_SYSTEM_PROMPT_CHARS = 14_000
 
 
 def test_the_system_prompt_stays_short():

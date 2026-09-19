@@ -133,6 +133,13 @@ OTHER FIELDS
   axles" -> total_axle_capacity_lbs = 14000.
 - hitch_type is ONLY "Bumper Pull" or "Gooseneck". Either / any / no preference -> null.
 - haul_item is their own words, even vague ("just random stuff").
+- non_metadata_features: equipment ON the trailer that has no field of its own, in their words:
+  a ramp or ramp door, winch, tarp, LED lights, sliding or butterfly gates, side door,
+  insulation, spare tire, toolbox, D-rings, torsion axles, electric brakes. Each one ranks the
+  results, so add only real equipment.
+  NEVER a feature: the cargo ("a scissor lift", "my Bobcat") or the business or use ("food
+  truck", "mobile coffee business") - those are haul_item; nor a make, type, hitch, size,
+  weight, axle count or rating, colour or price - those have their own fields.
 
 ONE SPECIFIC TRAILER -> inventory_lookup
 Fill it whenever they point at particular stock, however they phrase it and even mid-questions

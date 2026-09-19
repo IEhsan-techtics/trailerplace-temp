@@ -19,9 +19,10 @@ gets sensible answers. Three scenarios per category:
 
 These customers decline contact details in their first message, so they send no email.
 
---scripted rules,category,email (or all) adds hand-written conversations: the question
-rules (light-load weight skip, width for large cargo, defaults), category switches and
-recommendations, and one conversation per kind of team email. The email ones GIVE
+--scripted rules,category,flow,features,email (or all) adds hand-written conversations: the
+question rules (light-load weight skip, width for large cargo, defaults), category switches
+and recommendations, non-metadata features and the gpt-5-nano reranker, and one conversation
+per kind of team email. The email ones GIVE
 contact details, so their notifications really go out - to the inbox .env names.
 
 Writes one markdown log with a summary table and every conversation in full to
@@ -131,6 +132,7 @@ class Turn:
     slots: dict[str, Any]
     note: str = ""
     usage: dict[str, Any] = field(default_factory=dict)
+    listings: list[str] = field(default_factory=list)   # URLs shown this turn, in order
 
 
 @dataclass
@@ -218,7 +220,8 @@ def run_one(base_url: str, category: str, scenario: str, index: int, log_lock: t
         result.turns.append(
             Turn(text, body.get("assistant_text") or "", seconds,
                  state.get("pending_slot"), dict(state.get("slots") or {}), note,
-                 body.get("usage") or {})
+                 body.get("usage") or {},
+                 [str(item.get("url") or "") for item in body.get("listings") or [] if isinstance(item, dict)])
         )
         return state
 
@@ -357,6 +360,11 @@ class Script:
     stash_at: int | None = None          # after this step a request is held, nothing sent yet
     reply_has: tuple[tuple[int, str], ...] = ()   # (step, text) the bot's reply must contain
     no_listings_at: tuple[int, ...] = ()           # steps whose reply must carry no listings
+    features: tuple[str, ...] = ()       # each word must be in a stored non-metadata feature
+    not_features: tuple[str, ...] = ()   # none of these words may be in one
+    no_features: bool = False            # the feature list must end empty
+    rerank: bool | None = None           # the gpt-5-nano feature reranker must (not) have run
+    top_has: str | None = None           # the first listing shown must carry this word
 
 
 def _bump(cargo: str) -> dict[str, str]:
@@ -445,6 +453,49 @@ SCRIPTS: list[Script] = [
            [OPENING, "I'm starting a mobile coffee business and need a trailer for it", QUALIFY],
            switch="yes", category="Concession"),
 
+    # --- non-metadata features and the gpt-5-nano reranker ---------------------------
+    # Real equipment must be stored and must pull matching trailers to the top; cargo, a
+    # use, axles, a hitch, a size or a colour must never be stored, and then nano must not
+    # run at all. Each feature below is on only SOME of that category's stock (tarp: 12 of
+    # 24 Dump, winch: 16 of 38 Flatbed, insulation: 10 of 48 Enclosed, butterfly gates: 6
+    # of 12 Livestock), so the ranking has something to do.
+    Script("features", "dump with a tarp -> tarp trailers first",
+           [OPENING, "I need a dump trailer with a tarp system", QUALIFY],
+           answers=_bump("gravel"), features=("tarp",), rerank=True, top_has="tarp",
+           category="Dump"),
+    Script("features", "flatbed with a winch -> winch trailers first",
+           [OPENING, "Looking for a flatbed that has a winch", QUALIFY],
+           answers=_bump("steel pipe"), features=("winch",), rerank=True, top_has="winch",
+           category="Flatbed"),
+    Script("features", "insulated enclosed -> insulation matched by meaning",
+           [OPENING, "I want an insulated enclosed trailer", QUALIFY],
+           answers=_bump("tools and equipment that have to stay dry"), features=("insul",),
+           rerank=True, top_has="insul", category="Enclosed"),
+    Script("features", "livestock with butterfly gates",
+           [OPENING, "I need a livestock trailer with butterfly gates", QUALIFY],
+           answers=_bump("cattle"), features=("butterfly",), rerank=True, top_has="butterfly",
+           category="Livestock"),
+    Script("features", "feature given mid-questions is kept",
+           [OPENING, "I want a tilt trailer", "Oh, and it needs to have a winch", QUALIFY],
+           answers=_bump("a small tractor"), features=("winch",), rerank=True,
+           top_has="winch", category="Tilt"),
+    Script("features", "torsion axles and a winch kept; count, rating, cargo dropped",
+           [OPENING, "I need an equipment trailer with tandem 7000 lb torsion axles and a winch "
+                     "to haul my Bobcat", QUALIFY],
+           answers=_bump("a Bobcat skid steer"), features=("torsion", "winch"),
+           not_features=("bobcat", "tandem", "7000", "7,000"), rerank=True, category="Equipment"),
+    Script("features", "cargo is not a feature - scissor lift",
+           [OPENING, "I need a tilt trailer to haul a scissor lift", QUALIFY],
+           answers=_bump("a scissor lift"), no_features=True, not_features=("scissor",),
+           rerank=False, category="Tilt"),
+    Script("features", "a business is not a feature - coffee",
+           [OPENING, "I'm starting a mobile coffee business and need a concession trailer", QUALIFY],
+           no_features=True, not_features=("coffee", "business"), rerank=False,
+           category="Concession"),
+    Script("features", "size, colour, hitch and axles are not features",
+           [OPENING, "I need a black 20 ft gooseneck flatbed with tandem 7000 lb axles", QUALIFY],
+           answers=_bump("lumber"), no_features=True, rerank=False, category="Flatbed"),
+
     # --- emails to the team ------------------------------------------------------------
     Script("email", "FAQ - financing", [TESTER, "Do you offer financing on your trailers?"],
            emails=("faq_-_financing",)),
@@ -526,7 +577,8 @@ def run_script(base_url: str, script: Script, log_lock: threading.Lock) -> Resul
         result.turns.append(
             Turn(text, body.get("assistant_text") or "", seconds,
                  state.get("pending_slot"), dict(state.get("slots") or {}), note,
-                 body.get("usage") or {})
+                 body.get("usage") or {},
+                 [str(item.get("url") or "") for item in body.get("listings") or [] if isinstance(item, dict)])
         )
         return state
 
@@ -550,6 +602,49 @@ def run_script(base_url: str, script: Script, log_lock: threading.Lock) -> Resul
         mark = "PASS" if result.passed else "FAIL"
         print(f"  {mark}  {script.group:<9} {script.name:<50} {len(result.turns):>2} turns", flush=True)
     return result
+
+
+def _listing_text(url: str) -> str:
+    """Everything a listing says about its equipment, lower-cased - read from the catalogue,
+    because the /chat response only carries a trimmed pitch list."""
+    from src import db
+    from src.db_models import TrailerListingRow
+
+    with db.get_session_factory()() as sql:
+        row = sql.query(TrailerListingRow).filter(TrailerListingRow.url == url).first()
+    if row is None:
+        return ""
+    features = row.features if isinstance(row.features, list) else [row.features or ""]
+    return " | ".join([str(row.title or ""), *map(str, features), str(row.match_evidence_text or "")]).lower()
+
+
+def _check_features(result: Result, script: Script, state: dict[str, Any]) -> None:
+    add = result.checks.append
+    stored = [str(f) for f in state.get("non_metadata_features") or []]
+    lowered = [f.lower() for f in stored]
+    result.final["non_metadata_features"] = stored
+    for word in script.features:
+        add((f"feature '{word}' stored", any(word in f for f in lowered), f"features={stored}"))
+    for word in script.not_features:
+        add((f"'{word}' not a feature", not any(word in f for f in lowered), f"features={stored}"))
+    if script.no_features:
+        add(("no features stored", not stored, f"features={stored}"))
+
+    reranks = sum(int(t.usage.get("feature_reranks") or 0) for t in result.turns)
+    nano_turns = [t for t in result.turns if t.usage.get("feature_reranks")]
+    if script.rerank is not None:
+        detail = f"nano batches={reranks}" + (
+            f", on a {nano_turns[0].seconds:.1f}s turn" if nano_turns else "")
+        add((f"nano reranker {'ran' if script.rerank else 'did not run'}",
+             (reranks > 0) == script.rerank, detail))
+
+    if script.top_has:
+        shown = next((t.listings for t in result.turns if t.listings), [])
+        texts = [_listing_text(url) for url in shown]
+        with_it = sum(script.top_has in text for text in texts)
+        add((f"first listing has '{script.top_has}'",
+             bool(texts) and script.top_has in texts[0],
+             f"{with_it} of {len(texts)} shown have it"))
 
 
 def _check_script(result: Result, script: Script, state: dict[str, Any], repeats: list[str],
@@ -593,6 +688,9 @@ def _check_script(result: Result, script: Script, state: dict[str, Any], repeats
     for step, text in script.reply_has:
         reply = result.turns[step].bot if step < len(result.turns) else ""
         add((f"reply {step + 1} says '{text}'", text.lower() in reply.lower().replace("’", "'"), ""))
+
+    if script.features or script.not_features or script.no_features or script.rerank is not None:
+        _check_features(result, script, state)
 
     if stash_seen is not None:
         held, sent = stash_seen
@@ -722,7 +820,7 @@ def main() -> int:
     categories = [c for c in CATEGORIES if not args.only or c in args.only.split(",")]
     scenarios = [s for s in args.scenarios.split(",") if s]
     jobs: list[Any] = [(c, s, i) for i, c in enumerate(categories) for s in scenarios]
-    groups = {"rules", "category", "email", "flow"} if args.scripted == "all" else set(filter(None, args.scripted.split(",")))
+    groups = {"rules", "category", "email", "flow", "features"} if args.scripted == "all" else set(filter(None, args.scripted.split(",")))
     jobs += [script for script in SCRIPTS if script.group in groups]
     started = datetime.now()
     print(f"Running {len(jobs)} conversations against {args.base_url} ({health.get('model')})")
