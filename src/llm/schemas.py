@@ -169,6 +169,14 @@ class ChatbotTurnOutput(StrictBaseModel):
     is_category_info_only: bool = Field(
         description="True when they are ASKING ABOUT a category rather than choosing it."
     )
+    unavailable_type_requested: str | None = Field(
+        description=(
+            "A trailer TYPE they asked for or about that is NOT in the list of types we stock "
+            "(a boat trailer, a camper, a horse trailer, or anything under WE DO NOT CURRENTLY "
+            "STOCK THESE), in their words. Null when the type is one we stock, or they named "
+            "no type."
+        )
+    )
     extracted: ExtractedFields = Field(description="Structured fields from the latest message.")
     slot_answers: list[SlotAnswer] = Field(
         description=(

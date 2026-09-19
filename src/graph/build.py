@@ -100,6 +100,10 @@ def _tools_and_reply(state: dict, output: Any, user_message: str) -> None:
     no second model call at all and compose assembles the reply exactly as before.
     """
     outcome = state.setdefault("turn_outcome", {})
+    if outcome.get("unavailable_type"):
+        # A type we do not carry owns the turn: the team has been told and compose writes
+        # the fixed reply. Running the reply pass too would risk a second escalation email.
+        return
     targets = _route(state, output)
     needs_person = _needs_a_person(state, output)
     if not (targets or needs_person):

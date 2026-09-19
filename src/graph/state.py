@@ -61,6 +61,9 @@ class SessionState(TypedDict, total=False):
     pending_keep_filters: dict[str, Any] | None
     pending_category_switch: dict[str, Any] | None
     rejected_switches: list[str]
+    # Trailer types they asked for that we do not carry, lower-cased. The team is told about
+    # each one once; asking again gets the same answer without a second email.
+    unavailable_requests: list[str]
     # "gooseneck" is both a hitch type and a make we stock, so a bare mention is worth one
     # short question rather than a guess. Holds the text that was ambiguous.
     pending_gooseneck_clarification: str | None
@@ -113,6 +116,7 @@ def new_state(session_id: str) -> SessionState:
         pending_keep_filters=None,
         pending_category_switch=None,
         rejected_switches=[],
+        unavailable_requests=[],
         pending_gooseneck_clarification=None,
         contact={
             "name": None, "email": None, "phone": None,

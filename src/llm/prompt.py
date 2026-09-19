@@ -311,12 +311,15 @@ def cargo_traits_block() -> str:
 def _unstocked_section() -> str:
     """Categories we do not currently stock, so "do you have X?" is answered honestly."""
     block = categories.unstocked_categories_block()
-    if not block.strip():
-        return "We currently stock every category listed above."
-    return (
-        "WE DO NOT CURRENTLY STOCK THESE. If they ask for one, say so plainly and "
-        "suggest the closest category we do have:\n" + block
+    rule = (
+        "A TYPE WE DO NOT CARRY: if they ask for a trailer type that is not in the list "
+        "above - one of these, or any other (boat, camper, horse trailer) - put it in "
+        "unavailable_type_requested. The reply, the alternatives and the note to our team "
+        "are handled for you."
     )
+    if not block.strip() or block.startswith("None"):
+        return "We currently stock every category listed above.\n" + rule
+    return "WE DO NOT CURRENTLY STOCK THESE:\n" + block + "\n" + rule
 
 
 def _format_value(value: Any) -> str:

@@ -34,7 +34,7 @@ from src.tools.category import (
 from src.rules.engine import apply_rules
 from src.rules.store import current_rules
 from src.tools.filters import apply_extracted_fields
-from src.tools import team_notify
+from src.tools import team_notify, unavailable
 from src.tools.lookup_gate import brand_is_lookup_make
 from src.tools.questions import (
     all_required_resolved,
@@ -63,6 +63,7 @@ def apply_node(state: dict, output: Any, user_message: str = "") -> dict:
     # that same turn joins the same batch.
     team_notify.flush(state)
     _apply_faq_notification(state, output)
+    _apply_unavailable_type(state, output)
     handled = _apply_pending_confirmations(state, output, user_message)
     _apply_gooseneck(state, output, user_message)
     if not handled:
@@ -143,6 +144,24 @@ def _apply_faq_notification(state: dict, output: Any) -> None:
         state,
         reason=f"FAQ - {faq_key}",
         description=question or f"asked about {str(faq_key).replace('_', ' ')}",
+    )
+
+
+def _apply_unavailable_type(state: dict, output: Any) -> None:
+    """They asked for a trailer type we do not carry: tell the team, and let compose say so.
+
+    Here, with the other notifications, so the contact details merged above are already in
+    place - a customer who asks for a boat trailer AND gives their number in one message gets
+    the email sent straight away rather than stashed.
+    """
+    requested = unavailable.requested_type(output)
+    if not requested:
+        return
+    status = unavailable.record(state, output, requested)
+    state.setdefault("turn_outcome", {})["unavailable_type"] = {"type": requested, "status": status}
+    logger.info(
+        "UNAVAILABLE type requested: session=%s type=%r status=%s",
+        state.get("session_id"), requested, status,
     )
 
 

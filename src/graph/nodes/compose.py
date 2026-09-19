@@ -28,6 +28,23 @@ def compose_node(state: dict, output: Any) -> dict:
     """Build ``turn_outcome["assistant_text"]`` and record what was asked."""
     outcome = state.setdefault("turn_outcome", {})
 
+    # They asked for a trailer type we do not carry. The whole reply is ours: it is not
+    # available, here is what we do have, and the team will be in touch - asking for their
+    # details if we cannot reach them yet. It owns the turn even on the first message, the
+    # same way an escalation does, so the request is never lost to the welcome.
+    unavailable_type = outcome.get("unavailable_type")
+    if unavailable_type:
+        from src.tools import unavailable
+
+        text = unavailable.reply(
+            state, unavailable_type["type"], unavailable_type["status"],
+            first_turn=_is_first_turn(state),
+        )
+        outcome["assistant_text"] = _with_handoff(outcome, text)
+        outcome["asked_slot"] = None
+        _note_contact_ask(state, outcome["assistant_text"])
+        return state
+
     # The reply pass already wrote this turn (it had listings to present, so the model saw
     # them through a tool and formatted the cards itself). Nothing here reassembles it - the
     # only job left is recording which trailers the customer was actually shown.
