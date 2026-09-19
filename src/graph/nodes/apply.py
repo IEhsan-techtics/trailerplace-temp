@@ -30,7 +30,6 @@ from src.graph.nodes import greeting
 from src.domain.slot_map import (
     axle_count_out_of_range,
     brand_is_actually_a_hitch,
-    parse_axle_count_answer,
     slot_value_kind,
 )
 from src.tools.category import (
@@ -499,7 +498,14 @@ def _close_axle_count(state: dict, pending: dict, output: Any, user_message: str
     if reason is None:
         # The model does not always turn a bare "Tandem." into a number, so their words are
         # read with the same vocabulary the question offered them.
-        spoken = parse_axle_count_answer(user_message)
+        spoken = axles.count_from_reply(user_message)
+        if spoken is None and any(slot != "axle_count" for slot in result.stored):
+            # They answered something else ("about 5,000 lbs" - the load). Not a wrong
+            # count, so no correction: the question simply stands, within its two asks.
+            if asks >= axles.MAX_CLARIFY_ASKS:
+                record_no_preference(state, ["axle_count"])
+                state["pending_axle_count"] = None
+            return
         if spoken is not None and not axle_count_out_of_range(spoken):
             state.setdefault("slots", {})["axle_count"] = spoken
             mark_user_value(state, "axle_count")

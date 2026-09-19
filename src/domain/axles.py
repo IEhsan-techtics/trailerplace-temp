@@ -72,6 +72,29 @@ def basis_from_reply(text: str, model_basis: str | None) -> str | None:
     return None
 
 
+# A number carrying a unit, or a big one, is a weight or a size - not a count of axles.
+_MEASUREMENT_RE = re.compile(
+    r"\d[\d,.]*\s*(?:k\b|lbs?\b|pounds?\b|tons?\b|kg\b|ft\b|foot\b|feet\b|inch|in\b|#|'|\")"
+    r"|\d{3,}|\d,\d{3}",
+    re.I,
+)
+
+
+def count_from_reply(text: str) -> int | None:
+    """The axle count in a reply to COUNT_QUESTION, or None when it states none.
+
+    Out-of-range counts ("5 axles") are returned as they are, so the range check can explain
+    them. A weight or a size ("about 5,000 lbs") is not a count at all: New Prompt read that
+    as 5,000 axles and told the customer we only carry one to four.
+    """
+    from src.domain.slot_map import parse_axle_count_answer
+
+    words = str(text or "")
+    if _MEASUREMENT_RE.search(words):
+        return None
+    return parse_axle_count_answer(words)
+
+
 def is_no_preference(text: str) -> bool:
     """"Not sure", "any", "whatever works" - to the count question, no preference."""
     return bool(_NO_PREFERENCE_RE.search(str(text or "")))

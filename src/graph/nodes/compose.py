@@ -628,13 +628,17 @@ def _closing_part(state: dict, output: Any) -> tuple[str, str | None]:
 
     # The axle questions, after the confirmations above: those are about the category or the
     # hitch, which decide what the axles are even for.
+    # They replace whatever slot question was pending: that one was not asked this turn, and
+    # left in place it would claim their answer to ours ("about 5,000 lbs" read as the load).
     held = state.get("pending_axle_basis")
     if held:
         held["asks"] = int(held.get("asks") or 0) + 1
+        state["pending_slot"] = None
         return axles.BASIS_QUESTION, None
     count = state.get("pending_axle_count")
     if count and state.get("category"):
         count["asks"] = int(count.get("asks") or 0) + 1
+        state["pending_slot"] = None
         question = axles.COUNT_QUESTION
         if state.get("invalid_retry_slot") == "axle_count":
             prefix = _RETRY_PREFIX.get(str(state.get("invalid_retry_reason")), "")

@@ -231,3 +231,29 @@ def test_the_halved_guess_is_not_the_number_held(fake_llm):
         extracted={"axle_capacity": 7000.0, "total_axle_capacity_lbs": 14000.0})
 
     assert state_after()["pending_axle_basis"]["value"] == 14000.0
+
+
+def test_a_weight_or_size_is_not_an_axle_count():
+    assert axles.count_from_reply("about 5,000 lbs") is None
+    assert axles.count_from_reply("20 ft") is None
+    assert axles.count_from_reply("7000") is None
+    assert axles.count_from_reply("single axle please") == 1
+    assert axles.count_from_reply("5 axles") == 5, "out of range, returned for the range check"
+
+
+def test_answering_the_load_instead_is_not_scolded_as_a_wrong_count(fake_llm):
+    """Live: "about 5,000 lbs" to "how many axles?" was read as 5,000 axles."""
+    _count_question_open(fake_llm)
+    result = say(fake_llm, "about 5,000 lbs", slots={"payload_capacity": "about 5,000 lbs"})
+
+    assert "one to four" not in result["assistant_text"]
+    assert "axle_count" not in state_after()["slots"]
+
+
+def test_the_axle_question_replaces_the_pending_slot_question(fake_llm):
+    dump_trailer(fake_llm)
+    say(fake_llm, "gravel", slots={"haul_item": "gravel"})
+    assert state_after()["pending_slot"] == "payload_capacity"
+    say(fake_llm, "5k axles", extracted={"axle_capacity": 5000.0, "axle_capacity_basis": "per_axle"})
+
+    assert state_after()["pending_slot"] is None, "the count question went out, not the weight"
