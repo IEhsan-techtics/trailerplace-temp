@@ -12,6 +12,7 @@ The order of the steps is load-bearing:
 3. gooseneck       - decides whether "gooseneck" is a hitch or a make, before either is stored
 4. category        - may open a keep-filters question instead of switching immediately
 5. filters         - runs with the category settled, so per-category parsing applies
+5a. axles          - needs what step 5 stored: files or holds a capacity, opens the count question
 5b. question rules - needs this turn's cargo and values; decides the questions steps 7-8 read
 6. haul suggestion - needs the haul_item that step 5 just stored
 7. attempts        - needs to know what steps 5 and 6 resolved
@@ -22,16 +23,23 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from src.domain import axles
 from src.domain import gooseneck as gooseneck_domain
+from src.domain import quantities as quantity_math
 from src.graph.nodes import greeting
-from src.domain.slot_map import brand_is_actually_a_hitch
+from src.domain.slot_map import (
+    axle_count_out_of_range,
+    brand_is_actually_a_hitch,
+    parse_axle_count_answer,
+    slot_value_kind,
+)
 from src.tools.category import (
     meaningful_filters,
     normalize_category,
     set_trailer_category,
     suggest_category_from_haul_item,
 )
-from src.rules.engine import apply_rules
+from src.rules.engine import apply_rules, mark_user_value
 from src.rules.store import current_rules
 from src.tools.filters import apply_extracted_fields
 from src.tools import team_notify, unavailable
@@ -75,6 +83,7 @@ def apply_node(state: dict, output: Any, user_message: str = "") -> dict:
         state["invalid_retry_slot"] = result.invalid_slot
         state["invalid_retry_reason"] = result.invalid_reason
     record_no_preference(state, result.no_preference)
+    _apply_axles(state, output, user_message, result)
 
     _apply_question_rules(state, output)
     _apply_haul_item_suggestion(state, result)
@@ -365,6 +374,180 @@ def _apply_question_rules(state: dict, output: Any) -> None:
     elif not is_answered(state, "haul_item"):
         state["cargo_traits"] = []
     apply_rules(state, current_rules())
+    _skip_weight_after_axle_rating(state)
+
+
+# ------------------------------------------------------------------------- 5a. axles
+_CAPACITY_SLOTS = ("axle_capacity", "total_axle_capacity_lbs")
+_SLOT_FOR_BASIS = {"per_axle": "axle_capacity", "total": "total_axle_capacity_lbs"}
+
+
+def _apply_axles(state: dict, output: Any, user_message: str, result: Any) -> None:
+    """Per-axle or total, and how many axles. After the filters, so it sees what they stored.
+
+    Three things, in this order:
+
+    1. A capacity held last turn is filed once they say which it is - using the number we
+       held, not the model's re-read of it (New Prompt saw the model halve 14,000 to 7,000 on
+       the follow-up, having assumed two axles).
+    2. A new capacity whose wording says neither ("14,000 lbs of axle capacity") is held
+       rather than stored, and asked about.
+    3. After a per-axle rating, "how many axles?" - the search needs it to work out the total.
+    """
+    extracted = getattr(output, "extracted", None)
+    model_basis = getattr(extracted, "axle_capacity_basis", None)
+
+    held = state.get("pending_axle_basis")
+    if held:
+        _resolve_held_capacity(state, held, user_message, model_basis, result)
+    else:
+        _hold_unclear_capacity(state, output, user_message, model_basis, result)
+
+    _apply_axle_count(state, output, user_message, result)
+
+
+def _unstore(state: dict, slot: str, result: Any) -> None:
+    (state.get("slots") or {}).pop(slot, None)
+    (state.get("slot_sources") or {}).pop(slot, None)
+    result.stored.pop(slot, None)
+
+
+def _resolve_held_capacity(state: dict, held: dict, user_message: str,
+                           model_basis: str | None, result: Any) -> None:
+    # Whatever the model filed under either capacity this turn is its re-read of the number
+    # we are holding. The held one is what they said.
+    for slot in _CAPACITY_SLOTS:
+        if slot in result.stored:
+            _unstore(state, slot, result)
+
+    basis = axles.basis_from_reply(user_message, model_basis)
+    if basis is None:
+        if int(held.get("asks") or 0) >= axles.MAX_CLARIFY_ASKS:
+            state["pending_axle_basis"] = None
+            logger.info(
+                "AXLE capacity dropped after %d asks: session=%s value=%s",
+                held.get("asks"), state.get("session_id"), held.get("value"),
+            )
+        return  # still open: compose asks again
+
+    slot = _SLOT_FOR_BASIS[basis]
+    value = float(held["value"])
+    state.setdefault("slots", {})[slot] = value
+    mark_user_value(state, slot)
+    result.stored[slot] = value
+    state["pending_axle_basis"] = None
+    logger.info("AXLE capacity %s resolved as %s: session=%s", value, basis, state.get("session_id"))
+
+
+def _hold_unclear_capacity(state: dict, output: Any, user_message: str,
+                           model_basis: str | None, result: Any) -> None:
+    stored = [slot for slot in _CAPACITY_SLOTS if slot in result.stored]
+    if not stored or axles.infer_basis(user_message, model_basis) != "unclear":
+        return
+    # The number as the model read it from their words - the quantity, converted here -
+    # falling back to what the filters stored. Given both fields, the model's per-axle one is
+    # a halved guess (it assumes two axles), so the larger is the number they actually said.
+    value = None
+    for quantity in getattr(getattr(output, "extracted", None), "quantities", None) or []:
+        if getattr(quantity, "slot_name", None) in _CAPACITY_SLOTS:
+            value = quantity_math.to_canonical(quantity.slot_name, quantity)
+            if value:
+                break
+    value = value or max(float(result.stored[slot]) for slot in stored)
+    for slot in stored:
+        _unstore(state, slot, result)
+    state["pending_axle_basis"] = {"value": float(value), "asks": 0}
+    logger.info("AXLE capacity %s held pending per-axle/total: session=%s", value, state.get("session_id"))
+
+
+def _apply_axle_count(state: dict, output: Any, user_message: str, result: Any) -> None:
+    """Close last turn's "how many axles?", or open it after a per-axle rating."""
+    pending = state.get("pending_axle_count")
+    if pending:
+        _close_axle_count(state, pending, output, user_message, result)
+        return
+
+    if state.get("invalid_retry_slot") == "axle_count":
+        # They volunteered a count we do not stock ("five axles"). Asked with our own
+        # question rather than a bare "axle count?", with the one-to-four reason in front.
+        state["pending_axle_count"] = {"asks": 0}
+        return
+
+    if (
+        state.get("category")
+        and is_answered(state, "axle_capacity")
+        and (state.get("slot_sources") or {}).get("axle_capacity") != "default"
+        and not state.get("pending_axle_basis")
+        and not is_answered(state, "axle_count")
+        and "axle_count" not in (state.get("declined_slots") or [])
+    ):
+        state["pending_axle_count"] = {"asks": 0}
+        logger.info("AXLE count question opened: session=%s", state.get("session_id"))
+
+
+def _close_axle_count(state: dict, pending: dict, output: Any, user_message: str, result: Any) -> None:
+    asks = int(pending.get("asks") or 0)
+
+    if is_answered(state, "axle_count"):
+        state["pending_axle_count"] = None  # they answered
+        return
+    if "axle_count" in result.no_preference or "axle_count" in (state.get("declined_slots") or []):
+        state["pending_axle_count"] = None
+        return
+
+    reason = state.get("invalid_retry_reason") if state.get("invalid_retry_slot") == "axle_count" else None
+    if reason is None:
+        # The model does not always turn a bare "Tandem." into a number, so their words are
+        # read with the same vocabulary the question offered them.
+        spoken = parse_axle_count_answer(user_message)
+        if spoken is not None and not axle_count_out_of_range(spoken):
+            state.setdefault("slots", {})["axle_count"] = spoken
+            mark_user_value(state, "axle_count")
+            result.stored["axle_count"] = spoken
+            state["pending_axle_count"] = None
+            logger.info("AXLE count %s read from their reply: session=%s", spoken, state.get("session_id"))
+            return
+        if spoken is not None:
+            reason = "axle_range"
+        elif axles.is_no_preference(user_message):
+            record_no_preference(state, ["axle_count"])
+            state["pending_axle_count"] = None
+            return
+        else:
+            reason = "unclear"
+
+    if asks >= axles.MAX_CLARIFY_ASKS:
+        # Two asks spent. Whatever they said, it is no preference now - never a third ask.
+        record_no_preference(state, ["axle_count"])
+        state["pending_axle_count"] = None
+        state["invalid_retry_slot"] = None
+        state["invalid_retry_reason"] = None
+        return
+    state["invalid_retry_slot"] = "axle_count"
+    state["invalid_retry_reason"] = reason
+
+
+def _skip_weight_after_axle_rating(state: dict) -> None:
+    """An axle rating sizes the trailer from the capacity end - don't ask the load weight.
+
+    "How heavy is your load?" exists to size the trailer. Someone who said "7,000 lb axles"
+    has done that themselves, and asking anyway reads as not having listened. The rating
+    already ranks the search in every category.
+    """
+    sources = state.get("slot_sources") or {}
+    rated = any(
+        is_answered(state, slot) and sources.get(slot) != "default"
+        and isinstance(state["slots"][slot], (int, float)) and state["slots"][slot] > 0
+        for slot in _CAPACITY_SLOTS
+    )
+    if not rated:
+        return
+    required = state.get("required_slots") or []
+    skipped = state.setdefault("rule_skipped", {})
+    for slot in list(required):
+        if slot_value_kind(slot) == "payload_lbs" and not is_answered(state, slot):
+            required.remove(slot)
+            skipped[slot] = "they already gave an axle rating"
 
 
 # ------------------------------------------------------------- 6. haul-item suggestion
@@ -488,6 +671,8 @@ def _apply_results_gate(state: dict, output: Any) -> None:
         state.get("pending_keep_filters")
         or state.get("pending_category_switch")
         or state.get("pending_gooseneck_clarification")
+        or state.get("pending_axle_basis")
+        or state.get("pending_axle_count")
         or greeting.contact_gate_applies(state)
     )
 

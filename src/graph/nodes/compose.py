@@ -12,6 +12,7 @@ import re
 from typing import Any
 
 from src.domain import company
+from src.domain import axles
 from src.domain import gooseneck as gooseneck_domain
 from src.graph.nodes import greeting
 from src.tools.questions import mark_asked, next_unanswered_slot, question_text
@@ -22,6 +23,7 @@ _RETRY_PREFIX = {
     "negative": "That came through as a negative number, which I don't think is what you meant.",
     "axle_range": "We carry trailers with one to four axles.",
     "implausible": "That number seems unusual for a trailer, so I want to double-check the amount and unit.",
+    "unclear": "Sorry, I didn't catch that.",
 }
 
 
@@ -623,6 +625,21 @@ def _closing_part(state: dict, output: Any) -> tuple[str, str | None]:
     keep = state.get("pending_keep_filters")
     if keep:
         return _keep_filters_question(keep), None
+
+    # The axle questions, after the confirmations above: those are about the category or the
+    # hitch, which decide what the axles are even for.
+    held = state.get("pending_axle_basis")
+    if held:
+        held["asks"] = int(held.get("asks") or 0) + 1
+        return axles.BASIS_QUESTION, None
+    count = state.get("pending_axle_count")
+    if count and state.get("category"):
+        count["asks"] = int(count.get("asks") or 0) + 1
+        question = axles.COUNT_QUESTION
+        if state.get("invalid_retry_slot") == "axle_count":
+            prefix = _RETRY_PREFIX.get(str(state.get("invalid_retry_reason")), "")
+            question = f"{prefix} {question.removeprefix('And ').capitalize()}" if prefix else question
+        return question, None
 
     # 4. No category yet. There is no slot to ask about, but there is still a conversation
     #    to carry: the contact opener on turn one, and "what will you be hauling?" after

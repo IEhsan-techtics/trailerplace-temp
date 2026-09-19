@@ -275,6 +275,8 @@ class ToolRunner:
             ("pending_keep_filters", "whether to keep their earlier answers"),
             ("pending_category_switch", "whether to switch category"),
             ("pending_gooseneck_clarification", "whether they meant the gooseneck hitch or the brand"),
+            ("pending_axle_basis", "whether their axle capacity is per axle or the total"),
+            ("pending_axle_count", "how many axles they want"),
         ):
             if self.state.get(key):
                 return (

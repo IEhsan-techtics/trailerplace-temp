@@ -365,6 +365,9 @@ class Script:
     no_features: bool = False            # the feature list must end empty
     rerank: bool | None = None           # the gpt-5-nano feature reranker must (not) have run
     top_has: str | None = None           # the first listing shown must carry this word
+    slots_equal: dict[str, Any] = field(default_factory=dict)  # slot -> value it must end with
+    absent: tuple[str, ...] = ()         # slots that must end unset
+    reply_lacks: tuple[tuple[int, str], ...] = ()  # (step, text) the reply must NOT contain
 
 
 def _bump(cargo: str) -> dict[str, str]:
@@ -495,6 +498,56 @@ SCRIPTS: list[Script] = [
     Script("features", "size, colour, hitch and axles are not features",
            [OPENING, "I need a black 20 ft gooseneck flatbed with tandem 7000 lb axles", QUALIFY],
            answers=_bump("lumber"), no_features=True, rerank=False, category="Flatbed"),
+
+    # --- axle capacity: per axle or total, how many, and what it is not -------------
+    # The axle answers are scripted rather than left to QUALIFY: the auto-customer answers
+    # the slot questions, and "per axle or total?" / "how many axles?" are not slots.
+    Script("axles", "unclear capacity -> per axle, then tandem",
+           [OPENING, "I need a dump trailer for gravel with 14,000 lbs of axle capacity",
+            "per axle", "tandem", QUALIFY],
+           slots_equal={"axle_capacity": 14000.0, "axle_count": 2}, absent=("total_axle_capacity_lbs",),
+           not_asked=("payload_capacity",), reply_has=((1, "per axle, or the total"),
+                                                        (2, "how many axles")),
+           category="Dump"),
+    Script("axles", "unclear capacity -> total, no count question",
+           [OPENING, "Looking for a flatbed with 14,000 lbs of axle capacity",
+            "that's the total across both", QUALIFY],
+           answers=_bump("lumber"), slots_equal={"total_axle_capacity_lbs": 14000.0},
+           absent=("axle_capacity",), not_asked=("payload_capacity",),
+           reply_has=((1, "per axle, or the total"),), reply_lacks=((2, "how many axles"),),
+           category="Flatbed"),
+    Script("axles", "unclear twice -> dropped, never asked again",
+           [OPENING, "I need a utility trailer with 10,000 lbs of axle capacity",
+            "hmm, I'm not sure", "no idea honestly", QUALIFY],
+           answers=_bump("furniture and boxes"),
+           absent=("axle_capacity", "total_axle_capacity_lbs"),
+           reply_has=((1, "per axle, or the total"), (2, "per axle, or the total")),
+           reply_lacks=((3, "per axle, or the total"),), category="Utility"),
+    Script("axles", "7,000 lb axles -> per axle at once, bare 'Tandem.'",
+           [OPENING, "I want a tilt trailer with 7,000 lb axles", "Tandem.", QUALIFY],
+           answers=_bump("a small tractor"),
+           slots_equal={"axle_capacity": 7000.0, "axle_count": 2},
+           not_asked=("payload_capacity",), reply_has=((1, "how many axles"),),
+           reply_lacks=((1, "per axle, or the total"),), category="Tilt"),
+    Script("axles", "5 axles -> one to four, asked again",
+           [OPENING, "I need a dump trailer with 7000 lb axles", "5 axles", "two", QUALIFY],
+           answers=_bump("gravel"), slots_equal={"axle_capacity": 7000.0, "axle_count": 2},
+           reply_has=((2, "one to four"),), category="Dump"),
+    Script("axles", "tandem 5200 lb torsion axles -> count, rating, feature",
+           [OPENING, "Equipment trailer please, tandem 5200 lb torsion axles", QUALIFY],
+           answers=_bump("a mini excavator"),
+           slots_equal={"axle_capacity": 5200.0, "axle_count": 2},
+           features=("torsion",), not_features=("tandem", "5200"),
+           not_asked=("payload_capacity",), reply_lacks=((1, "how many axles"),),
+           category="Equipment"),
+    Script("axles", "quadruple axles -> 4, no rating so weight still asked",
+           [OPENING, "I need a flatbed with quadruple axles", QUALIFY],
+           answers=_bump("steel beams"), slots_equal={"axle_count": 4},
+           asked=("payload_capacity",), category="Flatbed"),
+    Script("axles", "'5k axles' as the load weight -> not a load",
+           [OPENING, "I need a dump trailer", "gravel", "5k axles", QUALIFY],
+           absent=("payload_capacity",), slots_equal={"axle_capacity": 5000.0},
+           category="Dump"),
 
     # --- emails to the team ------------------------------------------------------------
     Script("email", "FAQ - financing", [TESTER, "Do you offer financing on your trailers?"],
@@ -685,6 +738,14 @@ def _check_script(result: Result, script: Script, state: dict[str, Any], repeats
     for step in script.no_listings_at:
         reply = result.turns[step].bot if step < len(result.turns) else ""
         add((f"no listings on reply {step + 1}", "http" not in reply, reply[:120]))
+    for slot, value in script.slots_equal.items():
+        add((f"{slot} = {value}", slots.get(slot) == value, f"got {slots.get(slot)!r}"))
+    for slot in script.absent:
+        add((f"{slot} not stored", slots.get(slot) in (None, "", []), f"got {slots.get(slot)!r}"))
+    for step, text in script.reply_lacks:
+        reply = result.turns[step].bot if step < len(result.turns) else ""
+        add((f"reply {step + 1} does not say '{text}'",
+             text.lower() not in reply.lower().replace("’", "'"), reply[:120]))
     for step, text in script.reply_has:
         reply = result.turns[step].bot if step < len(result.turns) else ""
         add((f"reply {step + 1} says '{text}'", text.lower() in reply.lower().replace("’", "'"), ""))
@@ -820,7 +881,7 @@ def main() -> int:
     categories = [c for c in CATEGORIES if not args.only or c in args.only.split(",")]
     scenarios = [s for s in args.scenarios.split(",") if s]
     jobs: list[Any] = [(c, s, i) for i, c in enumerate(categories) for s in scenarios]
-    groups = {"rules", "category", "email", "flow", "features"} if args.scripted == "all" else set(filter(None, args.scripted.split(",")))
+    groups = {"rules", "category", "email", "flow", "features", "axles"} if args.scripted == "all" else set(filter(None, args.scripted.split(",")))
     jobs += [script for script in SCRIPTS if script.group in groups]
     started = datetime.now()
     print(f"Running {len(jobs)} conversations against {args.base_url} ({health.get('model')})")

@@ -61,6 +61,20 @@ _MEASUREMENT_SLOTS = frozenset(
     {"length", "width", "height", "payload_capacity", "axle_capacity", "total_axle_capacity_lbs"}
 )
 
+# The only slots an axle phrase may answer.
+_AXLE_SLOTS = frozenset({"axle_capacity", "total_axle_capacity_lbs", "axle_count"})
+
+
+def _axle_phrase_for_other_slot(slot: str, raw: Any) -> bool:
+    """An axle rating offered as the answer to some other slot ("5k axles" as the load weight).
+
+    Seen in New Prompt: "a 20ft livestock with 5k axles" came back as the load weight, which
+    invented a 5,000 lb load the customer never mentioned and filtered the search on it. The
+    axle number still reaches its own slot through the model's axle fields.
+    """
+    return slot not in _AXLE_SLOTS and slot_map.mentions_an_axle(raw)
+
+
 # Slots this module is willing to write. Anything else the model invents is ignored rather
 # than stored, which is what stops a hallucinated slot name reaching the search filters.
 _SLOT_TARGETS = frozenset(_EXTRACTED_TO_SLOT.values()) | {
@@ -211,6 +225,10 @@ def _apply_quantities(state: dict, output: Any, category: str, writable: frozens
         if slot in settled or slot not in writable or not quantity_math.supports(slot):
             continue
         raw = str(getattr(quantity, "raw_text", "") or "") or raw_by_slot.get(slot, "")
+        if _axle_phrase_for_other_slot(slot, raw):
+            logger.info("FILTER ignored an axle phrase for another slot: slot=%s raw=%r", slot, raw)
+            settled.add(slot)
+            continue
 
         # The sign is the model's reading too (brief S22 still re-asks a negative). Python used
         # to overrule it from the raw text, and a regex cannot read people: it took the dash
@@ -274,6 +292,10 @@ def apply_extracted_fields(state: dict, output: Any) -> FieldApplication:
     #    from their words.
     for slot, raw in raw_by_slot.items():
         if slot in writable and slot not in settled:
+            if _axle_phrase_for_other_slot(slot, raw):
+                logger.info("FILTER ignored an axle phrase for another slot: slot=%s raw=%r", slot, raw)
+                settled.add(slot)
+                continue
             _apply_one(state, slot, raw, category, result)
 
     # 3. The model's converted numbers fill only the gaps.
