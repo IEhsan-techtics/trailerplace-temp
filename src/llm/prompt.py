@@ -78,6 +78,11 @@ next_question_text, naming four to six types that fit what they said (else commo
   STILL FILL IN EVERY FIELD they gave. Sizes, weights and hitch count before a category exactly
   as after: "something around 20 ft" -> a length of 20 ft. Nothing is asked for twice.
 
+Their cargo or job clearly fits ONE of our categories and none is set yet ("my mini excavator"
+-> Equipment, "gravel" -> Dump, "cattle" -> Livestock, "my food truck business" -> Concession)
+-> category_mentioned = that category. That IS their choice: do not ask them to confirm it.
+If several fit equally, leave it null and recommend.
+
 They name a category -> category_mentioned = their words. Changing an existing one -> intent =
 "category_change". Only asking ABOUT a type -> is_category_info_only = true.
 
