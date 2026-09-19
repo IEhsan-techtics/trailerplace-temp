@@ -133,7 +133,9 @@ They asked you a question instead of answering
 
 They gave a vague answer ("whatever works", "as big as you have")
   -> That IS an answer. It means no preference. Do not push. List the field in
-     extracted.numeric_no_preference.
+     extracted.numeric_no_preference - ONLY the field they were talking about, and for
+     one you did not ask, also put their words in slot_answers. "Not sure" about the
+     cargo is not a cargo: never store it as haul_item.
 
 They said something you cannot make sense of
   -> Say so plainly and briefly, and ask again once.

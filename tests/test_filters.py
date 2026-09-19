@@ -144,9 +144,33 @@ def test_vague_answer_is_recorded_as_no_preference():
 
 
 def test_numeric_no_preference_from_the_model_is_honoured():
-    state = state_with()
+    state = state_with(pending_slot="width")
     result = apply_extracted_fields(state, Output(make_extracted(numeric_no_preference=["width"])))
     assert "width" in result.no_preference
+
+
+def test_no_preference_for_a_question_nobody_asked_is_ignored():
+    """Live run: "just some random stuff" about the cargo also flagged the weight, and a
+    question never asked was skipped."""
+    state = state_with(pending_slot="haul_item")
+    output = Output(
+        make_extracted(numeric_no_preference=["haul_item", "payload_capacity"]),
+        slot_answers=[SlotAnswer(slot_name="haul_item", raw_answer="not sure")],
+    )
+    result = apply_extracted_fields(state, output)
+    assert "haul_item" in result.no_preference
+    assert "payload_capacity" not in result.no_preference
+
+
+def test_a_volunteered_no_preference_with_their_words_still_counts():
+    """"Any length is fine" while being asked the cargo: they did speak about the length."""
+    state = state_with(pending_slot="haul_item")
+    output = Output(
+        make_extracted(numeric_no_preference=["length"]),
+        slot_answers=[SlotAnswer(slot_name="length", raw_answer="any length is fine")],
+    )
+    result = apply_extracted_fields(state, output)
+    assert "length" in result.no_preference
 
 
 # ---------------------------------------------------------------------- hitch type (S21)
@@ -179,6 +203,25 @@ def test_broad_haul_item_is_kept_verbatim():
     output = Output(slot_answers=[SlotAnswer(slot_name="haul_item", raw_answer="just random stuff")])
     apply_extracted_fields(state, output)
     assert state["slots"]["haul_item"] == "just random stuff"
+
+
+@pytest.mark.parametrize("raw", ["Hmm, not sure.", "no idea", "I don’t know yet", "idk", "whatever"])
+def test_a_non_answer_is_never_stored_as_the_cargo(raw):
+    """Live run: "Hmm, not sure." was stored as haul_item, so the question could never be
+    skipped and the search carried it as the cargo."""
+    state = state_with()
+    output = Output(slot_answers=[SlotAnswer(slot_name="haul_item", raw_answer=raw)])
+    result = apply_extracted_fields(state, output)
+    assert "haul_item" not in state["slots"]
+    assert "haul_item" in result.no_preference
+
+
+@pytest.mark.parametrize("raw", ["not sure, probably gravel", "nothing heavy, just mulch"])
+def test_a_hedged_answer_that_still_names_the_cargo_is_stored(raw):
+    state = state_with()
+    output = Output(slot_answers=[SlotAnswer(slot_name="haul_item", raw_answer=raw)])
+    apply_extracted_fields(state, output)
+    assert state["slots"]["haul_item"] == raw
 
 
 # ------------------------------------------------------------------ invented slot names

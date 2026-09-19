@@ -528,6 +528,43 @@ def is_impossible_measurement(category: str, slot_name: str, value: Any) -> bool
     return bool(re.search(r"(?<![\d.])-\s*\d", text))
 
 
+# Words that say "I don't know / don't mind" and nothing else. A free-text answer made of
+# ONLY these is no answer at all: a live run stored "Hmm, not sure." as the cargo and the
+# question could never be skipped. Deliberately a whole-answer test, not a keyword hit -
+# "not sure, probably gravel" still stores, because what is left ("probably gravel") says
+# something. And a BROAD answer is not a non-answer: "just random stuff" tells us they haul
+# a mix (brief S20) and is kept, where "not sure" tells us nothing.
+_NON_ANSWER_PHRASES = tuple(sorted((
+    "not sure", "not really sure", "i'm not sure", "im not sure", "i am not sure", "unsure",
+    "no idea", "i have no idea", "no clue", "not a clue", "dunno", "idk", "i don't know",
+    "i dont know", "don't know", "dont know", "not certain", "can't say", "cant say",
+    "no preference", "doesn't matter", "doesnt matter", "does not matter", "don't mind",
+    "dont mind", "i don't mind", "whatever", "anything", "anything really", "whatever works",
+    "haven't decided", "havent decided", "not decided yet", "not yet", "n/a", "na", "none",
+    "nothing specific", "nothing in particular",
+), key=len, reverse=True))
+_FILLER = ("hmm", "hm", "um", "umm", "uh", "er", "well", "honestly", "really", "to be honest",
+           "sorry", "yet", "right now", "at the moment", "just", "i guess", "tbh", "oh", "ok", "okay", "lol")
+
+
+def _whole_words(phrases: tuple[str, ...]) -> re.Pattern[str]:
+    ordered = sorted(phrases, key=len, reverse=True)
+    return re.compile(r"(?<![\w'])(?:" + "|".join(re.escape(p) for p in ordered) + r")(?![\w'])")
+
+
+_NON_ANSWER_RE = _whole_words(_NON_ANSWER_PHRASES)
+_FILLER_RE = _whole_words(_FILLER)
+
+
+def is_non_answer(value: Any) -> bool:
+    """True when a free-text answer says nothing beyond "not sure" / "no idea" / "whatever"."""
+    if not isinstance(value, str):
+        return False
+    text = re.sub(r"[^\w\s'/]", " ", value.lower().replace("’", "'"))
+    text, hits = _NON_ANSWER_RE.subn(" ", text)
+    return hits > 0 and not _FILLER_RE.sub(" ", text).strip()
+
+
 def normalize_answer_for_slot(category: str, slot_name: str, value: Any) -> Any:
     """The value to STORE under ``slot_name`` itself.
 
@@ -541,7 +578,7 @@ def normalize_answer_for_slot(category: str, slot_name: str, value: Any) -> Any:
     """
     kind = _SLOT_VALUE_KIND.get(slot_name)
     if kind is None:
-        return value
+        return None if is_non_answer(value) else value
     if kind == "hitch_type":
         return normalize_hitch_answer(value)
     if kind == "subcategory":

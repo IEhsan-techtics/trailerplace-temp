@@ -286,11 +286,19 @@ def apply_extracted_fields(state: dict, output: Any) -> FieldApplication:
                 continue
             _apply_one(state, slot, value, category, result)
 
-        # Slots the model itself flagged as "they stated no preference" (brief S18).
+        # Slots the model itself flagged as "they stated no preference" (brief S18) - but
+        # only a slot the customer was actually answering. A live run had "just some random
+        # stuff", said about the cargo, also flag the weight, and a question never asked was
+        # skipped. Volunteering "any size is fine" still counts: the model puts their words
+        # for that slot in slot_answers, which is what raw_by_slot holds.
+        addressed = set(raw_by_slot) | {state.get("pending_slot")}
         for slot in getattr(extracted, "numeric_no_preference", None) or []:
-            if slot in writable and slot not in result.stored:
-                if slot not in result.no_preference:
-                    result.no_preference.append(slot)
+            if slot not in writable or slot in result.stored or slot in result.no_preference:
+                continue
+            if slot not in addressed:
+                logger.info("FILTER ignored no-preference: slot=%s (not asked, not addressed)", slot)
+                continue
+            result.no_preference.append(slot)
 
         _apply_features(state, extracted)
 
