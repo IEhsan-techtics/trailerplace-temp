@@ -129,8 +129,17 @@ the unit they meant, and raw_text = their exact words. Do not convert units - Py
 
 OTHER FIELDS
 - length / width / height are in FEET; payload_capacity is the WEIGHT OF THE LOAD in pounds.
-- axle_capacity is the rating of ONE axle ("7,000 lb axles" -> 7000). "14,000 lbs across both
-  axles" -> total_axle_capacity_lbs = 14000.
+- AXLES. A weight tied to the axles ("7,000 lb axles", "axle capacity of 5200") is an axle
+  rating; a weight of the cargo ("a 7000 lb skid steer") is payload_capacity - never swap them.
+  axle_capacity is the rating of ONE axle; total_axle_capacity_lbs is all of them together.
+  Set axle_capacity_basis:
+    "7,000 lb axles", "axles rated 3500" -> per_axle, axle_capacity 7000
+    "2-7,000# axles", "tandem 5200 lb axles" -> per_axle, and axle_count 2
+    "14k combined", "14,000 lbs across both axles" -> total, total_axle_capacity_lbs 14000
+    "14,000 lbs of axle capacity" -> unclear, axle_capacity 14000 - the system asks which.
+  Until they say which, never call the number per axle or total in your reply.
+  axle_count: single 1, tandem / double / dual 2, tri / triple 3, quad / quadruple 4 - only when
+  the word is about the axles ("single bin", "super singles" are not). Never guess it.
 - hitch_type is ONLY "Bumper Pull" or "Gooseneck". Either / any / no preference -> null.
 - haul_item is their own words, even vague ("just random stuff").
 - non_metadata_features: equipment ON the trailer that has no field of its own, in their words:
@@ -340,6 +349,19 @@ def state_block(state: dict) -> str:
             f"- You suggested switching to {switch.get('suggested')} because they mentioned "
             f"\"{switch.get('from_haul_item')}\". They are answering that now - set "
             f"category_confirm_answer to yes or no."
+        )
+
+    held = state.get("pending_axle_basis")
+    if held:
+        lines.append(
+            f"- You asked whether {_format_value(held.get('value'))} lbs is per axle or the total "
+            "across all axles. They are answering that now: set axle_capacity_basis from their "
+            "words, and do not call the number either one until they have."
+        )
+    if state.get("pending_axle_count"):
+        lines.append(
+            "- You asked how many axles they want (we carry 1 to 4). They are answering that now: "
+            "set axle_count."
         )
 
     gooseneck = state.get("pending_gooseneck_clarification")

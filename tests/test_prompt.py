@@ -44,7 +44,11 @@ def qualified_state(**kwargs):
 # Raised from 13,500 for the non_metadata_features rule (~580 chars). Without it the model
 # filed cargo and uses as features ("scissor lift", "mobile coffee business"), and each one
 # sent every candidate listing to the gpt-5-nano reranker for a ranking nothing could match.
-MAX_SYSTEM_PROMPT_CHARS = 14_000
+#
+# Raised from 14,000 for the AXLES rule (~750 chars; live 14,303). Without it the model called
+# a bare "14,000 lbs of axle capacity" TOTAL in the same reply that asked per axle or total -
+# half of the clarification questions in the live axles run contradicted themselves.
+MAX_SYSTEM_PROMPT_CHARS = 14_500
 
 
 def test_the_system_prompt_stays_short():
