@@ -10,7 +10,7 @@ import logging
 import pytest
 
 from src.graph.state import new_state
-from src.llm.schemas import ExtractedFields, SlotAnswer
+from src.llm.schemas import ExtractedFields, Quantity, SlotAnswer
 from src.tools.filters import apply_extracted_fields, raw_text_for_slots
 
 
@@ -21,7 +21,7 @@ def make_extracted(**kwargs):
         axle_capacity=None, total_axle_capacity_lbs=None, axle_count=None,
         axle_capacity_basis=None, hitch_type=None, haul_item=None,
         brand_preference=None, non_metadata_features=[], numeric_no_preference=[],
-        raw_numeric_spans=[],
+        quantities=[],
     )
     defaults.update(kwargs)
     return ExtractedFields(**defaults)
@@ -43,58 +43,52 @@ def state_with(category="Dump", **kwargs):
 
 
 # ------------------------------------------------------------ the live-probe regression
-def test_raw_range_overrides_the_models_midpoint():
-    """gpt-5.6-luna really did answer 19.0 for "18-20 ft". Brief S15 says 18."""
+def q(slot, raw, low, high=None, unit="ft"):
+    return Quantity(slot_name=slot, raw_text=raw, low=low, high=high, unit=unit)
+
+
+def test_a_range_resolves_to_its_smaller_end_in_python():
+    """The model hands over both ends; Python picks the smaller - never an average (S15)."""
     state = state_with()
-    output = Output(
-        make_extracted(
-            length=19.0,
-            raw_numeric_spans=[SlotAnswer(slot_name="length", raw_answer="18-20 ft")],
-        )
-    )
+    output = Output(make_extracted(length=19.0, quantities=[q("length", "18-20 ft", 20, 18)]))
     apply_extracted_fields(state, output)
     assert state["slots"]["length"] == 18.0
 
 
-def test_divergence_between_python_and_the_model_is_logged(caplog):
+def test_where_the_regex_parser_would_disagree_is_logged(caplog):
     state = state_with()
-    output = Output(
-        make_extracted(
-            length=19.0,
-            raw_numeric_spans=[SlotAnswer(slot_name="length", raw_answer="18-20 ft")],
-        )
-    )
+    output = Output(make_extracted(quantities=[q("width", "seven and a half feet", 7.5)]))
     with caplog.at_level(logging.WARNING, logger="src.tools.filters"):
         apply_extracted_fields(state, output)
-    assert any("divergence" in r.message for r in caplog.records)
+    assert state["slots"]["width"] == 7.5
+    assert any("QUANTITY divergence" in r.message for r in caplog.records)
 
 
 def test_raw_negative_overrides_a_sign_flipped_model_number():
-    """The model hands back +500.0 for "-500 lbs"; the raw text must still trigger a re-ask."""
+    """The model dropped the minus; the customer's own words still carry it (S22)."""
     state = state_with()
-    output = Output(
-        make_extracted(
-            payload_capacity=500.0,
-            raw_numeric_spans=[
-                SlotAnswer(slot_name="payload_capacity", raw_answer="-500 lbs")
-            ],
-        )
-    )
+    output = Output(make_extracted(
+        payload_capacity=500.0, quantities=[q("payload_capacity", "-500 lbs", 500, unit="lb")],
+    ))
     result = apply_extracted_fields(state, output)
     assert result.invalid_slot == "payload_capacity"
     assert result.invalid_reason == "negative"
     assert "payload_capacity" not in state["slots"]
 
 
-def test_slot_answers_outrank_raw_numeric_spans():
+def test_a_quantity_outranks_the_raw_text_parse():
     state = state_with()
     output = Output(
-        make_extracted(
-            length=30.0,
-            raw_numeric_spans=[SlotAnswer(slot_name="length", raw_answer="30 ft")],
-        ),
-        slot_answers=[SlotAnswer(slot_name="length", raw_answer="18-20 ft")],
+        make_extracted(quantities=[q("payload_capacity", "three and a half thousand pounds", 3500, unit="lb")]),
+        slot_answers=[SlotAnswer(slot_name="payload_capacity", raw_answer="three and a half thousand pounds")],
     )
+    apply_extracted_fields(state, output)
+    assert state["slots"]["payload_capacity"] == 3500.0
+
+
+def test_slot_answers_still_parse_when_no_quantity_came_back():
+    state = state_with()
+    output = Output(make_extracted(length=30.0), slot_answers=[SlotAnswer(slot_name="length", raw_answer="18-20 ft")])
     apply_extracted_fields(state, output)
     assert state["slots"]["length"] == 18.0
 
@@ -198,8 +192,7 @@ def test_a_slot_name_the_model_invents_is_ignored():
 # ------------------------------------------------------------------------- helper itself
 def test_raw_text_helper_merges_both_sources_with_slot_answers_winning():
     output = Output(
-        make_extracted(raw_numeric_spans=[SlotAnswer(slot_name="length", raw_answer="A"),
-                                          SlotAnswer(slot_name="width", raw_answer="B")]),
+        make_extracted(quantities=[q("length", "A", 1), q("width", "B", 1)]),
         slot_answers=[SlotAnswer(slot_name="length", raw_answer="C")],
     )
     assert raw_text_for_slots(output) == {"length": "C", "width": "B"}

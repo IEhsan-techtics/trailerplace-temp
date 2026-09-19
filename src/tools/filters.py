@@ -1,6 +1,16 @@
 """Turn one structured output into stored slot values. No LLM calls, no I/O.
 
-The rule that shapes this whole module: **raw customer text beats the model's arithmetic.**
+Numbers come in three ways, in this order of trust:
+
+1. ``extracted.quantities`` - the model READS the amount ("seven and a half feet" is 7.5 ft,
+   a unitless "144 x 72" is inches) and ``src/domain/quantities`` does the arithmetic. A live
+   run showed the regex parser misreading exactly this kind of everyday wording, so the
+   language is the model's job and the conversion is ours.
+2. The customer's raw words, parsed in Python - the fallback when no quantity came back.
+3. The model's own converted number, for anything neither of the above covers.
+
+Before the quantities existed, the rule was **raw customer text beats the model's
+arithmetic**, and it still holds for the parts that are arithmetic:
 
 ``ExtractedFields`` numerics arrive already converted by the model, which makes any rule
 that depends on the ORIGINAL WORDING unenforceable on them:
@@ -10,16 +20,16 @@ that depends on the ORIGINAL WORDING unenforceable on them:
 * brief S22 (a negative measurement is re-asked, never sign-flipped) - once "-500 lbs" has
   become the float 500.0 it is indistinguishable from an honest 500.
 
-So whenever the customer's verbatim wording for a slot is available - from ``slot_answers``
-or from ``extracted.raw_numeric_spans`` - that text is what gets parsed, and the model's
-number is used only as a fallback for slots no raw text covers. Whatever the input form,
-what lands in the state is a NUMBER (20.0, 18.5) and never a word.
+So a range is resolved to its smaller end in Python, never by the model, and the sign is
+read off the customer's own words. Whatever the input form, what lands in the state is a
+NUMBER (20.0, 18.5) and never a word.
 """
 from __future__ import annotations
 
 import logging
 from typing import Any
 
+from src.domain import quantities as quantity_math
 from src.domain import slot_map
 from src.rules.engine import is_default, mark_user_value
 from src.rules.store import current_rules
@@ -87,14 +97,13 @@ class FieldApplication:
 def raw_text_for_slots(output: Any) -> dict[str, str]:
     """Every slot the customer gave verbatim wording for this turn.
 
-    ``raw_numeric_spans`` first, then ``slot_answers`` - the latter is the model's explicit
-    "this message answers that question", so it wins when both mention a slot.
+    The quantities' ``raw_text`` first, then ``slot_answers`` - the latter is the model's
+    explicit "this message answers that question", so it wins when both mention a slot.
     """
     raw: dict[str, str] = {}
-    spans = getattr(getattr(output, "extracted", None), "raw_numeric_spans", None) or []
-    for span in spans:
-        name = (getattr(span, "slot_name", "") or "").strip()
-        text = getattr(span, "raw_answer", None)
+    for quantity in getattr(getattr(output, "extracted", None), "quantities", None) or []:
+        name = (getattr(quantity, "slot_name", "") or "").strip()
+        text = getattr(quantity, "raw_text", None)
         if name and text is not None and str(text).strip():
             raw[name] = str(text)
     for answer in getattr(output, "slot_answers", None) or []:
@@ -189,6 +198,60 @@ def _apply_features(state: dict, extracted: Any) -> None:
         mark_user_value(state, "hitch_type")
 
 
+def _apply_quantities(state: dict, output: Any, category: str, writable: frozenset[str],
+                      raw_by_slot: dict[str, str], result: FieldApplication) -> set[str]:
+    """Store every amount the model read. Returns the slots it settled, one way or another.
+
+    A quantity whose unit does not fit its slot is not settled here, so the raw-text parse
+    still gets its turn - a bad unit costs nothing but the shortcut.
+    """
+    settled: set[str] = set()
+    for quantity in getattr(getattr(output, "extracted", None), "quantities", None) or []:
+        slot = (getattr(quantity, "slot_name", "") or "").strip()
+        if slot in settled or slot not in writable or not quantity_math.supports(slot):
+            continue
+        raw = str(getattr(quantity, "raw_text", "") or "") or raw_by_slot.get(slot, "")
+
+        # The sign, from THEIR words (brief S22) - the model has been seen flipping it.
+        negative = float(getattr(quantity, "low", 0) or 0) < 0 or is_impossible_measurement(category, slot, raw)
+        if slot in _MEASUREMENT_SLOTS and negative:
+            result.invalid_slot, result.invalid_reason, result.invalid_raw = slot, "negative", raw
+            logger.info("FILTER reject: slot=%s reason=negative raw=%r", slot, raw)
+            settled.add(slot)
+            continue
+
+        value = quantity_math.to_canonical(slot, quantity)
+        if value is None:
+            logger.info("QUANTITY unit does not fit: slot=%s unit=%s raw=%r", slot, getattr(quantity, "unit", None), raw)
+            continue
+        if quantity_math.check(slot, value) == "implausible":
+            result.invalid_slot, result.invalid_reason, result.invalid_raw = slot, "implausible", raw
+            logger.info("FILTER reject: slot=%s reason=implausible value=%s raw=%r", slot, value, raw)
+            settled.add(slot)
+            continue
+
+        _log_parser_divergence(category, slot, raw, value)
+        _apply_one(state, slot, value, category, result)
+        settled.add(slot)
+    return settled
+
+
+def _log_parser_divergence(category: str, slot: str, raw: str, value: float) -> None:
+    """Say so when the regex parser would have stored something else.
+
+    Nothing is decided by it. It is how we can see, in the logs, every answer the old
+    fallback would have got wrong - and how a model misreading shows up just as clearly.
+    """
+    if not raw:
+        return
+    parsed = normalize_answer_for_slot(category, slot, raw)
+    if isinstance(parsed, (int, float)) and abs(float(parsed) - value) > max(0.1, value * 0.03):
+        logger.warning(
+            "QUANTITY divergence: slot=%s raw=%r model=%s python_parser=%s (model wins)",
+            slot, raw, value, parsed,
+        )
+
+
 def apply_extracted_fields(state: dict, output: Any) -> FieldApplication:
     """Apply everything the customer stated this turn to ``state["slots"]``.
 
@@ -201,15 +264,21 @@ def apply_extracted_fields(state: dict, output: Any) -> FieldApplication:
     raw_by_slot = raw_text_for_slots(output)
     writable = _writable_slots()
 
-    # 1. Raw text wins. Anything the customer worded themselves is parsed from their words.
+    # 1. The amounts the model read, converted here.
+    settled = _apply_quantities(state, output, category, writable, raw_by_slot, result)
+
+    # 2. Raw text for everything else. Anything the customer worded themselves is parsed
+    #    from their words.
     for slot, raw in raw_by_slot.items():
-        if slot in writable:
+        if slot in writable and slot not in settled:
             _apply_one(state, slot, raw, category, result)
 
-    # 2. The model's converted numbers fill only the gaps.
+    # 3. The model's converted numbers fill only the gaps.
     if extracted is not None:
         for field, slot in _EXTRACTED_TO_SLOT.items():
             value = getattr(extracted, field, None)
+            if slot in settled:
+                continue
             if slot in raw_by_slot:
                 _log_divergence(slot, raw_by_slot[slot], value, result)
                 continue

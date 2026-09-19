@@ -166,15 +166,17 @@ They asked what TYPES you carry ("what kinds do you have?")
 _FIELDS = """
 FILLING IN THE FIELDS
 
-Always copy their exact wording into raw_numeric_spans for every number you read.
-Example: they say "around 18-20 ft" -> length = 18, and raw_numeric_spans gets
-{slot_name: "length", raw_answer: "18-20 ft"}. Copy their text exactly. Do not tidy it.
-
-- A RANGE means the SMALLEST number. "18-20 ft" is 18. Never the middle, never the biggest.
-- "about", "roughly", "~" are fine. "about 20 ft" is 20.
-- Convert units. "3 tons" is 6000 lbs. "2 yards" is 6 ft.
-- Never turn a minus into a plus. "-500 lbs" stays -500 in raw_answer.
-- If they give no number, leave the field null. Do not guess one.
+EVERY amount they state goes into extracted.quantities: the number as they MEANT it, in the
+unit they meant, plus their exact words. Do not convert units - that is done for you.
+  "around 18-20 ft"        -> {slot_name: "length", low: 18, high: 20, unit: "ft", raw_text: "around 18-20 ft"}
+  "seven and a half feet"  -> low 7.5, unit "ft"      "three and a half thousand lbs" -> low 3500, unit "lb"
+  "a ton and a half"       -> low 1.5, unit "ton"     "twenty yard bins" -> bin_size, low 20, unit "yd"
+  "144 x 72 inches" (cargo size) -> length 144 in, width 72 in, and cargo_size 144 in.
+- NO UNIT? Use trailer sense: a width is 4-8.5 ft, a length 5-53 ft, a payload 500-30,000 lb,
+  a bin 10-40 yd. So a bare "144 x 72" is inches and a bare "20" for a length is feet.
+- A RANGE: give both ends. The SMALLEST is what counts - never average them.
+- Never drop a minus. "-500 lbs" is low -500.
+- If they give no number, add nothing. Do not guess one.
 - Fill these in WHENEVER they are said, category or no category.
 
 length / width / height are in FEET.
@@ -416,6 +418,7 @@ def state_block(state: dict) -> str:
         why = {
             "negative": "they gave a negative number",
             "axle_range": "we only carry 1 to 4 axles",
+            "implausible": "that number is far outside any trailer size, so the unit was probably misread - confirm it with them",
         }.get(str(reason), "that value did not work")
         lines.append(f"- Ask about {retry} once more: {why}.")
 

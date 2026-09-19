@@ -54,7 +54,7 @@ def empty_output(reason: str = "") -> ChatbotTurnOutput:
             axle_capacity=None, total_axle_capacity_lbs=None, axle_count=None,
             axle_capacity_basis=None, hitch_type=None, haul_item=None,
             brand_preference=None, non_metadata_features=[], numeric_no_preference=[],
-            raw_numeric_spans=[],
+            quantities=[],
         ),
         slot_answers=[],
         contact=ContactInfo(name=None, email=None, phone=None, declined=False),

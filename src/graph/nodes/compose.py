@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 _RETRY_PREFIX = {
     "negative": "That came through as a negative number, which I don't think is what you meant.",
     "axle_range": "We carry trailers with one to four axles.",
+    "implausible": "Just to check I have the right unit -",
 }
 
 

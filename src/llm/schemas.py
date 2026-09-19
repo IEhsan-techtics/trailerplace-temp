@@ -62,13 +62,43 @@ class ExtractedFields(StrictBaseModel):
         )
     )
     numeric_no_preference: list[str] = Field(description="Slot names where the user gave no numeric preference.")
-    raw_numeric_spans: list["SlotAnswer"] = Field(
+    quantities: list["Quantity"] = Field(
         description=(
-            "For EVERY numeric field you filled above, the customer's verbatim wording for "
-            "it: slot_name is the field name ('length', 'payload_capacity', ...) and "
-            "raw_answer is the exact substring they typed ('18-20 ft', 'about 3 tons', "
-            "'-500 lbs'). Copy their text character for character - do not tidy or convert "
-            "it. Python re-parses this and it OVERRIDES your converted number."
+            "EVERY measurement or amount they stated, read the way a person means it, in the "
+            "unit they meant. Python converts the units and this OVERRIDES the numbers above."
+        )
+    )
+
+
+# Units the customer can mean. Kept to what trailer questions actually use; Python holds
+# the conversion table (src/domain/quantities.py) and rejects a unit that does not fit the slot.
+QuantityUnit = Literal["ft", "in", "yd", "m", "cm", "mm", "lb", "kg", "ton", "tonne", "gal", "l", "cu_yd"]
+
+
+class Quantity(StrictBaseModel):
+    """One amount the customer stated. The LLM reads the language; Python does the arithmetic."""
+
+    slot_name: str = Field(
+        description=(
+            "length, width, height, payload_capacity, axle_capacity, total_axle_capacity_lbs, "
+            "cargo_size, trailer_size, bin_size or tank_capacity. A size with several dimensions "
+            "gives one entry per dimension (length / width / height) plus one for the size slot "
+            "they were answering, carrying its length."
+        )
+    )
+    raw_text: str = Field(description="Their exact words for this amount, character for character.")
+    low: float = Field(
+        description=(
+            "The number AS THEY MEANT IT, in `unit`: 'seven and a half' = 7.5, 'three and a half "
+            "thousand' = 3500, 'a ton and a half' = 1.5. For a range, the smaller end. Keep a minus."
+        )
+    )
+    high: float | None = Field(description="The larger end of a range, else null. Never an average.")
+    unit: QuantityUnit = Field(
+        description=(
+            "The unit they meant. If they gave none, the one that makes sense for a trailer: a "
+            "width is 4-8.5 ft, a length 5-53 ft, a payload 500-30,000 lb, a bin 10-40 yd - so "
+            "'144 x 72' is inches and 'about 20' for a length is feet."
         )
     )
 

@@ -66,7 +66,9 @@ def test_it_carries_the_category_menu_with_use_cases():
 def test_it_states_the_rules_python_also_enforces():
     prompt = system_prompt()
     assert "SMALLEST" in prompt          # S15
-    assert "3 tons" in prompt            # S17
+    # S17: units are converted in Python (src/domain/quantities.py) now; the model is told
+    # to report the unit it heard rather than do the arithmetic itself.
+    assert "Do not convert units" in prompt
     assert "Bumper Pull" in prompt       # S21
     assert "one axle" in prompt.lower()  # per-axle semantics
 
