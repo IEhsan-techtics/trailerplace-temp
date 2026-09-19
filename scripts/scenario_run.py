@@ -353,6 +353,7 @@ class Script:
     no_emails: bool = False              # nothing may reach the outbox
     stash_at: int | None = None          # after this step a request is held, nothing sent yet
     reply_has: tuple[tuple[int, str], ...] = ()   # (step, text) the bot's reply must contain
+    no_listings_at: tuple[int, ...] = ()           # steps whose reply must carry no listings
 
 
 def _bump(cargo: str) -> dict[str, str]:
@@ -407,7 +408,30 @@ SCRIPTS: list[Script] = [
            switch="no", offered="Livestock", category="Enclosed"),
     Script("category", "no category named - cattle",
            [OPENING, "What kind of trailer would you recommend for moving cattle?", QUALIFY],
-           switch="yes", category="Livestock"),
+           switch="yes", category="Livestock", asked=("length",)),
+
+    # --- when listings appear -------------------------------------------------------
+    # 1. Category and every required answer in one message: listings at once.
+    # 2. Category, then the answers: listings when the last one is in.
+    # 3. "Just show me" DURING the questions skips the rest - but a request on the turn that
+    #    picks the category only picks it; the questions start first.
+    Script("flow", "1. everything in one message - listings at once",
+           [OPENING, "I need a 20 ft livestock trailer"],
+           not_asked=("length",), category="Livestock", reply_has=((1, "http"),)),
+    Script("flow", "1. use case + answer in one message - listings at once",
+           [OPENING, "I need a trailer for my food truck business, about 16 ft long"],
+           not_asked=("length",), category="Concession", reply_has=((1, "http"),)),
+    Script("flow", "2. category, then answers",
+           [OPENING, "I need a dump trailer", QUALIFY], answers=_bump("gravel and dirt"),
+           asked=("haul_item", "payload_capacity"), category="Dump"),
+    Script("flow", "3. show me mid-questions skips the rest",
+           [OPENING, "I need a dump trailer", "Just show me what you have"],
+           asked=("haul_item",), not_asked=("payload_capacity",), category="Dump",
+           reply_has=((2, "http"),)),
+    Script("flow", "3. recommendation picks category, then asks first",
+           [OPENING, "Can you recommend a trailer for hauling gravel? Just show me options.",
+            "Enough questions, just show me the trailers"],
+           category="Dump", reply_has=((2, "http"),), no_listings_at=(1,)),
     Script("category", "no category named - excavator",
            [OPENING, "I need something to move my mini excavator between job sites", QUALIFY],
            answers=_bump("a mini excavator"), switch="yes", category="Equipment"),
@@ -558,6 +582,9 @@ def _check_script(result: Result, script: Script, state: dict[str, Any], repeats
     if script.category:
         add((f"category ends as {script.category}", state.get("category") == script.category,
              f"got {state.get('category')!r}"))
+    for step in script.no_listings_at:
+        reply = result.turns[step].bot if step < len(result.turns) else ""
+        add((f"no listings on reply {step + 1}", "http" not in reply, reply[:120]))
     for step, text in script.reply_has:
         reply = result.turns[step].bot if step < len(result.turns) else ""
         add((f"reply {step + 1} says '{text}'", text.lower() in reply.lower().replace("’", "'"), ""))
@@ -639,7 +666,7 @@ def main() -> int:
     categories = [c for c in CATEGORIES if not args.only or c in args.only.split(",")]
     scenarios = [s for s in args.scenarios.split(",") if s]
     jobs: list[Any] = [(c, s, i) for i, c in enumerate(categories) for s in scenarios]
-    groups = {"rules", "category", "email"} if args.scripted == "all" else set(filter(None, args.scripted.split(",")))
+    groups = {"rules", "category", "email", "flow"} if args.scripted == "all" else set(filter(None, args.scripted.split(",")))
     jobs += [script for script in SCRIPTS if script.group in groups]
     started = datetime.now()
     print(f"Running {len(jobs)} conversations against {args.base_url} ({health.get('model')})")

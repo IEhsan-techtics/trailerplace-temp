@@ -450,6 +450,17 @@ def _apply_refined_search(state: dict, output: Any, result: Any) -> None:
 
 
 # --------------------------------------------------------------------- 8. results gate
+def in_question_stage(state: dict) -> bool:
+    """A category is chosen and at least one of its questions has been asked.
+
+    ``asked_counts`` is written by compose, after this node, so on the turn a category is
+    first chosen it is still empty - that turn is never inside the question stage.
+    """
+    if not state.get("category"):
+        return False
+    return any(count > 0 for count in (state.get("asked_counts") or {}).values())
+
+
 def _apply_results_gate(state: dict, output: Any) -> None:
     """Results appear only on an explicit request, or when every required question is done.
 
@@ -458,6 +469,9 @@ def _apply_results_gate(state: dict, output: Any) -> None:
     """
     intent = getattr(output, "intent", "")
     asked_for_results = intent in _SHOW_RESULTS_INTENTS
+    # What they asked for, kept apart from whether it is honoured: compose still owes a
+    # customer with no category the website line (S25).
+    requested_results = asked_for_results
     complete = all_required_resolved(state)
     # Once they have seen listings, a changed requirement is itself a request to look
     # again - they are refining what is in front of them, not starting a new qualification.
@@ -484,10 +498,20 @@ def _apply_results_gate(state: dict, output: Any) -> None:
         # included - runs the same query again and re-prints the same trailers.
         wants_search = asked_for_results or refined
     else:
+        # Before any listings, "just show me" / "what do you recommend" only cuts the
+        # questions short once they have STARTED: a category is set and at least one of its
+        # questions has been put to them. "Recommend a trailer for cattle" picks the
+        # category - it does not skip a question nobody has asked yet.
+        if asked_for_results and not in_question_stage(state):
+            logger.info(
+                "GATE held: session=%s intent=%s before any question was asked",
+                state.get("session_id"), intent,
+            )
+            asked_for_results = False
         wants_search = asked_for_results or complete
 
     state["qualification_complete"] = (
         bool(state.get("category")) and not awaiting_answer and wants_search
     )
-    state["turn_outcome"]["wants_results"] = asked_for_results
+    state["turn_outcome"]["wants_results"] = requested_results
     state["turn_outcome"]["qualification_just_completed"] = complete and not asked_for_results

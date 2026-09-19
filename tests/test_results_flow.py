@@ -46,6 +46,47 @@ def test_the_search_runs_with_whatever_filters_exist(fake_llm, no_search):
     assert no_search[-1]["slots"]["haul_item"] == "gravel"
 
 
+# ------------------------------------------- a request only cuts the questions SHORT
+@pytest.mark.parametrize("intent", ["recommendation_request", "skip_all_show_results"])
+def test_a_request_that_also_picks_the_category_goes_to_the_questions_first(
+    fake_llm, no_search, intent
+):
+    """Live run: "What trailer would you recommend for moving cattle?" went straight to
+    listings. Choosing the category starts the questions; it cannot also skip them."""
+    complete_welcome(fake_llm)
+    fake_llm.push(turn_output(category_mentioned="livestock", intent=intent))
+    result = run_turn("s1", "What kind of trailer would you recommend for moving cattle?")
+
+    assert no_search == [], "no search before a single question was asked"
+    assert result["listings"] == []
+    state = state_after()
+    assert state["category"] == "Livestock"
+    assert state["pending_slot"] == "length", "the first question was asked instead"
+
+
+def test_once_a_question_has_been_asked_show_me_skips_the_rest(fake_llm, no_search):
+    complete_welcome(fake_llm)
+    fake_llm.push(turn_output(category_mentioned="livestock", intent="recommendation_request"))
+    run_turn("s1", "What would you recommend for cattle?")
+
+    fake_llm.push(turn_output(intent="skip_all_show_results", answered_current_question=False))
+    result = run_turn("s1", "just show me what you've got")
+
+    assert len(no_search) == 1
+    assert result["listings"]
+
+
+def test_everything_in_one_message_still_searches_at_once(fake_llm, no_search):
+    """Scenario one: a category and every required answer together need no question."""
+    complete_welcome(fake_llm)
+    fake_llm.push(turn_output(category_mentioned="livestock", intent="category_selection",
+                              slots={"length": "20 ft"}))
+    result = run_turn("s1", "I need a 20 ft livestock trailer")
+
+    assert len(no_search) == 1
+    assert result["listings"]
+
+
 # ------------------------------------------------------ explicit request WITHOUT a category
 def test_show_me_with_no_category_sends_them_to_the_website_and_does_not_search(
     fake_llm, no_search
