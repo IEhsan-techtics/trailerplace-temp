@@ -122,13 +122,15 @@ def no_reply_pass(monkeypatch):
         def __init__(self):
             self.queue = []
             self.calls = 0
+            self.prefetch_flags = []
 
         def push(self, reply):
             self.queue.append(reply)
             return reply
 
-        def __call__(self, state, turn, user_message):
+        def __call__(self, state, turn, user_message, prefetch_search=False):
             self.calls += 1
+            self.prefetch_flags.append(prefetch_search)
             if not self.queue:
                 return None
             from src.llm import usage

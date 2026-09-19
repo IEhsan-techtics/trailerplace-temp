@@ -112,7 +112,9 @@ def _tools_and_reply(state: dict, output: Any, user_message: str) -> None:
     # line rather than to the next qualification question.
     outcome["needs_a_person"] = needs_person
 
-    reply = respond_with_tools(state, output, user_message)
+    # The gate decides WHETHER trailers are shown; the reply pass only presents them. So when
+    # the gate is open the search runs up front instead of being left to the model.
+    reply = respond_with_tools(state, output, user_message, prefetch_search="search" in targets)
     if reply is not None:
         outcome["reply_text"] = reply.assistant_text
         outcome["cited_listing_urls"] = list(reply.cited_listing_urls or [])

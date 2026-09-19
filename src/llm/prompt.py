@@ -149,8 +149,9 @@ They say "gooseneck"
      "the Gooseneck brand" / "made by Gooseneck" -> the brand.
      Just "the gooseneck trailer" on its own -> do not guess. The system will ask.
 
-They asked to see TRAILERS ("show me what you have", "just show me", "show me the results")
-  -> intent = "skip_all_show_results". Do not ask another question.
+They asked to see TRAILERS ("show me what you have", "just show me", "show me the results"),
+or they are done answering ("enough questions", "skip the rest", "I just want to see options")
+  -> intent = "skip_all_show_results", even in the middle of the questions. Do not ask another.
 
 They asked what TYPES you carry ("what kinds do you have?")
   -> NOT a request for listings. intent = "category_exploration".

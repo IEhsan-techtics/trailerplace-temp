@@ -363,11 +363,44 @@ def _cited_urls(listings: list, reply_text: str) -> list[str]:
     return cited
 
 
-def respond_with_tools(state: dict, turn: Any, user_message: str) -> ReplyOutput | None:
+PREFETCH_CALL_ID = "prefetch_search_inventory"
+
+
+def _prefetched_search(runner: ToolRunner) -> list:
+    """Run the search now and hand it to the agent as a tool exchange it already made.
+
+    Python has decided this turn shows trailers (the results gate is open), so the search is
+    not the model's call to make. Left optional, a live run showed the model skipping it
+    whenever the same message also asked something else ("...what are your opening
+    hours?") - it answered the question and the customer never saw the trailers they had
+    just qualified for.
+
+    Framed as the model's own call and its result, which is the shape the chat API expects,
+    so the first pass already holds the listings: it only has to present them. It can still
+    search again for a next page. Saves a model round trip, too.
+    """
+    from langchain_core.messages import AIMessage, ToolMessage
+
+    result = runner.call("search_inventory", "{}")
+    return [
+        AIMessage(
+            content="",
+            tool_calls=[{"name": "search_inventory", "args": {}, "id": PREFETCH_CALL_ID, "type": "tool_call"}],
+        ),
+        ToolMessage(content=result, tool_call_id=PREFETCH_CALL_ID, name="search_inventory"),
+    ]
+
+
+def respond_with_tools(
+    state: dict, turn: Any, user_message: str, prefetch_search: bool = False
+) -> ReplyOutput | None:
     """Write the reply, letting the agent pull inventory through the tools.
 
     One graph invocation. LangGraph runs agent -> tools -> agent internally for as many
     rounds as the agent asks for, and the loop ends when it stops asking.
+
+    ``prefetch_search``: the results gate is open, so the search runs here, before the agent,
+    and the agent starts with its results (see ``_prefetched_search``).
 
     Returns None on any failure, which is the signal to fall back to the deterministic
     assembly in ``compose_node`` - a flat reply, never a broken turn.
@@ -375,7 +408,10 @@ def respond_with_tools(state: dict, turn: Any, user_message: str) -> ReplyOutput
     from src.graph.agent import run_agent
 
     runner = ToolRunner(state, turn)
-    text = run_agent(runner, build_system_prompt(state, turn), _messages(state, user_message))
+    messages = _messages(state, user_message)
+    if prefetch_search:
+        messages += _prefetched_search(runner)
+    text = run_agent(runner, build_system_prompt(state, turn), messages)
 
     if not text:
         logger.error("Reply pass returned nothing usable: session=%s", state.get("session_id"))
