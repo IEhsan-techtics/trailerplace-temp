@@ -377,7 +377,8 @@ def state_block(state: dict) -> str:
         lines.append(
             f"- You asked whether to keep their earlier answers when moving to "
             f"{keep.get('new_category')}. They are answering that now - set "
-            f"keep_fields_answer."
+            f"keep_fields_answer, and for 'some' list in kept_fields which of these they keep: "
+            f"{', '.join(keep.get('filters') or {})}."
         )
 
     contact = state.get("contact") or {}

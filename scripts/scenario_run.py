@@ -561,6 +561,32 @@ SCRIPTS: list[Script] = [
            absent=("payload_capacity",), slots_equal={"axle_capacity": 5000.0},
            category="Dump"),
 
+    # --- the customer changes category themselves: keep, drop, or keep some -----------
+    Script("switch", "dump -> flatbed, keep everything",
+           [OPENING, "I need a 16 ft dump trailer for gravel with tandem 7000 lb axles",
+            "Actually, make it a flatbed instead", "Yes, keep all of that", QUALIFY],
+           answers=_bump("steel pipe"), category="Flatbed",
+           slots_equal={"length": 16.0, "axle_capacity": 7000.0, "axle_count": 2},
+           reply_has=((2, "keep"),), no_listings_at=(2,)),
+    Script("switch", "enclosed with a ramp door -> utility, start fresh",
+           [OPENING, "Looking for a 7x14 enclosed trailer with a ramp door for moving furniture",
+            "Actually, I think a utility trailer would be better", "No, start fresh", QUALIFY],
+           answers=_bump("landscaping supplies"), category="Utility",
+           absent=("length", "width"), no_features=True, reply_has=((2, "ramp door"),),
+           no_listings_at=(2,)),
+    Script("switch", "switched mid-question, keep only the length",
+           [OPENING, "I need a 20 ft dump trailer", "gravel",
+            "Hmm, actually I'm moving a skid steer, so an equipment trailer instead",
+            "Keep the length, drop the rest", QUALIFY],
+           answers=_bump("a skid steer"), category="Equipment",
+           slots_equal={"length": 20.0}, no_listings_at=(3,)),
+    Script("switch", "switched while 'per axle or total?' is open",
+           [OPENING, "I need a dump trailer for gravel with 14,000 lbs of axle capacity",
+            "Actually, make it a flatbed", "That's 14,000 per axle", QUALIFY],
+           answers=_bump("lumber"), category="Flatbed",
+           slots_equal={"axle_capacity": 14000.0}, absent=("total_axle_capacity_lbs",),
+           reply_has=((1, "per axle, or the total"),)),
+
     # --- emails to the team ------------------------------------------------------------
     Script("email", "FAQ - financing", [TESTER, "Do you offer financing on your trailers?"],
            emails=("faq_-_financing",)),
@@ -754,7 +780,7 @@ def _check_script(result: Result, script: Script, state: dict[str, Any], repeats
         add((f"{slot} = {value}", slots.get(slot) == value, f"got {slots.get(slot)!r}"))
     for slot in script.absent:
         add((f"{slot} not stored", slots.get(slot) in (None, "", []), f"got {slots.get(slot)!r}"))
-    if script.group == "axles":
+    if script.group in ("axles", "switch"):
         # Live, the bot once told a customer it had noted their "axle capacity basis".
         jargon = [t.bot for t in result.turns
                   if re.search(r"basis|axle_|total_axle|field name", t.bot, re.I)]
@@ -900,7 +926,7 @@ def main() -> int:
     categories = [c for c in CATEGORIES if not args.only or c in args.only.split(",")]
     scenarios = [s for s in args.scenarios.split(",") if s]
     jobs: list[Any] = [(c, s, i) for i, c in enumerate(categories) for s in scenarios]
-    groups = {"rules", "category", "email", "flow", "features", "axles"} if args.scripted == "all" else set(filter(None, args.scripted.split(",")))
+    groups = {"rules", "category", "email", "flow", "features", "axles", "switch"} if args.scripted == "all" else set(filter(None, args.scripted.split(",")))
     words = [w.strip().lower() for w in args.match.split(",") if w.strip()]
     jobs += [script for script in SCRIPTS if script.group in groups
              and (not words or any(w in script.name.lower() for w in words))]

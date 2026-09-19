@@ -33,6 +33,7 @@ from src.domain.slot_map import (
     slot_value_kind,
 )
 from src.tools.category import (
+    FEATURES_KEY,
     meaningful_filters,
     normalize_category,
     set_trailer_category,
@@ -263,6 +264,8 @@ def _apply_keep_filters_answer(state: dict, output: Any) -> bool:
     for slot in offered:
         if slot not in keep_slots:
             slots.pop(slot, None)
+    if FEATURES_KEY in offered and FEATURES_KEY not in keep_slots:
+        state[FEATURES_KEY] = []
 
     # What they are hauling belongs to the OLD category. It is a required question for the
     # new one, so it is dropped and asked again rather than silently inherited - unless this

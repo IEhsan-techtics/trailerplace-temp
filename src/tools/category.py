@@ -131,8 +131,11 @@ def _prune_for_new_category(state: dict) -> None:
         slot: count for slot, count in (state.get("asked_counts") or {}).items()
         if slot in required
     }
+    # "Any number of axles" is about the trailer, not the category: kept, or the new
+    # category would ask how many axles again.
     state["declined_slots"] = [
-        slot for slot in (state.get("declined_slots") or []) if slot in required
+        slot for slot in (state.get("declined_slots") or [])
+        if slot in required or slot == "axle_count"
     ]
     state["pending_slot"] = None
     state["invalid_retry_slot"] = None
@@ -154,8 +157,12 @@ def _prune_for_new_category(state: dict) -> None:
 # changed, and it is a required question for the new category anyway, so it gets asked
 # properly rather than inherited.
 KEEP_QUESTION_SLOTS: tuple[str, ...] = (
-    "length", "width", "payload_capacity", "axle_capacity", "hitch_type",
+    "length", "width", "payload_capacity", "axle_capacity", "total_axle_capacity_lbs",
+    "axle_count", "hitch_type",
 )
+# Offered alongside the slots under this key: the equipment they asked for (ramps, torsion
+# axles) is theirs to keep or drop like any measurement, and used to go without being named.
+FEATURES_KEY = "non_metadata_features"
 
 
 def meaningful_filters(state: dict) -> dict[str, Any]:
@@ -175,6 +182,9 @@ def meaningful_filters(state: dict) -> dict[str, Any]:
         if isinstance(value, (list, str)) and not value:
             continue
         kept[slot] = value
+    features = [f for f in (state.get(FEATURES_KEY) or []) if str(f).strip()]
+    if features:
+        kept[FEATURES_KEY] = features
     return kept
 
 

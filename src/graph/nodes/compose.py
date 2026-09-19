@@ -119,6 +119,15 @@ def compose_node(state: dict, output: Any) -> dict:
                 state.get("session_id"), state.get("invalid_retry_slot"),
             )
             acknowledgement = ""
+        if acknowledgement and state.get("pending_keep_filters"):
+            # The model writes its line before Python decides to ask, so live it said "we'll
+            # switch your search to a 16-foot Flatbed with tandem 7,000 lb axles" and then asked
+            # whether to keep those. The keep question says what is happening on its own.
+            logger.info(
+                "COMPOSE dropped an acknowledgement ahead of the keep question: session=%s",
+                state.get("session_id"),
+            )
+            acknowledgement = ""
         if acknowledgement:
             parts.append(acknowledgement)
 
@@ -719,13 +728,28 @@ def _keep_filters_question(keep: dict) -> str:
     )
 
 
+# How each offered value reads in the keep question - plain words, never a field name.
+_KEEP_LABELS = {
+    "length": "a length of {} ft",
+    "width": "a width of {} ft",
+    "payload_capacity": "a load of {} lbs",
+    "axle_capacity": "{} lb axles",
+    "total_axle_capacity_lbs": "{} lbs of total axle capacity",
+    "axle_count": "{} axles",
+    "hitch_type": "a {} hitch",
+    "non_metadata_features": "{}",
+}
+
+
 def _describe(slot: str, value: Any) -> str:
-    label = slot.replace("_", " ")
     if isinstance(value, list):
         value = ", ".join(str(item) for item in value)
     if isinstance(value, float) and value.is_integer():
         value = int(value)
-    return f"{label} {value}"
+    if isinstance(value, int) and slot != "axle_count":
+        value = f"{value:,}"
+    template = _KEEP_LABELS.get(slot)
+    return template.format(value) if template else f"{slot.replace('_', ' ')} {value}"
 
 
 def _render_listings(state: dict, outcome: dict) -> str:
