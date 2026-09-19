@@ -125,6 +125,10 @@ def compose_node(state: dict, output: Any) -> dict:
         parts.append(flushed)
 
     closing, asked_slot = _closing_part(state, output)
+    if closing and asked_slot:
+        # Only while a qualification question is going out: then Python has chosen the one
+        # question this reply asks, and any other the model wrote is out of turn.
+        parts = [kept for part in parts if (kept := _without_other_questions(part, asked_slot))]
     if closing and _repeats(parts, closing, asked_slot):
         # The model answered the question AND proposed the same question as its next one, so
         # the reply asked "what type of trailer are you looking for?" twice in a row. The
@@ -240,6 +244,44 @@ _SLOT_TOPICS: dict[str, tuple[str, ...]] = {
 
 def _is_about(question: str, slot: str) -> bool:
     return any(re.search(rf"\b{re.escape(term)}", question) for term in _SLOT_TOPICS[slot])
+
+
+def _up_to_the_question_mark(text: Any) -> str:
+    """The model's proposed question, ending where the question ends.
+
+    Live runs caught text trailing it: stray characters ("...hauling? צור") and commentary
+    ("...of the vehicle? (This question is already included in the answer.)"). A question
+    ends at its question mark, so nothing after one is ever sent.
+    """
+    text = str(text or "").strip()
+    if "?" in text:
+        text = text[: text.index("?") + 1]
+    return text
+
+
+def _without_other_questions(text: str, asked_slot: str | None) -> str:
+    """Drop questions the model slipped into its own lines about a DIFFERENT slot.
+
+    Which question comes next is Python's call. A live run had the answer ask "About how long
+    is the vehicle?" while the closing asked for its weight - two questions, one of them out
+    of order. A question that is (also) about the slot being asked is left for ``_repeats`` to
+    settle, and a question about no known slot ("which one fits what you need?") is left
+    alone. Slots without a topic list are left alone entirely.
+    """
+    if not text or "?" not in text or asked_slot not in _SLOT_TOPICS:
+        return text
+    kept = []
+    for sentence in _SENTENCE_END.split(text):
+        low = _collapse(sentence)
+        if (
+            low.endswith("?")
+            and not _is_about(low, asked_slot)
+            and any(_is_about(low, slot) for slot in _SLOT_TOPICS)
+        ):
+            logger.info("COMPOSE dropped an out-of-turn question: slot=%s text=%r", asked_slot, sentence)
+            continue
+        kept.append(sentence)
+    return " ".join(kept).strip()
 
 
 def _repeats(parts: list[str], closing: str, slot: str | None = None) -> bool:
@@ -586,7 +628,7 @@ def _closing_part(state: dict, output: Any) -> tuple[str, str | None]:
         return "", None
 
     proposed_slot = getattr(output, "next_question_slot", None)
-    proposed_text = (getattr(output, "next_question_text", None) or "").strip()
+    proposed_text = _up_to_the_question_mark(getattr(output, "next_question_text", None))
     if proposed_slot == slot and proposed_text:
         question = proposed_text
     else:

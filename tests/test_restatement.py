@@ -136,3 +136,39 @@ def test_a_reworded_re_ask_is_caught(reworded, slot, closing):
 ])
 def test_a_different_question_is_kept(parts, slot, closing):
     assert not _repeats(parts, closing, slot)
+
+
+# ----------------------------------------------- the model's own questions, kept in line
+from src.graph.nodes.compose import _up_to_the_question_mark, _without_other_questions  # noqa: E402
+
+
+@pytest.mark.parametrize("proposed, sent", [
+    # Both live.
+    ("What vehicle will you be hauling? צור", "What vehicle will you be hauling?"),
+    ("What's the approximate weight of the vehicle? (This question is already included in the answer.)",
+     "What's the approximate weight of the vehicle?"),
+    ("What length do you need?", "What length do you need?"),
+    ("", ""),
+    (None, ""),
+])
+def test_a_proposed_question_ends_at_its_question_mark(proposed, sent):
+    assert _up_to_the_question_mark(proposed) == sent
+
+
+def test_a_question_about_another_slot_is_dropped_from_the_answer():
+    """Live, Car Hauler: the answer asked the length while the closing asked the weight."""
+    answer = ("The vehicle’s weight helps us narrow down a car hauler with enough payload "
+              "capacity. About how long is the vehicle?")
+    assert _without_other_questions(answer, "payload_capacity") == (
+        "The vehicle’s weight helps us narrow down a car hauler with enough payload capacity."
+    )
+
+
+@pytest.mark.parametrize("text, slot", [
+    ("What's the rough weight of what you'll haul?", "payload_capacity"),  # about the asked slot too
+    ("Which one fits what you need?", "payload_capacity"),                   # about no slot
+    ("About how long is the vehicle?", None),                                # nothing being asked
+    ("About how long is the vehicle?", "dump_mechanism"),                    # a rules-panel slot
+])
+def test_questions_that_are_not_out_of_turn_are_kept(text, slot):
+    assert _without_other_questions(text, slot) == text
