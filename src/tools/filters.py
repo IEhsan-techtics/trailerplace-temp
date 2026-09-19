@@ -29,6 +29,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from src.domain.axles import is_measurement
 from src.domain import quantities as quantity_math
 from src.domain import slot_map
 from src.rules.engine import is_default, mark_user_value
@@ -142,6 +143,12 @@ def _apply_one(state: dict, slot: str, raw: Any, category: str, result: FieldApp
         result.invalid_reason = "negative"
         result.invalid_raw = str(raw)
         logger.info("FILTER reject: slot=%s reason=negative raw=%r", slot, raw)
+        return
+    if slot == "axle_count" and is_measurement(raw):
+        # Live: "about 5,000 lbs" to "how many axles?" came back from the model as an axle
+        # count, and the customer was told we only carry one to four. A weight or a size is
+        # not a wrong count - it is not a count at all, so it is dropped without a correction.
+        logger.info("FILTER skip: slot=axle_count raw=%r is a measurement, not a count", raw)
         return
     if slot == "axle_count" and axle_count_out_of_range(raw):
         result.invalid_slot = slot

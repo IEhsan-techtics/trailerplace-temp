@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import os
 import sys
 import threading
@@ -753,6 +754,11 @@ def _check_script(result: Result, script: Script, state: dict[str, Any], repeats
         add((f"{slot} = {value}", slots.get(slot) == value, f"got {slots.get(slot)!r}"))
     for slot in script.absent:
         add((f"{slot} not stored", slots.get(slot) in (None, "", []), f"got {slots.get(slot)!r}"))
+    if script.group == "axles":
+        # Live, the bot once told a customer it had noted their "axle capacity basis".
+        jargon = [t.bot for t in result.turns
+                  if re.search(r"basis|axle_|total_axle|field name", t.bot, re.I)]
+        add(("no field names in the replies", not jargon, jargon[0][:120] if jargon else ""))
     for step, text in script.reply_lacks:
         reply = result.turns[step].bot if step < len(result.turns) else ""
         add((f"reply {step + 1} does not say '{text}'",

@@ -250,6 +250,27 @@ def test_answering_the_load_instead_is_not_scolded_as_a_wrong_count(fake_llm):
     assert "axle_count" not in state_after()["slots"]
 
 
+def test_the_models_own_count_is_not_a_weight_either(fake_llm):
+    """Live: the model filed "about 5,000 lbs" as axle_count too, and Python's range check
+    told the customer we only carry one to four."""
+    _count_question_open(fake_llm)
+    result = say(fake_llm, "about 5,000 lbs",
+                 slots={"payload_capacity": "about 5,000 lbs", "axle_count": "about 5,000 lbs"})
+
+    assert "one to four" not in result["assistant_text"]
+    assert "didn't catch" not in result["assistant_text"].lower()
+    assert "axle_count" not in state_after()["slots"]
+    assert state_after()["pending_axle_count"], "the question still stands"
+
+
+def test_a_count_out_of_range_is_still_explained():
+    from src.tools.filters import FieldApplication, _apply_one
+
+    result = FieldApplication()
+    _apply_one({"slots": {}}, "axle_count", "5 axles", "Dump", result)
+    assert result.invalid_reason == "axle_range"
+
+
 def test_the_axle_question_replaces_the_pending_slot_question(fake_llm):
     dump_trailer(fake_llm)
     say(fake_llm, "gravel", slots={"haul_item": "gravel"})

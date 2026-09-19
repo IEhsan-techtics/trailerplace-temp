@@ -83,6 +83,11 @@ _MEASUREMENT_RE = re.compile(
 )
 
 
+def is_measurement(text) -> bool:
+    """True for a weight or a size ("about 5,000 lbs", "5000", "20 ft") - never an axle count."""
+    return bool(_MEASUREMENT_RE.search(str(text or "")))
+
+
 def count_from_reply(text: str) -> int | None:
     """The axle count in a reply to COUNT_QUESTION, or None when it states none.
 
@@ -92,10 +97,9 @@ def count_from_reply(text: str) -> int | None:
     """
     from src.domain.slot_map import parse_axle_count_answer
 
-    words = str(text or "")
-    if _MEASUREMENT_RE.search(words):
+    if is_measurement(text):
         return None
-    return parse_axle_count_answer(words)
+    return parse_axle_count_answer(str(text or ""))
 
 
 def is_no_preference(text: str) -> bool:
