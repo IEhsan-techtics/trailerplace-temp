@@ -86,6 +86,8 @@ def _needs_a_person(state: dict, output: Any) -> bool:
     answer instead of replacing it: ``ask_for_missing`` asks for exactly the same details the
     gate wanted, so nothing is given up by letting the escalation win the turn.
     """
+    if (state.get("turn_outcome") or {}).get("link_interest"):
+        return True
     return getattr(output, "intent", "") in _NEEDS_A_PERSON_INTENTS
 
 

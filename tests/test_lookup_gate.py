@@ -28,6 +28,7 @@ def _turn(confidence="high", extracted=None, **identifiers):
         make=identifiers.get("make"),
         model_text=identifiers.get("model_text"),
         stock_number=identifiers.get("stock_number"),
+        listing_url=identifiers.get("listing_url"),
         wants=None,
         confidence=confidence,
     )
@@ -49,6 +50,12 @@ def _turn(confidence="high", extracted=None, **identifiers):
         ("category word is not a model", _turn(make="Diamond C", model_text="dump trailer"), False),
         # Layer 2.
         ("low confidence never fires", _turn(confidence="low", stock_number="81382"), False),
+        # A link to one of our listing pages names one trailer; any other link does not.
+        ("our listing link",
+         _turn(listing_url="https://www.trailerplace.com/inventory/2026-galyean-32-cattle-trailer-w-butterfly-gates-015087/"),
+         True),
+        ("a facebook link is not a lookup", _turn(listing_url="https://www.facebook.com/share/p/abc123/"), False),
+        ("our home page is not a listing", _turn(listing_url="https://www.trailerplace.com/"), False),
     ],
 )
 def test_lookup_requested(label, turn, fires):
@@ -119,7 +126,7 @@ def no_lookup(monkeypatch):
 
     calls = []
 
-    def _fake_lookup_inventory(*, year, make, model_text, stock_number, limit):
+    def _fake_lookup_inventory(*, year, make, model_text, stock_number, listing_url=None, limit):
         calls.append(
             {"year": year, "make": make, "model_text": model_text, "stock_number": stock_number}
         )

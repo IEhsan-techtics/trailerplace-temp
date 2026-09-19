@@ -83,9 +83,11 @@ def build_tools(runner: Any) -> list:
         make: str | None = None,
         model_text: str | None = None,
         stock_number: str | None = None,
+        listing_url: str | None = None,
     ) -> str:
         """Look up specific stock by identifier when the customer names one particular
-        trailer: a stock number, a year plus a make, or a make plus a model code. NOT for
+        trailer: a stock number, a year plus a make, a make plus a model code, or a link to
+        one of our listings (trailerplace.com/inventory/...). NOT for
         category shopping - a make on its own is a brand preference, and a trailer type
         ("dump trailer") is not a model.
 
@@ -95,6 +97,7 @@ def build_tools(runner: Any) -> list:
             model_text: Model code exactly as the customer typed it, e.g. 'LPX', 'fmax 212'.
             stock_number: Explicit stock/unit number only. Never a weight, size, price, year
                 or phone number.
+            listing_url: A trailerplace.com/inventory link they gave, copied exactly.
         """
         return runner.call(
             "lookup_inventory",
@@ -104,6 +107,7 @@ def build_tools(runner: Any) -> list:
                     "make": make,
                     "model_text": model_text,
                     "stock_number": stock_number,
+                    "listing_url": listing_url,
                 }
             ),
         )

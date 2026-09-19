@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 
 from src.config import settings
+from src.domain.links import normalize_listing_url
 from src.search.inventory_matcher import lookup_inventory
 from src.tools.lookup_gate import lookup_requested, usable_stock_number
 
@@ -25,9 +26,11 @@ def inventory_lookup_node(state: dict) -> dict:
     before = {key: state.get(key) for key in guarded_keys}
 
     logger.info(
-        "TOOL inventory_lookup: session=%s year=%s make=%s model=%s stock=%s confidence=%s",
-        state.get("session_id"), lookup.year, lookup.make, lookup.model_text, lookup.stock_number, lookup.confidence,
+        "TOOL inventory_lookup: session=%s year=%s make=%s model=%s stock=%s url=%s confidence=%s",
+        state.get("session_id"), lookup.year, lookup.make, lookup.model_text, lookup.stock_number,
+        getattr(lookup, "listing_url", None), lookup.confidence,
     )
+    listing_url = normalize_listing_url(getattr(lookup, "listing_url", None))
 
     # A stock number that failed the plausibility check ("7000 lbs", or a number this turn
     # also extracted as the payload) is dropped rather than searched on: left in, it joins
@@ -38,9 +41,18 @@ def inventory_lookup_node(state: dict) -> dict:
         make=lookup.make,
         model_text=lookup.model_text,
         stock_number=usable_stock_number(turn),
+        listing_url=listing_url,
         limit=settings.inventory_lookup_limit,
     )
     matches = result["matches"]
+
+    shown = {normalize_listing_url(url) for url in state.get("shown_urls") or []}
+    if listing_url and matches and normalize_listing_url(matches[0].get("url")) in shown:
+        # A link to a trailer we already showed them: the card is on their screen, so it is
+        # not shown again. The reply pass still gets its details, to answer their question.
+        outcome["inventory_already_shown"] = matches[:1]
+        result = {**result, "match_status": "already_shown", "matches": []}
+        matches = []
 
     logger.info(
         "TOOL inventory_lookup: session=%s status=%s matches=%d requested=%r",

@@ -25,6 +25,7 @@ from typing import Any
 
 from src.domain import axles
 from src.domain import gooseneck as gooseneck_domain
+from src.domain import links
 from src.domain import quantities as quantity_math
 from src.graph.nodes import greeting
 from src.domain.slot_map import (
@@ -71,6 +72,7 @@ def apply_node(state: dict, output: Any, user_message: str = "") -> dict:
     # that same turn joins the same batch.
     team_notify.flush(state)
     _apply_faq_notification(state, output)
+    _apply_shared_link(state, output, user_message)
     _apply_unavailable_type(state, output)
     handled = _apply_pending_confirmations(state, output, user_message)
     _apply_gooseneck(state, output, user_message)
@@ -154,6 +156,35 @@ def _apply_faq_notification(state: dict, output: Any) -> None:
         reason=f"FAQ - {faq_key}",
         description=question or f"asked about {str(faq_key).replace('_', ' ')}",
     )
+
+
+# What they asked about the linked trailer, as the team email says it.
+_LINK_ASKS = {
+    "price": "asked about the price",
+    "availability": "asked if it is still available",
+    "details": "asked for details",
+}
+
+
+def _apply_shared_link(state: dict, output: Any, user_message: str) -> None:
+    """A link to a trailer - ours, a Facebook or an Instagram post - that they want.
+
+    The model reads whether they want it (``shared_link_interest``); the URL itself says
+    where it points. The team hears about it like any listing interest, under the same
+    contact gate, and the email names the kind of link so they know where the customer saw it.
+    """
+    if not getattr(output, "shared_link_interest", False):
+        return
+    found = links.find_trailer_links(user_message)
+    if not found:
+        return
+    label, url = found[0]
+    wants = getattr(getattr(output, "inventory_lookup", None), "wants", None)
+    article = "an" if label[:1] in "AEIOU" else "a"
+    description = f"Shared {article} {label} and {_LINK_ASKS.get(wants, 'wants this trailer')}: {url}"
+    status = team_notify.record(state, reason="Listing Interest", description=description)
+    state.setdefault("turn_outcome", {})["link_interest"] = {"status": status, "label": label}
+    logger.info("LINK interest: session=%s %s status=%s", state.get("session_id"), label, status)
 
 
 def _apply_unavailable_type(state: dict, output: Any) -> None:

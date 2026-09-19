@@ -404,6 +404,13 @@ class ToolRunner:
 
         outcome = self.state.get("turn_outcome") or {}
         status = outcome.get("inventory_match_status") or "none"
+        already = outcome.get("inventory_already_shown")
+        if already:
+            return (
+                "ALREADY SHOWN: that link is a trailer you already showed them, so do NOT show "
+                "its card again. Answer what they asked about it in a sentence or two, from "
+                "these details only:\n" + listing_block(already)
+            )
         listings = list(outcome.get("listings") or [])
         label = _lookup_label(turn, outcome)
         self._remember(listings)
@@ -453,6 +460,14 @@ class ToolRunner:
         key = str(reason or "other").strip().lower()
         reason_line, canned_key = self._ESCALATION_REASONS.get(key, self._ESCALATION_REASONS["other"])
 
+        link = (self.state.get("turn_outcome") or {}).get("link_interest")
+        if link and canned_key == "listing_interest":
+            # Already sent (or stashed) from the link they shared, with the kind of link named.
+            # A second record would be a second email about the same trailer.
+            self.ran.append("escalate")
+            answer = canned_responses.escalation_answer(canned_key, link["status"])
+            return _reply_instruction(self.state, answer, link["status"])
+
         status = team_notify.record(self.state, reason=reason_line, description=summary)
         outcome = self.state.setdefault("turn_outcome", {})
         outcome["escalated"] = True
@@ -492,6 +507,7 @@ class ToolRunner:
                     make=args.get("make"),
                     model_text=args.get("model_text"),
                     stock_number=args.get("stock_number"),
+                    listing_url=args.get("listing_url"),
                 )
         except Exception:
             logger.exception("TOOL %s failed: session=%s", name, self.state.get("session_id"))

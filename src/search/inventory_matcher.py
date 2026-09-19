@@ -594,18 +594,51 @@ def match_inventory(
     }
 
 
+def _match_listing_url(listing_url: str | None, df: pd.DataFrame | None = None) -> dict[str, Any] | None:
+    """The one row whose page this is, as an exact result; None when it is not on the lot."""
+    from src.domain.links import normalize_listing_url
+
+    wanted = normalize_listing_url(listing_url)
+    if not wanted:
+        return None
+    df = df if df is not None else prepared_inventory()
+    if df.empty or "url" not in df.columns:
+        return None
+    rows = df[df["url"].map(normalize_listing_url) == wanted]
+    if rows.empty:
+        logger.info("inventory_matcher_url | no row for %s", wanted)
+        return None
+    listing = _row_to_listing(rows.iloc[0], score=1.0)
+    return {
+        "match_status": "exact",
+        "matches": [listing],
+        "requested_label": listing.get("title") or "that listing",
+    }
+
+
 def lookup_inventory(
     *,
     year: int | None,
     make: str | None,
     model_text: str | None,
     stock_number: str | None,
+    listing_url: str | None = None,
     limit: int = 5,
 ) -> dict[str, Any]:
     """Pure function of identifiers — no user-text parsing.
 
+    ``listing_url`` - one of our listing pages - is matched on the URL itself first: it names
+    exactly one row, so it is exact or nothing. When it matches nothing (sold, or mistyped)
+    the other identifiers still run.
+
     Returns ``{"match_status": "exact"|"no_exact"|"ambiguous"|"none", "matches": [...], "requested_label": str}``.
     """
+    url_match = _match_listing_url(listing_url)
+    if url_match is not None:
+        return url_match
+    if listing_url and not (year or make or model_text or stock_number):
+        return {"match_status": "none", "matches": [], "requested_label": "that listing"}
+
     identifiers = _Identifiers(
         year=year,
         possible_make=make,

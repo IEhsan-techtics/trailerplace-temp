@@ -63,7 +63,7 @@ def empty_output(reason: str = "") -> ChatbotTurnOutput:
         contact=ContactInfo(name=None, email=None, phone=None, declined=False),
         inventory_lookup=InventoryLookup(
             is_lookup=False, year=None, make=None, model_text=None,
-            stock_number=None, wants=None, confidence="low",
+            stock_number=None, listing_url=None, wants=None, confidence="low",
         ),
         haul_classification=HaulClassification(cargo_traits=[], haul_item_matched=None),
         keep_fields_answer=None,
@@ -74,6 +74,7 @@ def empty_output(reason: str = "") -> ChatbotTurnOutput:
         faq_key=None,
         unavailable_type_requested=None,
         listing_reference=None,
+        shared_link_interest=False,
         dropped_fields=[],
         acknowledgement="",
         answer_to_customer_question=None,

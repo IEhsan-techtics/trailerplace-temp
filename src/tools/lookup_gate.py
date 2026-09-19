@@ -26,6 +26,7 @@ import re
 from typing import Any
 
 from src.domain.categories import resolve_category_matches
+from src.domain.links import normalize_listing_url
 from src.domain.normalizer import normalize_make
 
 logger = logging.getLogger(__name__)
@@ -157,6 +158,10 @@ def lookup_requested(turn: Any) -> bool:
     if getattr(lookup, "confidence", "low") not in {"medium", "high"}:
         return False
     if usable_stock_number(turn) or (lookup.year and lookup.make):
+        return True
+    if normalize_listing_url(getattr(lookup, "listing_url", None)):
+        # One of our own listing pages identifies exactly one trailer. A Facebook or
+        # Instagram link does not - that goes to the team instead (apply._apply_shared_link).
         return True
     # Make alone is a brand preference, never a lookup - require a real identifier, and a
     # category word posing as the model is category shopping, not an identifier.

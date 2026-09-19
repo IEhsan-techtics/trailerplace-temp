@@ -155,7 +155,11 @@ Fill it whenever they point at particular stock, however they phrase it and even
 (keep the bigger intent too):
 - a make plus a model code, typos included ("Diamond C LPX", "the fmax", "iron bull fhg24k");
 - a make plus a year ("any 2024 Iron Bulls?");
-- a stock number ("stock 02570", "unit 81382", "#12914").
+- a stock number ("stock 02570", "unit 81382", "#12914");
+- a link to our listing (trailerplace.com/inventory/...) -> listing_url, copied exactly.
+A link to a trailer (ours, Facebook, Instagram) they want or ask about -> shared_link_interest
+true, and wants = what they asked. Price or availability of one trailer is a lookup, first
+message included.
 stock_number is a 4-6 digit number framed as stock / unit / # / id. It is NEVER a weight ("a
 5000 pound skid steer"), a size, a price ("under $9,995"), a year or phone digits - if it could
 be one of those, leave it null.

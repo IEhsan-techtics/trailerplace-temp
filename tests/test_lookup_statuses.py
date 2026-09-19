@@ -30,7 +30,7 @@ def matcher(monkeypatch):
 
     result = {"match_status": "none", "matches": [], "requested_label": "stock 81382"}
 
-    def _fake(*, year, make, model_text, stock_number, limit):
+    def _fake(*, year, make, model_text, stock_number, listing_url=None, limit):
         return dict(result)
 
     monkeypatch.setattr(lookup_module, "lookup_inventory", _fake)

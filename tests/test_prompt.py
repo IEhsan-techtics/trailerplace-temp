@@ -284,7 +284,10 @@ def test_the_configured_wording_of_every_remaining_question_is_given():
 # The response schema rides along with every call too, and it used to be bigger than the
 # prompt: every field restated a rule the prompt already gave, plus a pydantic title per
 # field. It measured 20,677 chars before the trim and 13,470 after.
-MAX_RESPONSE_SCHEMA_CHARS = 14_000
+#
+# Raised from 14,000 for listing_url and shared_link_interest (14,146): a customer pasting one
+# of our listing links, or a Facebook or Instagram post, had no field to land in.
+MAX_RESPONSE_SCHEMA_CHARS = 14_500
 
 
 def test_the_response_schema_stays_short():

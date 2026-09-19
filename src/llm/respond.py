@@ -175,7 +175,45 @@ def _state_line(state: dict, turn: Any) -> str:
     question = (getattr(turn, "user_question_to_answer", None) or "").strip()
     if question:
         lines.append(f'- Answer this first, in one or two sentences: "{question}"')
+    lookup = _lookup_hint(turn)
+    if lookup:
+        lines.append(f"- They named one specific trailer: call lookup_inventory with {lookup}.")
+        carry_on = carry_on_question(state)
+        if carry_on and not (state.get("turn_outcome") or {}).get("link_interest"):
+            lines.append(
+                f'- They are mid-way through our questions. After the trailer, end with exactly '
+                f'this question and no other: "{carry_on[1]}"'
+            )
+    link = (state.get("turn_outcome") or {}).get("link_interest")
+    if link:
+        from src.domain import canned_responses
+        from src.llm.tools import _reply_instruction
+
+        answer = canned_responses.escalation_answer("listing_interest", link["status"])
+        lines.append(
+            f"- They shared this {link['label']} and want that trailer. Their interest is already "
+            f"recorded for the team - do not call escalate for it. "
+            + _reply_instruction(state, answer, link["status"])
+        )
     return "\n".join(lines)
+
+
+def carry_on_question(state: dict):
+    from src.tools.questions import carry_on_question as _carry_on
+
+    return _carry_on(state)
+
+
+def _lookup_hint(turn: Any) -> str:
+    """The identifiers the analysis pass found, when they pass the lookup gate."""
+    from src.tools.lookup_gate import lookup_requested
+
+    if turn is None or not lookup_requested(turn):
+        return ""
+    lookup = turn.inventory_lookup
+    fields = ("year", "make", "model_text", "stock_number", "listing_url")
+    given = {name: getattr(lookup, name, None) for name in fields}
+    return ", ".join(f"{name}={value!r}" for name, value in given.items() if value)
 
 
 def build_system_prompt(state: dict, turn: Any) -> str:

@@ -250,7 +250,7 @@ def test_tool_argument_schemas_are_preserved():
     tools = {t.name: t for t in build_tools(_runner())}
     assert set(tools) == {"search_inventory", "lookup_inventory", "escalate"}
     assert tools["search_inventory"].args == {}, "search takes no arguments by design"
-    assert set(tools["lookup_inventory"].args) == {"year", "make", "model_text", "stock_number"}
+    assert set(tools["lookup_inventory"].args) == {"year", "make", "model_text", "stock_number", "listing_url"}
 
 
 def test_tools_still_go_through_the_runner_preconditions():

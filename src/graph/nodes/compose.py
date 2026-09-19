@@ -15,7 +15,7 @@ from src.domain import company
 from src.domain import axles
 from src.domain import gooseneck as gooseneck_domain
 from src.graph.nodes import greeting
-from src.tools.questions import mark_asked, next_unanswered_slot, question_text
+from src.tools.questions import carry_on_question, mark_asked, next_unanswered_slot, question_text
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +54,7 @@ def compose_node(state: dict, output: Any) -> dict:
     if outcome.get("reply_text"):
         outcome["assistant_text"] = _with_handoff(outcome, outcome["reply_text"])
         outcome["asked_slot"] = None
+        _carry_on_after_lookup(state, outcome)
         _record_shown(state, outcome.get("cited_listing_urls") or [])
         _note_contact_ask(state, outcome["assistant_text"])
         return state
@@ -389,6 +390,35 @@ def _restates(candidate: str, established: str) -> bool:
     return covered / len(words) >= _RESTATEMENT_OVERLAP
 
 
+def _carry_on_after_lookup(state: dict, outcome: dict) -> None:
+    """A lookup in the middle of our questions ends by picking the questions back up.
+
+    Live: asked "any 2026 Galyeans?" while we waited to hear what they haul, the reply showed
+    the Galyeans and closed on "do any of these look like a fit?" - the dump trailer they came
+    for was never mentioned again. Python picks the question; the reply pass was told to end
+    with it, and this puts it there when the model closed on its own question instead.
+    """
+    if not outcome.get("inventory_lookup_ran") or outcome.get("search_ran"):
+        return
+    if outcome.get("link_interest") or outcome.get("escalated"):
+        return  # those replies are told to ask no qualification question
+    carry_on = carry_on_question(state)
+    if not carry_on:
+        return
+    slot, question = carry_on
+    text = outcome["assistant_text"]
+    if question.lower() not in text.lower():
+        sentences = _SENTENCE_END.split(text.rstrip())
+        if sentences and sentences[-1].rstrip().endswith("?"):
+            sentences = sentences[:-1]  # their generic closing, replaced by ours
+        text = " ".join(sentences).rstrip()
+        text = f"{text}\n\n{question}" if text else question
+        logger.info("COMPOSE carried on after a lookup: session=%s slot=%s", state.get("session_id"), slot)
+    outcome["assistant_text"] = text
+    outcome["asked_slot"] = slot
+    mark_asked(state, slot)
+
+
 def _person_fallback(state: dict, output: Any, outcome: dict) -> str:
     """What to say when the agent could not write the reply on a turn that needed a person.
 
@@ -402,6 +432,14 @@ def _person_fallback(state: dict, output: Any, outcome: dict) -> str:
     """
     from src.domain import canned_responses
     from src.tools import team_notify
+
+    link = outcome.get("link_interest")
+    if link:
+        # The link they shared already told the team (apply._apply_shared_link); a second
+        # record here would email them twice about the same trailer.
+        key, status = "listing_interest", link["status"]
+        answer = canned_responses.escalation_answer(key, status)
+        return f"{answer} {team_notify.ask_for_missing(state)}" if status == "stashed" else answer
 
     key = "complaint" if outcome.get("escalation_owns_turn") else "team_request"
     status = team_notify.record(

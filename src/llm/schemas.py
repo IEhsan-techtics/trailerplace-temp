@@ -96,6 +96,7 @@ class InventoryLookup(StrictBaseModel):
     make: str | None = Field(description="The make.")
     model_text: str | None = Field(description="Model code exactly as typed.")
     stock_number: str | None = Field(description="Stock/unit/# number only - never a weight, size, price, year or phone.")
+    listing_url: str | None = Field(description="A trailerplace.com/inventory link they gave, copied exactly.")
     wants: Literal["price", "availability", "details", "general"] | None = Field(description="What they want to know.")
     confidence: Literal["low", "medium", "high"] = Field(description="How sure the lookup is.")
 
@@ -191,6 +192,9 @@ class ChatbotTurnOutput(StrictBaseModel):
         "contact_human", "financing", "trade_in", "service_parts", "store_info"
     ] | None = Field(description="Which standard question they asked, even alongside something bigger.")
     listing_reference: int | None = Field(description="1-based number of a listing we showed.")
+    shared_link_interest: bool = Field(
+        description="They shared a link to a trailer (ours, Facebook, Instagram) and want it or ask about it."
+    )
     dropped_fields: list[str] = Field(description="Fields they asked to drop.")
 
     # --- reply pieces: there is no second call, so the prose is authored here ---

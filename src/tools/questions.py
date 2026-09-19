@@ -177,3 +177,26 @@ def question_text(state: dict, slot: str) -> str:
         if rule.action == "ask_question" and rule.slot == slot and (rule.question or "").strip():
             return rule.question.strip()
     return (state.get("slot_questions") or {}).get(slot) or f"Could you tell me the {slot.replace('_', ' ')}?"
+
+
+# Questions of our own that outrank the next slot question while they are open.
+_OPEN_CONFIRMATIONS = (
+    "pending_gooseneck_clarification", "pending_category_switch", "pending_keep_filters",
+    "pending_axle_basis", "pending_axle_count",
+)
+
+
+def carry_on_question(state: dict) -> tuple[str, str] | None:
+    """After a side question mid-qualification (a lookup), the question that picks the flow
+    back up: (slot, wording). None when there is no flow to go back to, or when one of our
+    own confirmations is open - that is asked on its own turn, not tacked on here.
+    """
+    if not state.get("category") or state.get("qualification_complete"):
+        return None
+    if any(state.get(key) for key in _OPEN_CONFIRMATIONS):
+        return None
+    slot = next_unanswered_slot(state)
+    if not slot:
+        return None
+    wording = question_text(state, slot)
+    return slot, f"Back to your {state['category']} trailer - {wording[:1].lower()}{wording[1:]}"

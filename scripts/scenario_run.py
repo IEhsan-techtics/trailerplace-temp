@@ -339,6 +339,7 @@ def _check(result: Result, customer: Customer, state: dict[str, Any], repeats: l
 # points at a test inbox before running --scripted email.
 
 QUALIFY = "<answer the questions until listings are shown>"
+SHOWN = "{SHOWN}"   # replaced with the first listing URL shown so far
 TESTER = "Hi, I'm Sam Tester. My email is sam.tester@example.com and my phone is 555-0100."
 
 
@@ -369,6 +370,9 @@ class Script:
     slots_equal: dict[str, Any] = field(default_factory=dict)  # slot -> value it must end with
     absent: tuple[str, ...] = ()         # slots that must end unset
     reply_lacks: tuple[tuple[int, str], ...] = ()  # (step, text) the reply must NOT contain
+    cards_at: tuple[tuple[int, str], ...] = ()     # (turn, text) a card shown on that turn has in its URL
+    no_cards_at: tuple[int, ...] = ()              # turns that must show no cards
+    email_has: tuple[str, ...] = ()                # text some team email body must contain
 
 
 def _bump(cargo: str) -> dict[str, str]:
@@ -587,6 +591,37 @@ SCRIPTS: list[Script] = [
            slots_equal={"axle_capacity": 14000.0}, absent=("total_axle_capacity_lbs",),
            reply_has=((1, "per axle, or the total"),)),
 
+    # --- one specific trailer: stock number, year + make, make + model, or a link ------
+    Script("lookup", "first message: is stock 13779 available?",
+           ["Hi, is stock number 13779 still available?"],
+           cards_at=((0, "13779"),), reply_has=((0, "14,350"),)),
+    Script("lookup", "first message: price of a make + model",
+           ["How much is the Aluma 8220H XL tilt?"], cards_at=((0, "14493"),)),
+    Script("lookup", "mid-questions: any 2026 Galyeans?, then back to the questions",
+           [OPENING, "I need a dump trailer", "Quick question - do you have any 2026 Galyean trailers?",
+            "gravel"],
+           cards_at=((2, "galyean"),), reply_has=((2, "back to your dump trailer"),),
+           slots_equal={"haul_item": "gravel"}, category="Dump"),
+    Script("lookup", "stock number that does not exist",
+           [OPENING, "Do you have stock number 99999?"], no_cards_at=(1,), reply_lacks=((1, "$"),)),
+    Script("lookup", "a load weight is not a stock number",
+           [OPENING, "I need a dump trailer that can carry 7000 lbs"],
+           reply_lacks=((1, "stock"),), category="Dump"),
+    Script("lookup", "our listing link on the first message -> that trailer + interest email",
+           ["Hi, I'm Sam Tester, sam.tester@example.com. Is this one still available? https://www.trailerplace.com/inventory/2026-galyean-32-cattle-trailer-w-butterfly-gates-015087/"],
+           cards_at=((0, "015087"),), emails=("listing_interest",),
+           email_has=("TrailerPlace website listing link",)),
+    Script("lookup", "facebook link -> interest email naming Facebook",
+           [TESTER, "Saw this on Facebook, how much is it? https://www.facebook.com/share/p/1AbCdEfGh/"],
+           no_cards_at=(1,), emails=("listing_interest",), email_has=("Facebook post link",)),
+    Script("lookup", "instagram link first, contact after -> email then",
+           ["Is this trailer still for sale? https://www.instagram.com/p/C9xYzAbC/",
+            "Sure - Sam Tester, 555-0100"],
+           emails=("listing_interest",), email_has=("Instagram post link",)),
+    Script("lookup", "a link to a trailer already shown -> no second card",
+           [OPENING, "I need a livestock trailer", QUALIFY, "Tell me more about this one: {SHOWN}"],
+           answers=_bump("cattle"), no_cards_at=(-1,), category="Livestock"),
+
     # --- emails to the team ------------------------------------------------------------
     Script("email", "FAQ - financing", [TESTER, "Do you offer financing on your trailers?"],
            emails=("faq_-_financing",)),
@@ -638,7 +673,8 @@ def _outbox(session_id: str, wait: float = 60.0) -> list[dict[str, Any]]:
         with db.get_session_factory()() as sql:
             rows = [
                 {"event_type": r.event_type, "status": r.status,
-                 "subject": (r.payload or {}).get("subject")}
+                 "subject": (r.payload or {}).get("subject"),
+                 "body": (r.payload or {}).get("body") or ""}
                 for r in sql.query(ChatbotOutbox).filter(ChatbotOutbox.session_id == uuid.UUID(session_id))
             ]
         if all(r["status"] != "pending" for r in rows) or time.time() > deadline:
@@ -680,6 +716,9 @@ def run_script(base_url: str, script: Script, log_lock: threading.Lock) -> Resul
                 state, more = _drive(say, state, customer, script.switch)
                 repeats += more
             else:
+                if SHOWN in step:
+                    shown = next((url for turn in result.turns for url in turn.listings if url), "")
+                    step = step.replace(SHOWN, shown or "(nothing was shown)")
                 state = say(step)
             if script.stash_at == index:
                 stash_seen = (bool(state.get("pending_email_actions")), len(_outbox(session_id, wait=0)))
@@ -776,6 +815,13 @@ def _check_script(result: Result, script: Script, state: dict[str, Any], repeats
     for step in script.no_listings_at:
         reply = result.turns[step].bot if step < len(result.turns) else ""
         add((f"no listings on reply {step + 1}", "http" not in reply, reply[:120]))
+    for turn_no, text in script.cards_at:
+        urls = result.turns[turn_no].listings if -len(result.turns) <= turn_no < len(result.turns) else []
+        add((f"reply {turn_no + 1 if turn_no >= 0 else turn_no} shows a card with '{text}'",
+             any(text.lower() in url.lower() for url in urls), ", ".join(urls) or "no cards"))
+    for turn_no in script.no_cards_at:
+        urls = result.turns[turn_no].listings if -len(result.turns) <= turn_no < len(result.turns) else []
+        add((f"no cards on reply {turn_no + 1 if turn_no >= 0 else turn_no}", not urls, ", ".join(urls)))
     for slot, value in script.slots_equal.items():
         add((f"{slot} = {value}", slots.get(slot) == value, f"got {slots.get(slot)!r}"))
     for slot in script.absent:
@@ -790,7 +836,7 @@ def _check_script(result: Result, script: Script, state: dict[str, Any], repeats
         add((f"reply {step + 1} does not say '{text}'",
              text.lower() not in reply.lower().replace("’", "'"), reply[:120]))
     for step, text in script.reply_has:
-        reply = result.turns[step].bot if step < len(result.turns) else ""
+        reply = result.turns[step].bot if -len(result.turns) <= step < len(result.turns) else ""
         add((f"reply {step + 1} says '{text}'", text.lower() in reply.lower().replace("’", "'"), ""))
 
     if script.features or script.not_features or script.no_features or script.rerank is not None:
@@ -809,6 +855,9 @@ def _check_script(result: Result, script: Script, state: dict[str, Any], repeats
         for prefix in script.emails:
             hit = [r for r in rows if r["event_type"].startswith(prefix)]
             add((f"email '{prefix}' sent", bool(hit) and all(r["status"] == "sent" for r in hit), summary))
+        for text in script.email_has:
+            add((f"an email says '{text}'", any(text in r["body"] for r in rows),
+                 " || ".join(r["body"][-160:] for r in rows) or "no emails"))
         dupes = len(rows) - len({r["event_type"] for r in rows})
         add(("no duplicate emails", dupes == 0, summary if dupes else ""))
 
@@ -926,7 +975,7 @@ def main() -> int:
     categories = [c for c in CATEGORIES if not args.only or c in args.only.split(",")]
     scenarios = [s for s in args.scenarios.split(",") if s]
     jobs: list[Any] = [(c, s, i) for i, c in enumerate(categories) for s in scenarios]
-    groups = {"rules", "category", "email", "flow", "features", "axles", "switch"} if args.scripted == "all" else set(filter(None, args.scripted.split(",")))
+    groups = {"rules", "category", "email", "flow", "features", "axles", "switch", "lookup"} if args.scripted == "all" else set(filter(None, args.scripted.split(",")))
     words = [w.strip().lower() for w in args.match.split(",") if w.strip()]
     jobs += [script for script in SCRIPTS if script.group in groups
              and (not words or any(w in script.name.lower() for w in words))]
