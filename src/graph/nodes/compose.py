@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 _RETRY_PREFIX = {
     "negative": "That came through as a negative number, which I don't think is what you meant.",
     "axle_range": "We carry trailers with one to four axles.",
-    "implausible": "Just to check I have the right unit -",
+    "implausible": "That number seems unusual for a trailer, so I want to double-check the amount and unit.",
 }
 
 
@@ -106,6 +106,15 @@ def compose_node(state: dict, output: Any) -> dict:
             logger.info(
                 "COMPOSE dropped an acknowledgement restating the answer: session=%s",
                 state.get("session_id"),
+            )
+            acknowledgement = ""
+        if acknowledgement and _acknowledges_a_rejected_value(state, acknowledgement):
+            # The model wrote its thanks before Python checked the number, so it thanked them
+            # for a value that was then rejected: "Thanks, I have the haul weight noted. That
+            # came through as a negative number..." The retry line says what happened instead.
+            logger.info(
+                "COMPOSE dropped an acknowledgement of a rejected value: session=%s slot=%s",
+                state.get("session_id"), state.get("invalid_retry_slot"),
             )
             acknowledgement = ""
         if acknowledgement:
@@ -245,6 +254,18 @@ _SLOT_TOPICS: dict[str, tuple[str, ...]] = {
 
 def _is_about(question: str, slot: str) -> bool:
     return any(re.search(rf"\b{re.escape(term)}", question) for term in _SLOT_TOPICS[slot])
+
+
+def _acknowledges_a_rejected_value(state: dict, acknowledgement: str) -> bool:
+    """Whether the model's thanks is for the value Python just rejected.
+
+    A slot without a topic list cannot be told apart, so on its retry turn any
+    acknowledgement goes - a missing "thanks" costs less than thanking for a wrong number.
+    """
+    slot = state.get("invalid_retry_slot")
+    if not slot:
+        return False
+    return slot not in _SLOT_TOPICS or _is_about(_collapse(acknowledgement), slot)
 
 
 def _up_to_the_question_mark(text: Any) -> str:

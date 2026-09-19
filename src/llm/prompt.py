@@ -177,7 +177,10 @@ unit they meant, plus their exact words. Do not convert units - that is done for
 - NO UNIT? Use trailer sense: a width is 4-8.5 ft, a length 5-53 ft, a payload 500-30,000 lb,
   a bin 10-40 yd. So a bare "144 x 72" is inches and a bare "20" for a length is feet.
 - A RANGE: give both ends. The SMALLEST is what counts - never average them.
-- Never drop a minus. "-500 lbs" is low -500.
+  "10k-12k" is a range (low 10000, high 12000), not a minus.
+- A real minus sign stays: "-500 lbs" is low -500.
+- TYPOS and shorthand: read what they meant. "10,00 lbs" = 1000, "1o ft" = 10, "tweny" = 20,
+  "10k" = 10000. You are the one who reads their words; nothing after you re-reads them.
 - If they give no number, add nothing. Do not guess one.
 - Fill these in WHENEVER they are said, category or no category.
 

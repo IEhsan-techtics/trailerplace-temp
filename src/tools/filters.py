@@ -212,8 +212,11 @@ def _apply_quantities(state: dict, output: Any, category: str, writable: frozens
             continue
         raw = str(getattr(quantity, "raw_text", "") or "") or raw_by_slot.get(slot, "")
 
-        # The sign, from THEIR words (brief S22) - the model has been seen flipping it.
-        negative = float(getattr(quantity, "low", 0) or 0) < 0 or is_impossible_measurement(category, slot, raw)
+        # The sign is the model's reading too (brief S22 still re-asks a negative). Python used
+        # to overrule it from the raw text, and a regex cannot read people: it took the dash
+        # in "10k-12k" for a minus and re-asked a perfectly good range. Typos, ranges and
+        # dashes are language; the regex check now runs only on the fallback path below.
+        negative = float(getattr(quantity, "low", 0) or 0) < 0
         if slot in _MEASUREMENT_SLOTS and negative:
             result.invalid_slot, result.invalid_reason, result.invalid_raw = slot, "negative", raw
             logger.info("FILTER reject: slot=%s reason=negative raw=%r", slot, raw)

@@ -193,6 +193,35 @@ def test_a_negative_weight_is_re_asked_not_stored(fake_llm):
     assert "negative number" in result["assistant_text"]
 
 
+def test_a_rejected_value_is_not_thanked_for(fake_llm):
+    """Live probe: "Thanks, I have the haul weight noted. Just to check I have the right
+    unit - What's the rough haul weight per load?" The model thanks before Python checks."""
+    fake_llm.push(turn_output(category_mentioned="dump", intent="category_selection"))
+    run_turn("s1", "dump trailer")
+    fake_llm.push(turn_output(slots={"haul_item": "gravel"}))
+    run_turn("s1", "gravel")
+
+    fake_llm.push(turn_output(slots={"payload_capacity": "-500 lbs"},
+                              acknowledgement="Thanks, I have the haul weight noted."))
+    result = run_turn("s1", "-500 lbs")
+
+    assert "noted" not in result["assistant_text"]
+    assert "negative number" in result["assistant_text"]
+
+
+def test_an_acknowledgement_of_something_else_survives_a_retry(fake_llm):
+    fake_llm.push(turn_output(category_mentioned="dump", intent="category_selection"))
+    run_turn("s1", "dump trailer")
+    fake_llm.push(turn_output(slots={"haul_item": "gravel"}))
+    run_turn("s1", "gravel")
+
+    fake_llm.push(turn_output(slots={"payload_capacity": "-500 lbs", "hitch_type": "gooseneck"},
+                              acknowledgement="Gooseneck it is."))
+    result = run_turn("s1", "gooseneck, -500 lbs")
+
+    assert result["assistant_text"].startswith("Gooseneck it is.")
+
+
 def test_the_negative_retry_cannot_loop(fake_llm):
     fake_llm.push(turn_output(category_mentioned="dump", intent="category_selection"))
     run_turn("s1", "dump trailer")

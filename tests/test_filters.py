@@ -64,16 +64,29 @@ def test_where_the_regex_parser_would_disagree_is_logged(caplog):
     assert any("QUANTITY divergence" in r.message for r in caplog.records)
 
 
-def test_raw_negative_overrides_a_sign_flipped_model_number():
-    """The model dropped the minus; the customer's own words still carry it (S22)."""
+def test_a_negative_the_model_read_is_re_asked():
+    """S22: a negative is re-asked, never stored with its sign dropped."""
     state = state_with()
-    output = Output(make_extracted(
-        payload_capacity=500.0, quantities=[q("payload_capacity", "-500 lbs", 500, unit="lb")],
-    ))
+    output = Output(make_extracted(quantities=[q("payload_capacity", "-500 lbs", -500, unit="lb")]))
     result = apply_extracted_fields(state, output)
     assert result.invalid_slot == "payload_capacity"
     assert result.invalid_reason == "negative"
     assert "payload_capacity" not in state["slots"]
+
+
+@pytest.mark.parametrize("raw, low, high, stored", [
+    ("10k-12k", 10000, 12000, 10000.0),     # the dash once read as a minus by the regex
+    ("10,00 lbs", 1000, None, 1000.0),      # a typo the model reads through
+    ("1o k", 10000, None, 10000.0),         # letter o for a zero
+    ("tweny thousand", 20000, None, 20000.0),
+])
+def test_the_models_reading_of_messy_input_is_what_is_stored(raw, low, high, stored):
+    """Interpretation is the model's job - a regex cannot read typos, and must not veto it."""
+    state = state_with()
+    output = Output(make_extracted(quantities=[q("payload_capacity", raw, low, high, unit="lb")]))
+    result = apply_extracted_fields(state, output)
+    assert result.invalid_slot is None
+    assert state["slots"]["payload_capacity"] == stored
 
 
 def test_a_quantity_outranks_the_raw_text_parse():

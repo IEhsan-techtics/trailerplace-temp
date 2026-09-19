@@ -119,8 +119,19 @@ def test_negative_measurement_is_flagged_not_sign_flipped(text):
         assert is_impossible_measurement("Dump", "payload_capacity", text) is True
 
 
-def test_negative_is_not_confused_with_a_range_dash():
-    assert is_impossible_measurement("Dump", "payload_capacity", "5000-7000 lbs") is False
+@pytest.mark.parametrize("text", ["5000-7000 lbs", "10k-12k", "5k - 10k lbs", "8ft-10ft", "3.5t-4t"])
+def test_negative_is_not_confused_with_a_range_dash(text):
+    """"10k-12k" was once read as -12k: the "k" before the dash is not a digit."""
+    assert is_impossible_measurement("Dump", "payload_capacity", text) is False
+
+
+@pytest.mark.parametrize("text", ["about -500 lbs", "(-500)", "-.5 ton"])
+def test_a_sign_after_a_space_or_bracket_is_still_negative(text):
+    assert is_impossible_measurement("Dump", "payload_capacity", text) is True
+
+
+def test_a_k_range_stores_its_smaller_end():
+    assert normalize_answer_for_slot("Dump", "payload_capacity", "10k-12k") == 10000.0
 
 
 # --------------------------------------------------------------- axle count 1-4 (S22)

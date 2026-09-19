@@ -523,9 +523,15 @@ def is_impossible_measurement(category: str, slot_name: str, value: Any) -> bool
         return False
     # The RAW text, not the parsed value: by the time it is parsed the sign is already gone.
     text = str(value or "").replace(",", "")
-    # A minus is a SIGN only when no digit precedes it. Between digits it is the range dash,
-    # and ranges are supported everywhere ("5000-7000 lbs" is a legitimate answer, not -7000).
-    return bool(re.search(r"(?<![\d.])-\s*\d", text))
+    # A minus is a SIGN unless a number precedes it. After a digit OR a number's unit it
+    # is the range dash, and ranges are supported everywhere: "5000-7000 lbs" is not -7000,
+    # and "10k-12k" or "8ft-10ft" is not -12k (the "k" before the dash once made it one).
+    # Spaces around the dash do not change that: "5k - 10k" is a range too.
+    for match in re.finditer(r"-\s*\.?\d", text):
+        # A range dash follows a NUMBER, bare or with its unit. "about -500" is still a sign.
+        if not re.search(r"\d\.?\s*[a-z]*\.?\s*$", text[: match.start()], re.IGNORECASE):
+            return True
+    return False
 
 
 # Words that say "I don't know / don't mind" and nothing else. A free-text answer made of
