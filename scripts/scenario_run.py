@@ -544,6 +544,17 @@ SCRIPTS: list[Script] = [
            [OPENING, "I need a flatbed with quadruple axles", QUALIFY],
            answers=_bump("steel beams"), slots_equal={"axle_count": 4},
            asked=("payload_capacity",), category="Flatbed"),
+    Script("axles", "weight given to the count question -> not a count, asked again",
+           [OPENING, "I need a dump trailer for gravel with 7000 lb axles", "about 5,000 lbs",
+            "tandem", QUALIFY],
+           slots_equal={"axle_capacity": 7000.0, "axle_count": 2},
+           reply_has=((1, "how many axles"),),
+           reply_lacks=((2, "one to four"), (2, "didn't catch")), category="Dump"),
+    Script("axles", "'5k axles' first mention -> per axle, never asked which",
+           [OPENING, "I need a dump trailer for gravel with 5k axles", "tandem", QUALIFY],
+           slots_equal={"axle_capacity": 5000.0, "axle_count": 2}, absent=("total_axle_capacity_lbs",),
+           not_asked=("payload_capacity",), reply_has=((1, "how many axles"),),
+           reply_lacks=((1, "per axle, or the total"),), category="Dump"),
     Script("axles", "'5k axles' as the load weight -> not a load",
            [OPENING, "I need a dump trailer", "gravel", "5k axles", QUALIFY],
            absent=("payload_capacity",), slots_equal={"axle_capacity": 5000.0},
@@ -871,6 +882,8 @@ def main() -> int:
                         help="per-category scenarios; pass an empty string for none")
     parser.add_argument("--scripted", default="",
                         help="scripted groups to add: rules,category,email or all")
+    parser.add_argument("--match", default="",
+                        help="comma-separated words; keep only scripted conversations whose name has one")
     args = parser.parse_args()
 
     health = httpx.get(f"{args.base_url}/health", timeout=10).json()
@@ -882,7 +895,9 @@ def main() -> int:
     scenarios = [s for s in args.scenarios.split(",") if s]
     jobs: list[Any] = [(c, s, i) for i, c in enumerate(categories) for s in scenarios]
     groups = {"rules", "category", "email", "flow", "features", "axles"} if args.scripted == "all" else set(filter(None, args.scripted.split(",")))
-    jobs += [script for script in SCRIPTS if script.group in groups]
+    words = [w.strip().lower() for w in args.match.split(",") if w.strip()]
+    jobs += [script for script in SCRIPTS if script.group in groups
+             and (not words or any(w in script.name.lower() for w in words))]
     started = datetime.now()
     print(f"Running {len(jobs)} conversations against {args.base_url} ({health.get('model')})")
     lock = threading.Lock()
