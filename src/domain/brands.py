@@ -177,11 +177,9 @@ def make_prompt_block() -> str:
         make for make in inventory.canonical_makes
         if make not in {"Gooseneck", "Bumper Pull"}
     )
-    lines = [
-        "Canonical trailer makes/brands available in the current inventory, with their available trailer categories:",
-        "Gooseneck and Bumper Pull are strictly hitch types, never trailer makes/brands. "
-        "Do not infer, recommend, or return either one as a make.",
-    ]
+    # Gooseneck is left out of the list because it is mostly a hitch; the analysis prompt
+    # explains the one case where it is the brand.
+    lines = ["MAKES WE STOCK, with their categories:"]
     if not prompt_makes:
         lines.append("- No makes are currently available from the inventory workbook.")
         return "\n".join(lines)

@@ -36,7 +36,11 @@ def qualified_state(**kwargs):
 # render from their trait definitions. It replaces a model judgement that used to be spread
 # through the prompt as category-specific rules, and it grows with every trait an admin
 # adds - which is exactly the growth this ceiling should catch.
-MAX_SYSTEM_PROMPT_CHARS = 20_500
+#
+# Lowered from 20,500 by the prompt rewrite: every rule stated once as situation -> action,
+# the scripted answers shared with the reply prompt, and the category term lists dropped
+# (Python maps the customer's words itself). Live it measured 12,630.
+MAX_SYSTEM_PROMPT_CHARS = 13_500
 
 
 def test_the_system_prompt_stays_short():
@@ -267,3 +271,21 @@ def test_the_configured_wording_of_every_remaining_question_is_given():
     block = state_block(state)
     assert "use exactly these words" in block
     assert "payload_capacity: \"What's the rough haul weight per load?\"" in block
+
+
+# The response schema rides along with every call too, and it used to be bigger than the
+# prompt: every field restated a rule the prompt already gave, plus a pydantic title per
+# field. It measured 20,677 chars before the trim and 13,470 after.
+MAX_RESPONSE_SCHEMA_CHARS = 14_000
+
+
+def test_the_response_schema_stays_short():
+    import json
+
+    from openai.lib._pydantic import to_strict_json_schema
+
+    from src.llm.schemas import ChatbotTurnOutput
+
+    schema = json.dumps(to_strict_json_schema(ChatbotTurnOutput))
+    assert len(schema) < MAX_RESPONSE_SCHEMA_CHARS, f"response schema is {len(schema)} chars"
+    assert '"title"' not in schema, "titles are dead weight the model reads on every call"

@@ -323,6 +323,30 @@ def category_prompt_block() -> str:
     return "\n".join(lines)
 
 
+def category_names_block() -> str:
+    """The closed list of categories, for the analysis prompt.
+
+    Only the names: the model returns the category in the customer's own words and
+    ``normalize_category`` maps them, so the TYPE and CARGO term lists in
+    ``category_prompt_block`` would be ~2,500 characters the model has no use for.
+    """
+    advertised = _advertised_categories()
+    lines = [
+        f"We carry exactly {len(advertised)} categories: {', '.join(advertised)}. No others "
+        "exist. Gooseneck and Bumper Pull are hitch types, never categories.",
+    ]
+    for rule in _CATEGORY_CLARIFICATION_RULES.values():
+        options = "; ".join(
+            f"{category} ({', '.join(terms)})"
+            for category, terms in dict(rule.get("options") or {}).items()
+        )
+        lines.append(
+            f"Ambiguous: {', '.join(rule.get('trigger_terms') or [])} - the system asks which "
+            f"they mean: {options}."
+        )
+    return "\n".join(lines)
+
+
 def category_reference_block() -> str:
     """Customer-facing catalogue for the Respond prompt: what each category is good for.
 

@@ -42,22 +42,43 @@ def company_facts_block() -> str:
     """The prompt block. Every fact here is checkable against the reference document."""
     return "\n".join(
         [
-            "DEALERSHIP FACTS (the only business facts you may state):",
-            f"- Name: {NAME}",
-            f"- Location: {LOCATION}",
-            f"- Phone: {PHONE}",
-            f"- Opening hours: {HOURS}",
-            f"- Website: {website()}",
-            f"- Services: {', '.join(SERVICES)}",
-            "",
-            f"Financing, trade-ins, service and parts are handled by people, not by you. "
-            f"Answer those with the phone number ({PHONE}) rather than details.",
-            "Never state a price, a delivery date, a restock date or a stock level that is "
-            "not in a listing you were given this turn.",
-            f"Our hours are {HOURS}. State the TIMES only - we have not been told which days, "
-            "so never name days of the week.",
+            "DEALERSHIP FACTS (the only business facts you may state)",
+            f"- {NAME}, {LOCATION}. Phone {PHONE}. Website {website()}.",
+            f"- Open {HOURS}. State the times only - we were not told which days, so never "
+            "name days of the week.",
+            f"- Services: {', '.join(SERVICES)}. Financing, trade-ins, service and parts are "
+            "handled by people: give the phone number, not details.",
+            "- Never state a price, delivery date, restock date or stock level that is not in "
+            "a listing you were given this turn.",
         ]
     )
+
+
+# The five questions the bot answers from a script instead of escalating. Written once and
+# shared by both prompts, so the analysis call and the reply pass can never drift apart.
+# The key is the faq_key the analysis call returns; the team is emailed about every one.
+STANDARD_ANSWERS = (
+    ("financing", "Financing",
+     f"We offer financing. Call {PHONE} to speak with our finance team, and I can keep "
+     "helping narrow down the right trailer."),
+    ("trade_in", "Trade-ins", f"Our sales team handles trade-in appraisals. Call {PHONE}."),
+    ("service_parts", "Service or parts", f"Our service and parts team can help. Reach them at {PHONE}."),
+    ("store_info", "Where we are / hours",
+     f"We're located in {LOCATION} and open {HOURS}. Call {PHONE} or visit {{website}}. "
+     "We also offer financing and delivery."),
+    ("contact_human", "Wanting a person",
+     f"You can reach our team at {PHONE}. Happy to keep helping with your trailer search too."),
+)
+
+
+def standard_answers_block(with_keys: bool = False) -> str:
+    """The scripted answers. ``with_keys`` adds the faq_key the analysis call must set."""
+    lines = ["THE FIVE STANDARD QUESTIONS - answer them yourself with this script, keeping "
+             "its meaning and the phone number. Never escalate them."]
+    for key, label, answer in STANDARD_ANSWERS:
+        tag = f" (faq_key {key})" if with_keys else ""
+        lines.append(f'- {label}{tag}: "{answer.format(website=website())}"')
+    return "\n".join(lines)
 
 
 def website_redirect_line() -> str:
