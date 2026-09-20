@@ -52,6 +52,21 @@ def _as_uuid(value: str) -> uuid.UUID:
         return uuid.uuid5(uuid.NAMESPACE_URL, f"trailerplace-session:{value}")
 
 
+def as_session_uuid(value: str) -> uuid.UUID:
+    """``_as_uuid`` under a public name, for callers outside this module."""
+    return _as_uuid(value)
+
+
+def session_uuid_for(channel_id: str) -> str:
+    """The session id a raw channel identity maps to, as a string.
+
+    A Messenger PSID is not a UUID, and the chatbot_* tables are keyed by one. Hashing it
+    deterministically means the same customer always resumes the same conversation, without
+    a lookup table to keep in step.
+    """
+    return str(_as_uuid(channel_id))
+
+
 # --------------------------------------------------------------------------- session setup
 def ensure_session(session_id: str) -> str:
     """Make sure a lead and a conversation row exist. Returns the lead id.
@@ -67,6 +82,8 @@ def ensure_session(session_id: str) -> str:
         return record["lead_id"]
 
     session_uuid = _as_uuid(session_id)
+    # Free after the first turn in this process - ensure_schema memoises. It stays on the
+    # turn path so a process that never ran startup (a script, a worker) still works.
     db.ensure_schema()
     with db.get_session_factory()() as sql:
         existing = sql.get(ChatbotConversation, session_uuid)
@@ -128,12 +145,18 @@ def save_turn(
     contact: dict[str, Any] | None = None,
     item_of_interest: str | None = None,
     outbox_events: list[dict[str, Any]] | None = None,
+    turn_id: Any = None,
 ) -> None:
     """Persist one completed turn.
 
     One transaction: the conversation row, the turn row and the lead update commit together
     or not at all, so a crash can never leave a transcript that disagrees with the state
     snapshot it was produced from.
+
+    ``turn_id`` is the receipt. Passing one that a caller can reproduce - derived from the
+    platform's own message id - is what lets ``stored_turn_response`` recognise a redelivery
+    later and hand back this reply rather than running the turn again. Left out, a fresh id
+    is minted and the turn is simply not replayable, which is all web chat needs.
     """
     if not persistence_enabled():
         record = _MEMORY.setdefault(
@@ -145,7 +168,8 @@ def save_turn(
         record["state_snapshot"] = dict(state_snapshot)
         record["state_version"] += 1
         record.setdefault("turns", []).append(
-            {"request_message": request_message, "response": response}
+            {"turn_id": str(turn_id) if turn_id else str(uuid.uuid4()),
+             "request_message": request_message, "response": response}
         )
         if contact:
             record["contact"] = dict(contact)
@@ -166,14 +190,14 @@ def save_turn(
         row.updated_at = datetime.now(timezone.utc)
 
         # Hoisted so the outbox rows below can reference this turn.
-        turn_id = uuid.uuid4()
+        turn_uuid = _as_uuid(turn_id) if turn_id else uuid.uuid4()
 
         # Appended through the relationship, not by raw FK, so the unit of work orders the
         # inserts correctly on a session's very first flush.
         row.turns.append(
             ChatbotTurn(
                 session_id=session_uuid,
-                turn_id=turn_id,
+                turn_id=turn_uuid,
                 request_message=request_message[: settings.chat_max_message_chars],
                 response=response,
             )
@@ -186,7 +210,7 @@ def save_turn(
             sql.add(
                 ChatbotOutbox(
                     session_id=session_uuid,
-                    turn_id=turn_id,
+                    turn_id=turn_uuid,
                     event_key=str(event.get("event_key") or uuid.uuid4()),
                     event_type=str(event.get("event_type") or "team_request")[:64],
                     payload=dict(event.get("payload") or {}),
@@ -197,6 +221,44 @@ def save_turn(
             _update_lead(sql, row.lead_id, contact or {}, item_of_interest)
 
         sql.commit()
+
+
+# ----------------------------------------------------------------------- turn idempotency
+def stored_turn_response(session_id: str, turn_id: Any) -> dict[str, Any] | None:
+    """The reply a turn already produced, if this turn has been answered before.
+
+    The turn row IS the receipt: it is written in the same transaction as the state snapshot
+    it produced, so a row here means that turn completed in full - the state was saved and
+    its emails were queued. A redelivery can therefore be answered from the row instead of
+    re-run, which matters more than it sounds: running it again would charge for two model
+    calls, advance the conversation twice on one message, and send the team a second email
+    about the same customer.
+
+    Never raises. A dedupe check that throws would cost a customer their message, which is
+    far worse than the duplicate it was guarding against.
+    """
+    if turn_id is None:
+        return None
+    try:
+        if not persistence_enabled():
+            record = _MEMORY.get(session_id) or {}
+            wanted = str(turn_id)
+            for turn in record.get("turns") or []:
+                if turn.get("turn_id") == wanted:
+                    return dict(turn.get("response") or {})
+            return None
+
+        with db.get_session_factory()() as sql:
+            row = sql.get(ChatbotTurn, (_as_uuid(session_id), _as_uuid(turn_id)))
+            return dict(row.response or {}) if row is not None else None
+    except Exception:  # pragma: no cover - never lose a message to a dedupe check
+        logger.exception("Turn receipt lookup failed: session=%s turn=%s", session_id, turn_id)
+        return None
+
+
+def turn_already_handled(session_id: str, turn_id: Any) -> bool:
+    """Has this exact turn already been answered and committed?"""
+    return stored_turn_response(session_id, turn_id) is not None
 
 
 # ------------------------------------------------------------------------------ the outbox
@@ -282,53 +344,110 @@ def deliver_pending_outbox_async(limit: int = 10) -> None:
 _FEEDBACK_POOL: Any = None
 
 
-def save_user_feedback(session_id: str, turn_idx: int, text: str, timestamp_iso: str) -> None:
-    """Attach a tester's note to one of the bot's replies.
+FEEDBACK_RATINGS = ("up", "down")
 
-    ``turn_idx`` counts the bot's replies from zero - app.py derives it from the reply's
-    position in its own message list. It is resolved against the ASSISTANT entries here, not
-    used as a raw index: this table stores every message in one list, user and assistant
-    alternating, so the index New Prompt used would land on the wrong message (and half the
-    time on the customer's).
+
+def _with_feedback(
+    conversation: list[dict[str, Any]], turn_idx: int, text: str | None,
+    timestamp_iso: str | None, rating: str | None, session_id: str,
+) -> list[dict[str, Any]] | None:
+    """The transcript with one reply annotated, or None when there is no such reply.
+
+    ``turn_idx`` counts the bot's REPLIES from zero - the position a frontend knows a
+    message by. It is resolved against the assistant entries rather than used as a raw
+    index: this table stores user and assistant messages in one alternating list, so a raw
+    index would land on the wrong message, and half the time on the customer's own.
     """
-    if not persistence_enabled():
-        return
+    replies = [i for i, entry in enumerate(conversation)
+               if isinstance(entry, dict) and entry.get("role") == "assistant"]
+    if not 0 <= turn_idx < len(replies):
+        logger.warning(
+            "FEEDBACK skipped: session=%s reply %d of %d", session_id, turn_idx, len(replies)
+        )
+        return None
+    position = replies[turn_idx]
+    entry = {**conversation[position], "feedback_at": timestamp_iso or _now_iso()}
+    # A rating and a note are independent: a thumb with no words is the common case, and
+    # sending only one of the two must not erase the other.
+    if rating is not None:
+        entry["feedback_rating"] = rating or None
+    if text is not None:
+        entry["feedback"] = text or None
+    updated = list(conversation)
+    updated[position] = entry
+    return updated
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def save_user_feedback(
+    session_id: str,
+    turn_idx: int,
+    text: str | None = None,
+    timestamp_iso: str | None = None,
+    *,
+    rating: str | None = None,
+) -> bool:
+    """Attach a thumb and/or a note to one of the bot's replies. True when it landed.
+
+    Stored on the message itself inside the transcript, not in a table of its own, so a
+    reply and the verdict on it are read back together and can never drift apart.
+    """
+    if rating is not None and rating not in FEEDBACK_RATINGS:
+        raise ValueError(f"rating must be one of {FEEDBACK_RATINGS}, not {rating!r}")
     try:
+        if not persistence_enabled():
+            record = _MEMORY.get(session_id)
+            if not record:
+                return False
+            updated = _with_feedback(
+                list(record.get("conversation") or []), turn_idx, text, timestamp_iso,
+                rating, session_id,
+            )
+            if updated is None:
+                return False
+            record["conversation"] = updated
+            return True
+
         with db.get_session_factory()() as sql:
             row = sql.get(ChatbotConversation, _as_uuid(session_id))
             if row is None or not isinstance(row.conversation, list):
-                return
-            conversation = list(row.conversation)
-            replies = [i for i, entry in enumerate(conversation)
-                       if isinstance(entry, dict) and entry.get("role") == "assistant"]
-            if not 0 <= turn_idx < len(replies):
-                logger.warning(
-                    "FEEDBACK skipped: session=%s reply %d of %d", session_id, turn_idx, len(replies)
-                )
-                return
-            position = replies[turn_idx]
-            conversation[position] = {
-                **conversation[position],
-                "feedback": text or None,
-                "feedback_at": timestamp_iso,
-            }
+                return False
+            updated = _with_feedback(
+                list(row.conversation), turn_idx, text, timestamp_iso, rating, session_id
+            )
+            if updated is None:
+                return False
             # A new list, so SQLAlchemy sees the JSON column change.
-            row.conversation = conversation
+            row.conversation = updated
             sql.commit()
+            return True
     except Exception:  # pragma: no cover - a note must never break the chat
         logger.exception("Feedback persistence failed: session=%s", session_id)
+        return False
 
 
-def enqueue_save_user_feedback(session_id: str, turn_idx: int, text: str, timestamp_iso: str) -> None:
-    """``save_user_feedback`` off the UI thread - the name app.py imports."""
+def enqueue_save_user_feedback(
+    session_id: str,
+    turn_idx: int,
+    text: str | None = None,
+    timestamp_iso: str | None = None,
+    *,
+    rating: str | None = None,
+) -> None:
+    """``save_user_feedback`` off the caller's thread - the name app.py imports.
+
+    Fire and forget: nobody is waiting on the answer to a thumbs-up, and the API returns as
+    soon as the note is queued.
+    """
     global _FEEDBACK_POOL
-    if not persistence_enabled():
-        return
     if _FEEDBACK_POOL is None:
         from concurrent.futures import ThreadPoolExecutor
 
         _FEEDBACK_POOL = ThreadPoolExecutor(max_workers=1, thread_name_prefix="feedback")
-    _FEEDBACK_POOL.submit(save_user_feedback, session_id, turn_idx, text, timestamp_iso)
+    _FEEDBACK_POOL.submit(save_user_feedback, session_id, turn_idx, text, timestamp_iso, rating=rating)
 
 
 def _update_lead(sql, lead_id, contact: dict[str, Any], item_of_interest: str | None) -> None:

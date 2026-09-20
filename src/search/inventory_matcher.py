@@ -121,7 +121,7 @@ def load_inventory(excel_path: str | Path = _LISTINGS_FILE) -> pd.DataFrame:
 def prepare_inventory(df: pd.DataFrame) -> pd.DataFrame:
     prepared = df.copy()
     for column in (
-        "title", "url", "year", "make", "model", "trim", "category",
+        "title", "url", "image_url", "year", "make", "model", "trim", "category",
         "subcategory", "stock_number", "price", "condition", "length", "width",
         "gvwr", "payload_capacity", "hitch_type", "color", "axles", "axle_capacity",
         "trailer_material", "floor", "dealer_notes", "info_specs_json",
@@ -286,6 +286,7 @@ def _row_to_listing(row: pd.Series | dict[str, Any], score: float | None = None)
     listing = {
         "title": _clean_scalar(get("title")),
         "url": _clean_scalar(get("url")),
+        "image_url": _clean_scalar(get("image_url")),
         "year": _clean_scalar(get("year")),
         "make": _clean_scalar(get("make")),
         "model": _clean_scalar(get("model")),

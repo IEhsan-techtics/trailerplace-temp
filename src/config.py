@@ -102,6 +102,10 @@ class Settings:
     rules_refresh_seconds: float = 30.0
     # Shared secret for the /admin/rules API. Empty means the API is not mounted at all.
     admin_api_token: str = ""
+    # Whether a trailer goes to Messenger as a generic-template card (photo, title, price,
+    # View Trailer button) or as plain bubbles. Off, the trailer still reaches them with a
+    # tappable link - see src/domain/cards.py.
+    messenger_listing_cards: bool = True
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -166,6 +170,7 @@ class Settings:
             turn_log_path=os.getenv("TURN_LOG_PATH", ""),
             rules_refresh_seconds=_float(os.getenv("RULES_REFRESH_SECONDS"), 30.0),
             admin_api_token=os.getenv("ADMIN_API_TOKEN", ""),
+            messenger_listing_cards=_bool(os.getenv("MESSENGER_LISTING_CARDS"), True),
         )
 
 

@@ -19,9 +19,11 @@ customer just said.
 from __future__ import annotations
 
 import logging
+import time
+import uuid
 from typing import Any
 
-from src import conversation_store
+from src import conversation_log, conversation_store, turn_log
 from src.graph.nodes.apply import apply_node
 from src.graph.nodes.compose import compose_node
 from src.graph.nodes.inventory_lookup import inventory_lookup_node
@@ -137,20 +139,47 @@ def _tools_and_reply(state: dict, output: Any, user_message: str) -> None:
                 state.pop("turn", None)
 
 
-def run_turn(session_id: str, user_message: str) -> dict[str, Any]:
+def run_turn(session_id: str, user_message: str, *, turn_id: Any = None) -> dict[str, Any]:
     """One complete turn: load, analyze, apply, tools, compose, persist.
 
     Returns the payload the API and the CLI both render.
+
+    ``turn_id`` makes the turn idempotent. Give one that the caller can reproduce for a
+    given customer message - the platform's own message id, or a hash of it - and a
+    redelivery is answered from the stored reply instead of being run a second time.
+    Without it every call is a new turn, which is what a browser holding its own request
+    open actually wants.
     """
     with usage.usage_scope() as turn_usage:
         lead_id = conversation_store.ensure_session(session_id)
         snapshot, conversation, stored_lead_id = conversation_store.load_session(session_id)
 
+        # Before the model call, because that is the expense being avoided. A turn row
+        # exists only if that turn committed in full, so its reply is the whole answer.
+        replay = conversation_store.stored_turn_response(session_id, turn_id)
+        if replay is not None:
+            logger.info("TURN replayed: session=%s turn=%s", session_id, turn_id)
+            replayed_state = from_snapshot(session_id, snapshot)
+            return {
+                **replay,
+                "session_id": session_id,
+                "turn_id": str(turn_id),
+                "slots": dict(replayed_state.get("slots") or {}),
+                "contact": dict(replayed_state.get("contact") or {}),
+                "state_schema_version": STATE_SCHEMA_VERSION,
+                "usage": turn_usage.as_dict(),
+                "replayed": True,
+            }
+
+        started = time.perf_counter()
         state = from_snapshot(session_id, snapshot)
         state["lead_id"] = stored_lead_id or lead_id
         state["messages"] = conversation
         state["turn_outcome"] = {}
         state["turn_index"] = int(state.get("turn_index") or 0) + 1
+        # Logged and stored either way, so a turn can always be found by its id - it is only
+        # the CALLER-supplied one that makes a turn replayable.
+        turn_id = turn_id or uuid.uuid4()
 
         # ---- the single model call ----
         output = analyze_turn(state, user_message)
@@ -188,6 +217,7 @@ def run_turn(session_id: str, user_message: str) -> dict[str, Any]:
             contact=state.get("contact"),
             item_of_interest=conversation_store.describe_interest(state),
             outbox_events=state["turn_outcome"].get("outbox_events"),
+            turn_id=turn_id,
         )
 
         # After the commit and off the reply path: the customer must never wait on an SMTP
@@ -201,10 +231,32 @@ def run_turn(session_id: str, user_message: str) -> dict[str, Any]:
             turn_usage.total_tokens, turn_usage.cached_tokens, state.get("category"),
             state.get("qualification_complete"),
         )
+        # After the save, so what is logged is what was persisted. Both are best-effort and
+        # neither can raise - a logging failure must never cost the customer their reply.
+        turn_log.log_turn(
+            session_id=session_id,
+            turn_id=str(turn_id),
+            turn_index=state.get("turn_index"),
+            intent=getattr(output, "intent", None),
+            category=state.get("category"),
+            latency_ms=(time.perf_counter() - started) * 1000,
+            turn_outcome=state["turn_outcome"],
+            usage=turn_usage,
+        )
+        conversation_log.log_conversation_turn(
+            session_id=session_id,
+            turn_id=str(turn_id),
+            user_message=user_message,
+            output=output,
+            assistant_text=assistant_text,
+            turn_outcome=state["turn_outcome"],
+            state=state,
+        )
 
         return {
             **response,
             "session_id": session_id,
+            "turn_id": str(turn_id),
             "slots": dict(state.get("slots") or {}),
             "contact": dict(state.get("contact") or {}),
             "state_schema_version": STATE_SCHEMA_VERSION,

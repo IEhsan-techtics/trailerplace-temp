@@ -63,18 +63,13 @@ def _enabled() -> bool:
     return persistence_enabled()
 
 
-_schema_ready = False
-
-
 def _sessions():
-    global _schema_ready
     from src import db
 
-    if not _schema_ready:
-        # The same create-if-missing the conversation store runs; the rules may be read
-        # before any conversation has been saved.
-        db.ensure_schema()
-        _schema_ready = True
+    # The same create-if-missing the conversation store runs; the rules may be read
+    # before any conversation has been saved. Memoised in db, so this costs nothing
+    # after the first call in the process.
+    db.ensure_schema()
     return db.get_session_factory()
 
 

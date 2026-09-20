@@ -71,6 +71,16 @@ def memory_store(monkeypatch):
     conversation_store.reset_memory()
 
 
+@pytest.fixture(autouse=True)
+def memory_inbound():
+    """The inbound queue starts empty for every test, and holds no lock."""
+    from src import inbound
+
+    inbound.reset_memory()
+    yield
+    inbound.reset_memory()
+
+
 @pytest.fixture
 def fake_llm(monkeypatch):
     """Script the single model call.

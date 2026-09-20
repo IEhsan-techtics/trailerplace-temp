@@ -121,6 +121,11 @@ class TrailerListingRow(Base):
     stock_number: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
     url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The listing's main photo. Read-only here: this table is owned and populated by the
+    # ingest, and Luna only ever selects from it. It is what a Messenger card shows -
+    # Meta fetches the URL server-side, so a missing one means a card without a picture,
+    # never a card that fails to send.
+    image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     condition: Mapped[str | None] = mapped_column(String(64), nullable=True)
     category: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -180,6 +185,47 @@ class TrailerListingRow(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class ChatbotInboundMessage(Base):
+    """A customer message a PUSH channel handed us, before it has been answered.
+
+    Web chat never lands here: a browser holds its request open and gets the reply back on
+    it. Messenger and anything else that pushes does, because two things are true there
+    that are not true of a browser - the platform retries a delivery it did not hear back
+    about, and two messages sent seconds apart can reach two different instances.
+
+    Rows go in pending and come out done. A message that could not be answered is also
+    marked done, with last_error set: leaving it pending would park it at the head of the
+    queue and block every later message from that customer forever.
+    """
+
+    __tablename__ = "chatbot_inbound_messages"
+    __table_args__ = (
+        # The idempotency key. A redelivery carries the platform's original message id, so
+        # it collides here and is discarded before any work is done.
+        UniqueConstraint("channel", "external_id", name="uq_chatbot_inbound_external_id"),
+        # Covers the drain's only query: the oldest pending message for one customer.
+        Index("ix_chatbot_inbound_pending", "session_id", "status", "sent_at"),
+    )
+
+    message_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    channel: Mapped[str] = mapped_column(String(32), nullable=False, default="messenger", server_default="messenger")
+    # The raw channel identity - a Messenger PSID - NOT the UUID the other chatbot_* tables
+    # are keyed by. conversation_store._as_uuid derives that from this.
+    session_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    # The platform's own message id, or one we synthesise for an event that carries none.
+    external_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    # When the customer pressed send, as the platform reports it. The ordering key, in
+    # preference to created_at, which only records when the delivery happened to reach us.
+    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending", server_default="pending")
+    # The turn that answered it, once one has.
+    turn_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    answered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class ChatbotOutbox(Base):

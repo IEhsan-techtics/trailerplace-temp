@@ -39,7 +39,7 @@ from src.shown_listings_store import (
     add_shown_keys_and_urls,
     add_shown_urls,
 )
-from src.domain.reply_chunks import split_reply_into_chunks, urls_in_chunk
+from src.domain.cards import website_bubbles
 from src.models import TrailerListing
 from src.thinking_agent import (
     generate_thinking_flow,
@@ -154,26 +154,6 @@ def _iter_sse_events(response: requests.Response):
                 continue
 
 
-def _listings_for_chunk(chunk: str, listings: list, claimed: set[int]) -> list[tuple[int, object]]:
-    """The listings this chunk links to, so a trailer's card sits under its own message.
-
-    `claimed` is carried across the chunks of one reply: a listing belongs to the first chunk
-    that links it, and whatever no chunk links falls through to the caller's leftovers.
-    """
-    linked = {str(url or "").rstrip("/").lower() for url in urls_in_chunk(chunk)}
-    if not linked:
-        return []
-    matched = []
-    for index, listing in enumerate(listings):
-        if index in claimed:
-            continue
-        url = str(getattr(listing, "url", "") or "").rstrip("/").lower()
-        if url and url in linked:
-            claimed.add(index)
-            matched.append((index + 1, listing))
-    return matched
-
-
 def _render_message_bubbles(msg: dict):
     """Render one stored turn as the bubbles it was sent in; return the LAST bubble.
 
@@ -185,26 +165,22 @@ def _render_message_bubbles(msg: dict):
     role = msg.get("role", "assistant")
     content = str(msg.get("content") or "")
     listings = list(msg.get("listings") or [])
-    chunks = split_reply_into_chunks(content) if role == "assistant" else []
-    if not chunks:
-        chunks = [content]
-    claimed: set[int] = set()
+    # The website rendering itself lives in src/domain/cards.py, beside the Messenger one,
+    # so the two channels' answers to "which trailer does this bubble show?" cannot drift.
+    bubbles = website_bubbles(content, listings) if role == "assistant" else [{"text": content, "listings": []}]
     bubble = None
-    for index, chunk in enumerate(chunks):
+    for index, part in enumerate(bubbles):
         bubble = st.chat_message(role)
         with bubble:
             if index == 0:
                 _render_search_note(msg.get("search_note"))
-            st.markdown(chunk)
+            st.markdown(part["text"])
             if SHOW_LISTING_CARDS:
-                for rank, listing in _listings_for_chunk(chunk, listings, claimed):
-                    render_card(listing, rank)
-    if SHOW_LISTING_CARDS and bubble is not None:
-        # Anything the reply did not link (or every card, when the text has no cards at all).
-        with bubble:
-            for rank, listing in enumerate(listings, 1):
-                if rank - 1 not in claimed:
-                    render_card(listing, rank)
+                for entry in part["listings"]:
+                    render_card(entry["listing"], entry["rank"])
+                # Anything the reply never linked, or every card when it has none at all.
+                for entry in part.get("leftover") or []:
+                    render_card(entry["listing"], entry["rank"])
     return bubble
 
 

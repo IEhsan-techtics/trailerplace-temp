@@ -250,6 +250,7 @@ def _row_to_listing(row: TrailerListingRow) -> dict[str, Any]:
         raw_features = [raw_features]
     return {
         "title": row.title or "",
+        "image_url": row.image_url,
         "condition": row.condition or "New",
         "price": row.price_display or price,
         "price_display": row.price_display or (f"${price:,.0f}" if price else None),

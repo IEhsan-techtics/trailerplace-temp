@@ -15,6 +15,7 @@ Run with the project venv:
 """
 from __future__ import annotations
 
+import contextlib
 import contextvars
 import json
 import logging
@@ -23,7 +24,7 @@ import re
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any
+from typing import Any, Literal
 
 from dotenv import load_dotenv
 
@@ -33,7 +34,7 @@ from fastapi import FastAPI, HTTPException, Response  # noqa: E402
 from fastapi.responses import StreamingResponse  # noqa: E402
 from pydantic import BaseModel, ConfigDict, Field  # noqa: E402
 
-from src import conversation_store, turn_status  # noqa: E402
+from src import conversation_store, db, turn_status  # noqa: E402
 from src.config import settings  # noqa: E402
 from src.domain.reply_chunks import split_reply_into_chunks  # noqa: E402
 from src.graph.build import run_turn  # noqa: E402
@@ -43,7 +44,30 @@ from src.log_setup import configure_trailerplace_logging  # noqa: E402
 configure_trailerplace_logging()
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="TrailerPlace chatbot", version="1.0")
+@contextlib.asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Get the schema out of the way before the first customer, not during their turn.
+
+    ``ensure_schema`` memoises, so this is the only time it costs anything in this process -
+    it used to run on every turn, and the reflection round trips to Azure Postgres were
+    about 2.7 s of an 11 s answer.
+
+    With DB_AUTO_CREATE=1 the full migration runs instead: ``upgrade head`` and then the
+    create-if-missing. Every revision is guarded, so it is safe on the live database whose
+    tables predate Alembic.
+    """
+    if conversation_store.persistence_enabled():
+        try:
+            if settings.db_auto_create:
+                db.run_migrations()
+            else:
+                db.ensure_schema()
+        except Exception:  # the bot still serves; the first turn will try again
+            logger.exception("Schema check at startup failed")
+    yield
+
+
+app = FastAPI(title="TrailerPlace chatbot", version="1.0", lifespan=lifespan)
 
 # The question-rules admin API (src/api/admin_rules.py), for the control panel. Mounted only
 # when a token is configured, so a deploy without one has no admin surface at all.
@@ -73,13 +97,16 @@ _STREAM_EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="chat_st
 
 
 class ChatRequest(BaseModel):
-    # app.py also sends turn_id, sales_phase, onboarding_api_messages, customer_* and
+    # app.py also sends sales_phase, onboarding_api_messages, customer_* and
     # already_shown_listing_urls. They are New Prompt's; Luna keeps all of that in the session
     # state, so they are accepted and ignored rather than rejected.
     model_config = ConfigDict(extra="ignore")
 
     message: str = Field(min_length=1)
     session_id: str | None = None
+    # Send the SAME id when retrying a message and the stored reply comes back instead of a
+    # second turn: no second model call, no second email, and the conversation does not move
+    # on twice on one message. A fresh id per attempt means every attempt is a new turn.
     turn_id: str | None = None
 
 
@@ -109,7 +136,7 @@ def _chat(request: ChatRequest) -> dict[str, Any]:
     # line, and at the end so the status dict does not keep one entry per session forever.
     turn_status.clear(session_id)
     try:
-        result = run_turn(session_id, request.message)
+        result = run_turn(session_id, request.message, turn_id=request.turn_id)
     except Exception:
         # The turn degrades internally on a model failure, so reaching here means something
         # structural. The customer gets a message rather than a stack trace.
@@ -121,7 +148,6 @@ def _chat(request: ChatRequest) -> dict[str, Any]:
     return {
         **result,
         **_contact_fields(result.get("contact")),
-        "turn_id": request.turn_id,
         # app.py has an onboarding phase of its own. Luna's contact gate lives in the graph,
         # so the UI is always in the main phase and simply renders what the bot says.
         "sales_phase": "main",
@@ -256,6 +282,39 @@ def get_session(session_id: str) -> dict[str, Any]:
         "qualification_complete": state.get("qualification_complete"),
         "contact": state.get("contact"),
     }
+
+
+class FeedbackRequest(BaseModel):
+    """A tester's verdict on one of Luna's replies."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    # Counts Luna's REPLIES from zero, which is the position a frontend knows a message by.
+    # The store resolves it against the assistant entries in the transcript.
+    turn_idx: int = Field(ge=0)
+    rating: Literal["up", "down"] | None = None
+    text: str | None = None
+    timestamp: str | None = None
+
+
+@app.post("/session/{session_id}/feedback")
+def post_feedback(session_id: str, request: FeedbackRequest) -> dict[str, Any]:
+    """Record a thumb and/or a note against one reply.
+
+    Written straight onto the message inside the stored transcript, so the reply and the
+    verdict on it are read back together and cannot drift apart.
+
+    Queued rather than awaited: nobody waits on a thumbs-up, and a note is never worth
+    holding the UI for. The answer is 'accepted', not 'stored' - a turn_idx pointing at a
+    reply that does not exist is logged and dropped.
+    """
+    session_id = _require_uuid(session_id, "session_id")
+    if request.rating is None and request.text is None:
+        raise HTTPException(status_code=422, detail="Send a rating, a note, or both.")
+    conversation_store.enqueue_save_user_feedback(
+        session_id, request.turn_idx, request.text, request.timestamp, rating=request.rating
+    )
+    return {"session_id": session_id, "turn_idx": request.turn_idx, "status": "accepted"}
 
 
 @app.post("/session/reset")
