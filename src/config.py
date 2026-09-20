@@ -102,6 +102,21 @@ class Settings:
     rules_refresh_seconds: float = 30.0
     # Shared secret for the /admin/rules API. Empty means the API is not mounted at all.
     admin_api_token: str = ""
+    # ---- Facebook Messenger (src/api/messenger.py) ----
+    # Both webhook routes 404 unless this is on AND the app secret and page token are set.
+    # A page token with no app secret would serve a bot anyone could speak through, so the
+    # secret is part of "configured", not an optional extra.
+    messenger_enabled: bool = False
+    # Echoed back during Meta's one-time subscription handshake.
+    messenger_verify_token: str = ""
+    # Signs every webhook body; we verify X-Hub-Signature-256 against it.
+    messenger_app_secret: str = ""
+    messenger_page_access_token: str = ""
+    messenger_graph_api_version: str = "v21.0"
+    messenger_send_timeout_seconds: float = 15.0
+    # How many message ids to remember in-process, purely to reject a retry that reaches
+    # this same instance. The durable check is the unique key on chatbot_inbound_messages.
+    messenger_seen_mid_cache_size: int = 2048
     # Whether a trailer goes to Messenger as a generic-template card (photo, title, price,
     # View Trailer button) or as plain bubbles. Off, the trailer still reaches them with a
     # tappable link - see src/domain/cards.py.
@@ -179,6 +194,13 @@ class Settings:
             turn_log_path=os.getenv("TURN_LOG_PATH", ""),
             rules_refresh_seconds=_float(os.getenv("RULES_REFRESH_SECONDS"), 30.0),
             admin_api_token=os.getenv("ADMIN_API_TOKEN", ""),
+            messenger_enabled=_bool(os.getenv("MESSENGER_ENABLED")),
+            messenger_verify_token=os.getenv("MESSENGER_VERIFY_TOKEN", ""),
+            messenger_app_secret=os.getenv("MESSENGER_APP_SECRET", ""),
+            messenger_page_access_token=os.getenv("MESSENGER_PAGE_ACCESS_TOKEN", ""),
+            messenger_graph_api_version=os.getenv("MESSENGER_GRAPH_API_VERSION", "v21.0"),
+            messenger_send_timeout_seconds=_float(os.getenv("MESSENGER_SEND_TIMEOUT_SECONDS"), 15.0),
+            messenger_seen_mid_cache_size=_int(os.getenv("MESSENGER_SEEN_MID_CACHE_SIZE"), 2048),
             messenger_listing_cards=_bool(os.getenv("MESSENGER_LISTING_CARDS"), True),
             messenger_chunk_pause_seconds=_float(os.getenv("MESSENGER_CHUNK_PAUSE_SECONDS"), 0.8),
             messenger_typing_refresh_seconds=_float(os.getenv("MESSENGER_TYPING_REFRESH_SECONDS"), 10.0),

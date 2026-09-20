@@ -21,7 +21,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from typing import Any
+from typing import Any, Callable
 
 from src import conversation_log, conversation_store, turn_log
 from src.graph.nodes.apply import apply_node
@@ -139,7 +139,28 @@ def _tools_and_reply(state: dict, output: Any, user_message: str) -> None:
                 state.pop("turn", None)
 
 
-def run_turn(session_id: str, user_message: str, *, turn_id: Any = None) -> dict[str, Any]:
+def _superseded(abandon_if: Callable[[], bool] | None) -> bool:
+    """Has the customer moved on? A check that fails is read as 'no'.
+
+    Deliberately: losing a finished reply because a health check blipped is worse than
+    sending one the customer has already overtaken.
+    """
+    if abandon_if is None:
+        return False
+    try:
+        return bool(abandon_if())
+    except Exception:  # noqa: BLE001
+        logger.exception("Abandon check failed; keeping the reply")
+        return False
+
+
+def run_turn(
+    session_id: str,
+    user_message: str,
+    *,
+    turn_id: Any = None,
+    abandon_if: Callable[[], bool] | None = None,
+) -> dict[str, Any]:
     """One complete turn: load, analyze, apply, tools, compose, persist.
 
     Returns the payload the API and the CLI both render.
@@ -149,6 +170,13 @@ def run_turn(session_id: str, user_message: str, *, turn_id: Any = None) -> dict
     redelivery is answered from the stored reply instead of being run a second time.
     Without it every call is a new turn, which is what a browser holding its own request
     open actually wants.
+
+    ``abandon_if`` is for a channel that can tell the customer has said more while we were
+    answering. Checked once, just before the save: true and the turn is thrown away whole -
+    nothing persisted, no transcript entry, no email to the team - and ``{"abandoned": True}``
+    comes back. The caller then reruns with the newer message folded in, and only THAT reply
+    is ever seen. Discarding before the save is what makes it complete: everything a turn
+    writes goes in that one transaction, so not reaching it leaves no trace.
     """
     with usage.usage_scope() as turn_usage:
         lead_id = conversation_store.ensure_session(session_id)
@@ -207,6 +235,15 @@ def run_turn(session_id: str, user_message: str, *, turn_id: Any = None) -> dict
             "category": state.get("category"),
             "qualification_complete": bool(state.get("qualification_complete")),
         }
+
+        # The last moment a turn can be called off. After the save it is on the record and
+        # its emails are queued, and calling it back would mean undoing both.
+        if _superseded(abandon_if):
+            logger.info(
+                "TURN abandoned, the customer said more: session=%s turn=%s", session_id, turn_id
+            )
+            return {"abandoned": True, "session_id": session_id, "turn_id": str(turn_id),
+                    "usage": turn_usage.as_dict()}
 
         conversation_store.save_turn(
             session_id,

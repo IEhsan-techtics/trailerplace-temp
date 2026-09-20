@@ -40,6 +40,11 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_CHANNEL = "messenger"
 
+# How many times a reply may be thrown away because the customer carried on typing while
+# it was being written. After this the next answer goes out regardless - otherwise someone
+# who never stops typing would never be answered at all.
+MAX_REGENERATIONS = 3
+
 # A deliberately different key from anything a turn locks on. The drain lock is held across
 # several transactions - one per turn - so it must not be a transaction-scoped lock, or the
 # drain would block on itself the moment a turn began.
@@ -306,18 +311,17 @@ def drain_inbound(
 
     ``message_ids``  the inbound rows that turn covered;
     ``turn_id``      the id it was recorded under;
-    ``stale``        True when they sent something else while we were writing, so the
-                     reply is out of date - the next result answers it and their newer
-                     words together;
     ``sends``        the reply already rendered for this channel;
     ``delivered``    how many of those pieces actually went out, when a transport was given.
+
+    A turn the customer interrupts produces NO result: it is discarded whole and rerun with
+    their newer message included, so only the reply that read everything they said is ever
+    returned or sent.
 
     Pass a ``transport`` (see src/channel_delivery.py) and the whole exchange is handled:
     the customer is shown typing while the turn runs, the search line reaches them the
     moment we start looking rather than with the results, and the answer arrives paced
-    bubble by bubble. A stale reply is rendered but NOT delivered - they have already moved
-    on, and the next turn's answer covers what they said. Without a transport nothing is
-    sent and the caller does the delivering.
+    bubble by bubble. Without a transport nothing is sent and the caller does the delivering.
 
     An empty list means either that there was nothing to do, or that another instance holds
     the lock and is doing it. Either way there is nothing for the caller to send.
@@ -331,6 +335,7 @@ def drain_inbound(
             logger.info("INBOUND drain skipped, another instance holds it: session=%s", session_id)
             return results
 
+        attempt = 0
         while True:
             batch = pending_inbound_batch(session_id, channel)
             if not batch:
@@ -348,22 +353,46 @@ def drain_inbound(
             # The turn's own session id: the graph publishes its search line under this,
             # not under the channel's raw identity.
             turn_session = conversation_store.session_uuid_for(session_id)
+
+            # A reply to a question they have already followed up on is worse than no reply
+            # at all, so a turn they interrupt is thrown away and rerun with what they went
+            # on to say folded in. On the last attempt the check is switched off and the
+            # answer goes out, so someone typing continuously is still answered.
+            last_attempt = attempt >= MAX_REGENERATIONS
+            if last_attempt:
+                logger.info(
+                    "INBOUND answering after %d interruptions: session=%s", attempt, session_id
+                )
+
+            def said_more(_ids=tuple(ids)) -> bool:
+                return has_inbound_beyond(session_id, _ids, channel)
+
             try:
                 with _keep_alive(turn_session, transport):
-                    result = answer(turn_session, message, turn_id=turn_id)
+                    result = answer(
+                        turn_session, message, turn_id=turn_id,
+                        abandon_if=None if last_attempt else said_more,
+                    )
             except Exception as exc:  # noqa: BLE001 - one bad message must not wedge the queue
                 logger.exception("INBOUND turn failed: session=%s messages=%d", session_id, len(ids))
                 mark_inbound_answered(ids, turn_id=turn_id, error=f"{type(exc).__name__}: {exc}")
+                attempt = 0
                 continue
+
+            if result.get("abandoned"):
+                # Nothing was written and nothing was sent. The messages stay pending, so
+                # the next pass picks them up together with whatever arrived.
+                attempt += 1
+                continue
+            attempt = 0
 
             mark_inbound_answered(ids, turn_id=turn_id)
             # Rendered for the channel it is going to, so a webhook only has to loop and
             # send. Messenger draws no markdown, so a trailer has to become an actual card
             # - see src/domain/cards.py.
             sends = _sends_for(channel, result)
-            stale = has_inbound_beyond(session_id, ids, channel)
             delivered = None
-            if transport is not None and sends and not stale:
+            if transport is not None and sends:
                 from src import channel_delivery
 
                 delivered = channel_delivery.deliver(session_id, sends, transport)
@@ -371,7 +400,6 @@ def drain_inbound(
                 **result,
                 "message_ids": ids,
                 "turn_id": str(turn_id),
-                "stale": stale,
                 "sends": sends,
                 "delivered": delivered,
             })

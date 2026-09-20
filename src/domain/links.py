@@ -7,7 +7,7 @@ points, and whether it is one of our listing pages.
 from __future__ import annotations
 
 import re
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 _URL_RE = re.compile(r"(?:https?://|www\.)[^\s<>\"')\]]+", re.I)
 
@@ -17,6 +17,18 @@ _SOURCES = (
     (("facebook.com", "fb.com", "fb.watch", "fb.me"), "Facebook post link"),
     (("instagram.com", "instagr.am"), "Instagram post link"),
 )
+
+
+# What the platform is CALLED, for a message written out to the model and the team. The
+# labels above name a link in an email; these name the platform in a sentence.
+_PLATFORMS = (
+    ("Facebook", ("facebook.com", "fb.com", "fb.me", "fb.watch", "messenger.com")),
+    ("Instagram", ("instagram.com", "instagr.am")),
+)
+
+# Facebook wraps an outbound link in a redirect (l.facebook.com/l.php?u=<the real url>),
+# so a customer sharing one of our listings hands us the wrapper, not the listing.
+_REDIRECT_HOSTS = ("l.facebook.com", "lm.facebook.com", "l.instagram.com")
 
 
 def _host(url: str) -> str:
@@ -61,3 +73,30 @@ def normalize_listing_url(value) -> str | None:
     if not path.startswith("/inventory/") or path == "/inventory":
         return None
     return f"https://www.trailerplace.com{path}/"
+
+
+def unwrap_redirect(url: str) -> str:
+    """The real destination behind a Facebook or Instagram redirect link, else the url itself.
+
+    Without this, a listing of ours shared from a Facebook post arrives as an l.facebook.com
+    wrapper, and neither the lookup nor the team email can see which trailer it is.
+    """
+    text = str(url or "").strip()
+    parts = urlsplit(text if "://" in text else f"https://{text}")
+    if (parts.hostname or "").lower() in _REDIRECT_HOSTS:
+        target = (parse_qs(parts.query).get("u") or [""])[0]
+        if target.startswith(("http://", "https://")):
+            return target
+    return text
+
+
+def platform_of(url: str) -> str | None:
+    """'Facebook', 'Instagram', or None for anything else.
+
+    By host alone: the path of a post URL is opaque and Meta changes its shape often.
+    """
+    host = _host(str(url or ""))
+    for platform, domains in _PLATFORMS:
+        if any(host == domain or host.endswith("." + domain) for domain in domains):
+            return platform
+    return None

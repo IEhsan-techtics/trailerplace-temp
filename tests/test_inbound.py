@@ -107,7 +107,7 @@ def test_three_messages_in_a_row_become_ONE_turn():
     """Three replies that each ignore the other two is not what a salesperson would send."""
     seen = []
 
-    def answer(session_id, message, *, turn_id=None):
+    def answer(session_id, message, *, turn_id=None, abandon_if=None):
         seen.append(message)
         return {"assistant_text": "Sure - what will you haul?", "listings": []}
 
@@ -124,7 +124,7 @@ def test_three_messages_in_a_row_become_ONE_turn():
 def test_the_turn_runs_against_the_session_that_psid_maps_to():
     sessions = []
 
-    def answer(session_id, message, *, turn_id=None):
+    def answer(session_id, message, *, turn_id=None, abandon_if=None):
         sessions.append(session_id)
         return {"assistant_text": "hi", "listings": []}
 
@@ -135,28 +135,54 @@ def test_the_turn_runs_against_the_session_that_psid_maps_to():
     assert sessions[0] != PSID, "the chatbot tables are keyed by a UUID, not by a PSID"
 
 
-def test_a_message_that_arrives_mid_turn_is_answered_by_the_next_pass():
+def test_a_turn_they_interrupt_is_thrown_away_and_rerun_with_both_messages():
+    """A reply to a question they have already followed up on is worse than no reply."""
     calls = []
 
-    def answer(session_id, message, *, turn_id=None):
+    def answer(session_id, message, *, turn_id=None, abandon_if=None):
         calls.append(message)
         if len(calls) == 1:
             record("mid-2", "and it needs a ramp", seconds=5)
-        return {"assistant_text": "ok", "listings": []}
+        # What run_turn does with the check: consulted once, just before the save.
+        if abandon_if is not None and abandon_if():
+            return {"abandoned": True}
+        return {"assistant_text": f"answering: {message}", "listings": []}
 
     record("mid-1", "dump trailer")
     results = inbound.drain_inbound(PSID, answer=answer)
 
-    assert calls == ["dump trailer", "and it needs a ramp"]
-    assert results[0]["stale"] is True, "do not send a reply they have already moved past"
-    assert results[1]["stale"] is False
+    both = "\n".join(["dump trailer", "and it needs a ramp"])
+    assert calls == ["dump trailer", both]
+    assert len(results) == 1, "the discarded turn produced no reply at all"
+    assert results[0]["assistant_text"] == f"answering: {both}"
     assert bodies() == []
+
+
+def test_someone_who_never_stops_typing_is_still_answered():
+    """After MAX_REGENERATIONS the check is switched off, or they would wait forever."""
+    calls = []
+
+    def answer(session_id, message, *, turn_id=None, abandon_if=None):
+        calls.append(message)
+        if abandon_if is not None:
+            # Still typing. On the last attempt the check is None, so they stop and the
+            # drain can finish - otherwise this test would feed it forever.
+            record(f"mid-{len(calls) + 1}", "and another thing", seconds=len(calls))
+            if abandon_if():
+                return {"abandoned": True}
+        return {"assistant_text": "here you go", "listings": []}
+
+    record("mid-1", "dump trailer")
+    results = inbound.drain_inbound(PSID, answer=answer)
+
+    assert len(calls) == inbound.MAX_REGENERATIONS + 1, "it gave up discarding and answered"
+    assert results[0]["assistant_text"] == "here you go"
 
 
 def test_a_turn_that_blows_up_does_not_wedge_the_queue():
     calls = []
 
-    def answer(session_id, message, *, turn_id=None):
+    def answer(session_id, message, *, turn_id=None, abandon_if=None):
         calls.append(message)
         if message == "bad":
             raise RuntimeError("model down")
@@ -195,7 +221,7 @@ def test_two_threads_draining_the_same_customer_answer_it_once():
     started = threading.Barrier(2)
     calls: list[str] = []
 
-    def answer(session_id, message, *, turn_id=None):
+    def answer(session_id, message, *, turn_id=None, abandon_if=None):
         calls.append(message)
         return {"assistant_text": "ok", "listings": []}
 
@@ -245,7 +271,7 @@ def test_a_redelivered_batch_is_answered_from_the_stored_reply(fake_llm):
 
 def test_the_reply_comes_back_ready_to_send_as_messenger_cards():
     """A webhook should have nothing left to decide - see src/domain/cards.py."""
-    def answer(session_id, message, *, turn_id=None):
+    def answer(session_id, message, *, turn_id=None, abandon_if=None):
         return {
             "assistant_text": "\n\n".join([
                 "Here are two that fit:",
@@ -294,7 +320,7 @@ def test_a_transport_gets_typing_the_search_line_and_then_the_paced_answer():
 
     transport = _Transport()
 
-    def answer(session_id, message, *, turn_id=None):
+    def answer(session_id, message, *, turn_id=None, abandon_if=None):
         # What the search node does the moment it starts looking.
         turn_status.publish(session_id, "One moment while I check what we have in stock.")
         # Longer than the keep-alive's poll interval, so this stands in for a real turn -
@@ -333,19 +359,22 @@ def test_a_transport_gets_typing_the_search_line_and_then_the_paced_answer():
     assert "typing_off" in [p for k, p in transport.calls if k == "action"]
 
 
-def test_a_stale_reply_is_rendered_but_never_sent():
-    """They carried on while we were writing. The next turn answers all of it together."""
+def test_a_discarded_reply_never_reaches_them_and_leaves_no_trace():
+    """It is thrown away before the save, so there is nothing to send and nothing stored."""
     transport = _Transport()
 
-    def answer(session_id, message, *, turn_id=None):
+    def answer(session_id, message, *, turn_id=None, abandon_if=None):
         if message == "dump trailer":
             record("mid-2", "actually a tilt", seconds=5)
+        if abandon_if is not None and abandon_if():
+            return {"abandoned": True}
         return {"assistant_text": f"answering: {message}", "listings": []}
 
     record("mid-1", "dump trailer")
     results = inbound.drain_inbound(PSID, answer=answer, transport=transport)
 
-    assert results[0]["stale"] is True and results[0]["sends"], "rendered"
-    assert results[0]["delivered"] is None, "but not delivered"
-    assert "answering: dump trailer" not in [p for k, p in transport.calls if k == "text"]
-    assert "answering: actually a tilt" in [p for k, p in transport.calls if k == "text"]
+    texts = [payload for kind, payload in transport.calls if kind == "text"]
+    both = "\n".join(["dump trailer", "actually a tilt"])
+    assert "answering: dump trailer" not in texts, "they never saw the superseded reply"
+    assert f"answering: {both}" in texts
+    assert len(results) == 1 and results[0]["delivered"]

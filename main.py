@@ -76,6 +76,13 @@ if settings.admin_api_token:
 
     app.include_router(admin_rules_router)
 
+# The Facebook Messenger webhook (src/api/messenger.py). Always mounted; both routes 404
+# unless MESSENGER_ENABLED is on and the app secret and page token are configured, so a
+# deployment that is not the Messenger one has no webhook surface at all.
+from src.api.messenger import router as messenger_router  # noqa: E402
+
+app.include_router(messenger_router)
+
 
 def _env_float(name: str, default: float) -> float:
     try:
