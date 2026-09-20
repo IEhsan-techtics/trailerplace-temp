@@ -124,6 +124,11 @@ def _apply_contact(state: dict, output: Any) -> None:
     # budget, which is what lets the gate ask twice per missing half instead of twice ever.
     if progressed:
         contact["asks_without_progress"] = 0
+        # And the turn gap with it. The gap is there to stop us asking the same thing twice
+        # in a row with nothing in between; a customer who has just given their name HAS put
+        # something in between, and following up for the number now is responsive rather
+        # than pestering.
+        contact["last_asked_turn"] = 0
 
     if getattr(incoming, "declined", False) or getattr(output, "intent", "") == "contact_declined":
         # Respected immediately and permanently, whether they refused everything or only the

@@ -44,15 +44,14 @@ HARD RULES
 _SITUATIONS = """
 WHAT TO DO, BY SITUATION
 
-First message or a hello -> YOU write this reply: the thank-you and welcome in acknowledgement,
-the request in next_question_text. Thank them on the FIRST message only, and ask only for what
-the state block says is missing.
-  Nothing given: "Thank you for contacting TrailerPlace. I see you're looking for a trailer, and
-  I'm here to help! Could you please provide your name and either your email or phone number?
-  This will allow our team to follow up with you on your inquiry."
-  Name only: thank them by name, ask for the email or phone, and say it is optional.
-  Name and contact: welcome them by name, then ask which type of trailer.
-  If they also asked something, answer it in answer_to_customer_question.
+THEIR FIRST MESSAGE -> acknowledgement MUST open with the welcome line the state block quotes,
+word for word. No first message skips it: not a question ("what do you guys sell?"), not a full
+spec, not a bare hello. Message one only, never again.
+  Their question, if they asked one -> answer_to_customer_question.
+  What the state block says is missing -> next_question_text: "Could you please provide your name
+  and either your email or phone number? This will allow our team to follow up with you."
+  Name only: use their name, ask for the email or phone, say it is optional.
+  Name and contact: use their name, then ask which type of trailer.
 
 One of the five STANDARD QUESTIONS (listed below) -> set faq_key and give its script in
 answer_to_customer_question, then still ask your next question. Never send these away.
@@ -385,16 +384,37 @@ def state_block(state: dict) -> str:
             f"{', '.join(keep.get('filters') or {})}."
         )
 
+    from src.graph.nodes import greeting
+
+    if greeting.is_first_turn(state):
+        # Last in the prompt and specific to this turn, which is the strongest place to put
+        # it. The rule in WHAT TO DO was read as being about greetings, so a customer who
+        # opened with "what do you guys sell?" got the catalogue and no hello at all.
+        lines.append(
+            "- This is their FIRST message. Your acknowledgement MUST begin with, word for "
+            f'word: "{greeting.OPENING}" Whatever else you say comes after it.'
+        )
+
     contact = state.get("contact") or {}
     if contact.get("declined"):
         lines.append("- They declined contact details. Never ask again.")
     elif contact.get("name") or contact.get("email") or contact.get("phone"):
         have = [k for k in ("name", "email", "phone") if contact.get(k)]
         lines.append(f"- Contact details on file: {', '.join(have)}. Do not ask again.")
-    elif contact.get("asked"):
-        lines.append("- Contact details already asked for once. Never ask again.")
+    elif greeting.contact_gate_applies(state):
+        # The truth, because Python allows a second ask and used to say otherwise here. Told
+        # "never ask again", the model obediently did not - and compose, which was still
+        # waiting for an ask, stitched its own template onto the answer instead. That is
+        # where "Before we go on -" came from, dangling in front of a livestock explanation.
+        if contact.get("asked"):
+            lines.append(
+                "- Still no contact details. Ask again in your own words, lightly, as the "
+                "LAST line - after whatever else you say."
+            )
+        else:
+            lines.append("- Contact details not asked for yet. Ask once, lightly, this turn.")
     else:
-        lines.append("- Contact details not asked for yet. Ask once, lightly, this turn.")
+        lines.append("- Contact details already asked for. Never ask again.")
 
     return "\n".join(lines)
 

@@ -216,6 +216,8 @@ def test_no_results_are_shown_until_contact_has_been_settled(fake_llm, no_search
 
 
 def test_giving_only_a_name_is_followed_by_asking_for_the_number(fake_llm):
+    """And the conversation moves on at the same time - the ask rides along with the flow
+    rather than taking the turn from it."""
     fake_llm.push(turn_output(intent="smalltalk_other"))
     run_turn("s1", "Hi, looking for a trailer")
 
@@ -223,9 +225,10 @@ def test_giving_only_a_name_is_followed_by_asking_for_the_number(fake_llm):
     result = run_turn("s1", "my name is Ibrahim")
 
     text = result["assistant_text"]
-    assert "Thank you for sharing your name, Ibrahim" in text
     assert "email address or phone number" in text
     assert "optional" in text
+    assert "your name" not in text, "only the half we are missing"
+    assert "What type of trailer" in text, "and the question they came for still got asked"
 
 
 def test_giving_only_a_number_is_followed_by_asking_for_the_name(fake_llm):
@@ -259,16 +262,32 @@ def test_the_completion_greeting_is_said_once(fake_llm):
 
 
 def test_the_gate_stops_asking_after_two_fruitless_turns(fake_llm, no_search):
-    """Twice is persistence, three times is pestering."""
-    for message in ("Hi", "hmm"):
+    """Twice is persistence, three times is pestering.
+
+    Turn 1 asks, turn 2 is left alone - two requests in a row read as a form being filled
+    in - turn 3 asks again, and from turn 4 the subject is closed.
+    """
+    for message in ("Hi", "hmm", "still looking"):
         fake_llm.push(turn_output(intent="smalltalk_other"))
-        run_turn("s1", message)
+        result = run_turn("s1", message)
+    assert "your name" in result["assistant_text"], "the second ask, one turn later"
 
     fake_llm.push(turn_output(category_mentioned="dump", intent="category_selection"))
     result = run_turn("s1", "a dump trailer")
 
     assert "your name" not in result["assistant_text"], "it stopped asking"
     assert state_after()["category"] == "Dump", "and got on with helping them"
+
+
+def test_the_same_request_is_not_made_two_turns_running(fake_llm):
+    """Asked on the way in and again on the very next message, the two read as one form."""
+    fake_llm.push(turn_output(intent="smalltalk_other"))
+    first = run_turn("s1", "Hi")
+    fake_llm.push(turn_output(intent="general_question"))
+    second = run_turn("s1", "what do you guys sell?")
+
+    assert "your name" in first["assistant_text"]
+    assert "your name" not in second["assistant_text"], "it let the next turn breathe"
 
 
 def test_progress_earns_another_ask(fake_llm):
@@ -548,3 +567,84 @@ def test_the_menu_leads_with_the_categories_that_have_the_most_choice():
     # point is that BREADTH orders the list, not the alphabet.
     assert sample[0] == "Equipment", sample
     assert sample.index("Equipment") < sample.index("Enclosed"), sample
+
+
+def test_a_question_before_contact_is_answered_without_a_stitched_on_lead_in(fake_llm):
+    """Live: "what is the use case for livestock trailers?" was answered with
+
+        Before we go on -
+
+        Livestock trailers are ventilated and partitioned...
+
+    The lead-in belongs in front of a REQUEST. With their answer between it and the
+    request it is a fragment, so there is no lead-in any more - the answer opens the reply.
+    """
+    fake_llm.push(turn_output(intent="smalltalk_other"))
+    run_turn("s1", "Hey there, so tell me what you guys sell?")
+
+    fake_llm.push(turn_output(
+        intent="general_question",
+        answer_to_customer_question=(
+            "Livestock trailers are ventilated and partitioned for hauling cattle and horses."
+        ),
+    ))
+    text = run_turn("s1", "what is the use case for livestock trailers?")["assistant_text"]
+
+    assert "Before we go on" not in text
+    assert text.startswith("Livestock trailers are ventilated"), "their answer opens it"
+
+
+def test_the_written_request_is_only_a_backstop(fake_llm):
+    """The model writes it in context whenever it does ask - ours is for when it forgets."""
+    fake_llm.push(turn_output(intent="smalltalk_other"))
+    run_turn("s1", "Hi")
+    fake_llm.push(turn_output(intent="smalltalk_other"))
+    run_turn("s1", "just browsing")
+
+    fake_llm.push(turn_output(
+        intent="general_question",
+        answer_to_customer_question="We're open Monday to Friday.",
+        next_question_text="And who am I speaking with, and what's the best number for you?",
+    ))
+    text = run_turn("s1", "when are you open?")["assistant_text"]
+
+    assert "best number for you" in text, "the model's own wording went out"
+    assert "It's optional, but it would be helpful" not in text, "ours stayed out of it"
+
+
+def test_the_contact_request_is_always_the_last_thing_said(fake_llm):
+    """Live: the model tucked it into its answer and the question that actually moves the
+    conversation along landed after it, buried second."""
+    fake_llm.push(turn_output(intent="smalltalk_other"))
+    run_turn("s1", "Hi")
+    fake_llm.push(turn_output(intent="smalltalk_other"))
+    run_turn("s1", "hmm")
+
+    fake_llm.push(turn_output(
+        intent="general_question",
+        answer_to_customer_question=(
+            "Dump trailers have hydraulic beds for gravel and debris. Could you please "
+            "provide your name and either an email address or phone number?"
+        ),
+    ))
+    text = run_turn("s1", "what about dump trailers?")["assistant_text"]
+
+    assert text.index("What type of trailer") < text.index("provide your name"), (
+        "the question that moves things along comes first"
+    )
+    assert text.count("provide your name") == 1, "lifted, not duplicated"
+    assert text.rstrip().endswith("?")
+
+
+def test_the_welcome_is_said_even_when_the_model_opens_with_the_catalogue(fake_llm):
+    """Live: "what do you guys sell?" was answered so thoroughly it never said hello."""
+    fake_llm.push(turn_output(
+        intent="general_question",
+        answer_to_customer_question="We carry Utility, Enclosed, Equipment and Dump trailers.",
+        next_question_text="May I get your name and either your email or phone number?",
+    ))
+    text = run_turn("s1", "Hey there, so tell me what you guys sell?")["assistant_text"]
+
+    assert text.startswith("Thank you for contacting TrailerPlace")
+    assert "We carry Utility" in text, "and the model's answer is kept, not replaced"
+    assert "May I get your name" in text, "along with its own ask"

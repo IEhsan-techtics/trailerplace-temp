@@ -130,6 +130,9 @@ def new_state(session_id: str) -> SessionState:
             "asked": False, "declined": False,
             # Asks that produced nothing new. Progress resets it; the gate stops at 2.
             "asks_without_progress": 0,
+            # The turn the last ask went out on, so the second one is not asked the turn
+            # after the first. 0 means we have never asked.
+            "last_asked_turn": 0,
             # Whether the "great to have your details" line has already been said.
             "greeted": False,
         },

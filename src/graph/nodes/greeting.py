@@ -29,6 +29,12 @@ _MENU_SAMPLE = 6
 # question, for the same reason: twice is persistence, three times is pestering.
 MAX_CONTACT_ASKS = 2
 
+# Turns that must pass before asking a second time. Asked on turn 1 and again on turn 2, the
+# two requests read as one form being filled in rather than a conversation - and the customer
+# has barely had a chance to answer the first before the second arrives. With a gap, the
+# second ask lands after they have actually told us something about what they need.
+CONTACT_ASK_TURN_GAP = 2
+
 
 def has_name(contact: dict) -> bool:
     return bool((contact.get("name") or "").strip())
@@ -45,11 +51,29 @@ def contact_is_complete(contact: dict) -> bool:
 
 
 def contact_gate_applies(state: dict) -> bool:
-    """True when the reply should be the contact request rather than the flow."""
+    """True when the reply should carry the contact request rather than only the flow."""
     contact = state.get("contact") or {}
     if contact.get("declined") or contact_is_complete(contact):
         return False
-    return int(contact.get("asks_without_progress") or 0) < MAX_CONTACT_ASKS
+    if int(contact.get("asks_without_progress") or 0) >= MAX_CONTACT_ASKS:
+        return False
+    last_asked = int(contact.get("last_asked_turn") or 0)
+    if not last_asked:
+        return True
+    return int(state.get("turn_index") or 0) - last_asked >= CONTACT_ASK_TURN_GAP
+
+
+def note_asked(state: dict) -> None:
+    """Record that this turn asked for their details.
+
+    One place, because three of them do it - the gate reply, the one-time opener, and the
+    check that spots the agent asking in its own words - and a count kept in two of the
+    three is how a customer ends up being asked a third time.
+    """
+    contact = state.setdefault("contact", {})
+    contact["asked"] = True
+    contact["asks_without_progress"] = int(contact.get("asks_without_progress") or 0) + 1
+    contact["last_asked_turn"] = int(state.get("turn_index") or 0)
 
 
 def _menu_sample() -> list[str]:
@@ -107,11 +131,37 @@ def _is_first_turn(state: dict) -> bool:
     return int(state.get("turn_index") or 0) <= 1
 
 
-def gate_lead(state: dict) -> str:
-    """The opening line. Leads on the first turn whatever the message contained.
+def is_first_turn(state: dict) -> bool:
+    """The welcome turn. Public because compose has to know it too."""
+    return _is_first_turn(state)
 
-    On later turns it does not - repeating "thank you for contacting us" three messages in
-    is the mark of a script, not a conversation.
+
+def owns_the_turn(state: dict) -> bool:
+    """True when the contact request IS the reply, rather than riding along with it.
+
+    Only the welcome turn. There, the request is the whole point and a qualification
+    question alongside it would compete with it.
+
+    Every later ask rides along instead: it goes on the end of whatever the reply was
+    already saying. It used to own those turns too, and the cost was hidden until the gate
+    stopped asking on consecutive turns - a customer who answered "-500 lbs" on turn three
+    got the contact request INSTEAD of being told the weight looked wrong, because the gate
+    took the turn and the flow never ran.
+    """
+    return _is_first_turn(state)
+
+
+def gate_lead(state: dict) -> str:
+    """The opening line, or "" when there is nothing to open with.
+
+    On the first turn it always leads, whatever the message contained. On later turns it
+    only does when they have just given us something to thank them for - repeating "thank
+    you for contacting us" three messages in is the mark of a script, not a conversation.
+
+    It used to return "Before we go on -" when there was nothing. That is a lead-in to a
+    REQUEST, and this text does not always precede one: with an answer between it and the
+    request it became a dangling fragment in front of an explanation about livestock
+    trailers. Now there is simply no lead, and whatever comes next opens the reply.
     """
     contact = state.get("contact") or {}
     name = (contact.get("name") or "").strip()
@@ -121,7 +171,7 @@ def gate_lead(state: dict) -> str:
         return f"Thank you for sharing your name, {name}."
     if has_reach(contact):
         return "Thank you for that."
-    return "Before we go on -"
+    return ""
 
 
 def gate_ask(state: dict) -> str:
@@ -147,14 +197,15 @@ def gate_ask(state: dict) -> str:
 def gate_reply(state: dict, answer: str = "") -> str:
     """Greeting, then anything they actually asked, then the contact request.
 
-    The question comes BEFORE the request on purpose. A customer who opens with "what are
-    your hours?" and is answered with a form is being processed, not helped - and the whole
-    reason the gate is polite about being optional is that a customer who feels handled
-    leaves.
+    The fallback, not the normal path: the model writes this reply itself and is told in the
+    state block to ask for whatever is missing. This is what goes out when it did not.
+
+    Their question is answered BEFORE the request, on purpose. A customer who opens with
+    "what are your hours?" and is answered with a form is being processed, not helped - and
+    the whole reason the gate is polite about being optional is that a customer who feels
+    handled leaves.
     """
-    parts = [gate_lead(state)]
-    if answer and answer.strip():
-        parts.append(answer.strip())
+    parts = [part for part in (gate_lead(state), (answer or "").strip()) if part]
     parts.append(gate_ask(state))
     return _GAP.join(parts)
 

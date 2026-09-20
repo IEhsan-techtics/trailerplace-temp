@@ -71,12 +71,14 @@ def compose_node(state: dict, output: Any) -> dict:
     # The welcome turn is written entirely by greeting.py, not assembled from the model's
     # pieces: the wording is the dealership's, it has to read the same every time, and the
     # contact request must not have a qualification question competing with it.
-    if greeting.contact_gate_applies(state):
-        contact = state.setdefault("contact", {})
+    #
+    # ONLY the welcome turn. A later ask rides on the end of the ordinary reply instead -
+    # see _contact_ask_is_due - so answering a question and asking for a number are no
+    # longer alternatives.
+    if greeting.contact_gate_applies(state) and greeting.owns_the_turn(state):
         outcome["assistant_text"] = _gate_text(state, output)
         outcome["asked_slot"] = None
-        contact["asked"] = True
-        contact["asks_without_progress"] = int(contact.get("asks_without_progress") or 0) + 1
+        greeting.note_asked(state)
         return state
 
     parts: list[str] = []
@@ -169,12 +171,13 @@ def compose_node(state: dict, output: Any) -> dict:
         mark_asked(state, asked_slot)
 
     if _contact_ask_is_due(state):
-        # The model usually asks for itself - the prompt tells it to, and its wording fits
-        # the conversation better than a fixed line. Appended ONLY when it did not, so the
-        # customer is never asked the same thing twice in one breath.
-        if not _already_asks_for_contact(" ".join(parts)):
-            parts.append(CONTACT_ASK)
-        state.setdefault("contact", {})["asked"] = True
+        # The model usually asks for itself - the state block tells it to, as the last line -
+        # and its wording fits the conversation better than a fixed one. Ours goes out only
+        # when it did not, so the customer is never asked the same thing twice in one breath,
+        # and it asks for the half we are actually missing rather than for both every time.
+        parts, written = _lift_contact_ask(parts)
+        parts.append(written or greeting.gate_ask(state))
+        greeting.note_asked(state)
 
     text = " ".join(part for part in parts if part).strip()
     if not text:
@@ -223,8 +226,7 @@ def _note_contact_ask(state: dict, text: str) -> None:
         return
     if not _already_asks_for_contact(text):
         return
-    contact["asked"] = True
-    contact["asks_without_progress"] = int(contact.get("asks_without_progress") or 0) + 1
+    greeting.note_asked(state)
 
 
 # The model writes typographic punctuation ("what’s", "—") and the configured wording uses
@@ -237,6 +239,10 @@ _TYPOGRAPHY = str.maketrans({
 })
 
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+
+# A blank line between two blocks of a reply. A constant because the shell that generated
+# this file collapses escapes inside string literals.
+_PARAGRAPH = chr(10) * 2
 
 
 def _collapse(text: str) -> str:
@@ -316,6 +322,32 @@ def _without_other_questions(text: str, asked_slot: str | None) -> str:
             continue
         kept.append(sentence)
     return " ".join(kept).strip()
+
+
+def _lift_contact_ask(parts: list[str]) -> tuple[list[str], str]:
+    """Take the contact request out of the middle of the reply and hand it back.
+
+    The state block asks the model to put it last and it usually does, but when it tucks the
+    request into its answer instead, the qualification question lands after it and the
+    customer reads two questions with the one that moves things along buried second:
+
+        "Dump trailers have hydraulic beds... Could you please provide your name and either
+        an email address or phone number? What type of trailer are you looking for?"
+
+    Lifted out here and re-appended by the caller, so the request is the last thing said
+    whoever wrote it - and the model keeps its own wording, which fits the conversation
+    better than ours.
+    """
+    kept: list[str] = []
+    lifted: list[str] = []
+    for part in parts:
+        remainder: list[str] = []
+        for sentence in _SENTENCE_END.split(part):
+            (lifted if _already_asks_for_contact(sentence) else remainder).append(sentence)
+        joined = " ".join(remainder).strip()
+        if joined:
+            kept.append(joined)
+    return kept, " ".join(lifted).strip()
 
 
 def _repeats(parts: list[str], closing: str, slot: str | None = None) -> bool:
@@ -607,6 +639,14 @@ def _gate_text(state: dict, output: Any) -> str:
     ).strip()
 
     if written and _already_asks_for_contact(written):
+        # The welcome is the one sentence every conversation is guaranteed to contain, and
+        # turn one is the only chance to say it. Live, the model answered "what do you guys
+        # sell?" so thoroughly that it opened with the catalogue and never said hello, so
+        # ours goes in front when its words do not carry one. Its ask is kept either way.
+        if greeting.is_first_turn(state) and not _welcomes_them(written, first_turn=True):
+            logger.info("COMPOSE put the opening in front of the written greeting: session=%s",
+                        state.get("session_id"))
+            return f"{greeting.OPENING}{_PARAGRAPH}{written}"
         return written
 
     logger.info(
@@ -617,28 +657,25 @@ def _gate_text(state: dict, output: Any) -> str:
 
 
 def _contact_ask_is_due(state: dict) -> bool:
-    """Whether the one-time request for a name and a way to reach them is due now.
+    """Whether the request for their details goes on the end of this reply.
 
     Appended to whatever else the reply says rather than competing with it. A customer whose
     first message is "looking for a 20ft livestock trailer" has answered every required
-    question at once, so the reply is a set of listings - and if the opener only ever went
-    out instead of a question, that customer would never be asked at all and the lead would
-    be lost on the very turn we learned most about them.
+    question at once, so the reply is a set of listings - and if the request only ever went
+    out INSTEAD of one, that customer would never be asked at all and the lead would be lost
+    on the very turn we learned most about them.
 
-    Asked once. Ignored, answered or refused, it is never raised again.
+    The gate decides when: twice at most, never on consecutive turns, never after they have
+    declined or given us both halves.
     """
-    contact = state.get("contact") or {}
-    if contact.get("asked") or contact.get("declined"):
-        return False
-    if any(contact.get(field) for field in ("name", "email", "phone")):
+    if not greeting.contact_gate_applies(state):
         return False
     # Set by the inventory lookup: they asked about a specific trailer, and the invitation
     # would crowd out the answer. The agent is told the same in the tool result; this holds
     # the deterministic path to it.
     if (state.get("turn_outcome") or {}).get("contact_invite_suppressed"):
         return False
-    # The opener is a first-message courtesy. Later on it reads as an interruption.
-    return int(state.get("turn_index") or 0) <= 1
+    return True
 
 
 def _closing_part(state: dict, output: Any) -> tuple[str, str | None]:

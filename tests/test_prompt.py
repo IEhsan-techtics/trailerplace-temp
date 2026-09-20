@@ -1,6 +1,7 @@
 """The prompt: short, grounded in real data, and honest about what is already known."""
 from __future__ import annotations
 
+from src.graph.nodes import greeting
 from src.graph.state import new_state
 from src.llm.prompt import build_messages, state_block, system_prompt
 from src.tools.category import set_trailer_category
@@ -53,7 +54,14 @@ MAX_SYSTEM_PROMPT_CHARS = 14_500
 
 def test_the_system_prompt_stays_short():
     """It is sent on every turn. A live probe showed input tokens dominating the cost, so
-    length here is a running bill, not a style preference."""
+    length here is a running bill, not a style preference.
+
+    NOTE: this measures the prompt built from the SIX fixture makes in conftest, not the
+    real catalogue. Against the live database the same prompt is about 250 characters
+    longer - measured at 14,528 on 2026-09-21 - so this ceiling is a floor on the real
+    one, not the real one. Use ``python -c "from src.llm.prompt import system_prompt;
+    print(len(system_prompt()))"`` against a live .env to see what is actually sent.
+    """
     prompt = system_prompt()
     assert len(prompt) < MAX_SYSTEM_PROMPT_CHARS, f"system prompt is {len(prompt)} chars"
 
@@ -164,10 +172,31 @@ def test_contact_already_on_file_is_not_asked_for_again():
     assert "name, email" in block
 
 
-def test_contact_asked_once_and_ignored_is_not_asked_again():
-    """The soft-opener decision: asked once, then dropped whatever they do."""
+def test_the_model_is_told_to_ask_again_when_python_still_wants_it_asked():
+    """The two used to disagree. Told "never ask again" while the gate was still open, the
+    model obediently did not - and compose stitched its own template onto the answer."""
     state = new_state("s1")
-    state["contact"]["asked"] = True
+    state["turn_index"] = 3
+    state["contact"].update({"asked": True, "last_asked_turn": 1})
+
+    block = state_block(state)
+    assert "Ask again" in block and "LAST line" in block
+
+
+def test_a_spent_gate_tells_the_model_to_drop_it():
+    """Two fruitless asks is the end of it, whatever they do."""
+    state = new_state("s1")
+    state["turn_index"] = 5
+    state["contact"].update({"asked": True, "asks_without_progress": 2, "last_asked_turn": 3})
+
+    assert "Never ask again" in state_block(state)
+
+
+def test_the_model_is_not_told_to_ask_the_turn_after_it_just_did():
+    state = new_state("s1")
+    state["turn_index"] = 2
+    state["contact"].update({"asked": True, "last_asked_turn": 1})
+
     assert "Never ask again" in state_block(state)
 
 
@@ -220,12 +249,35 @@ def test_it_tells_the_model_to_extract_fields_before_a_category_exists():
 
 def test_the_model_is_told_to_write_the_greeting():
     """The model writes a better welcome than a template - it can use their name and answer
-    what they asked. greeting.py is the fallback when its text does not ask for the
-    details."""
+    what they asked. greeting.py is the fallback when its text does not carry one."""
     prompt = system_prompt()
-    assert "YOU write this reply" in prompt
-    assert "Thank you for contacting TrailerPlace" in prompt
-    assert "FIRST message only" in prompt
+    assert "THEIR FIRST MESSAGE" in prompt
+    assert "word for word" in prompt
+    assert "Message one only" in prompt
+    # The line itself is quoted by the first-turn state block, not here: it is needed on
+    # exactly one turn, and the static prompt is sent on every one of them.
+    assert "Thank you for contacting TrailerPlace" not in prompt
+
+
+def test_the_opening_is_demanded_whatever_the_first_message_says():
+    """Read as a rule about greetings, it was skipped by a customer who opened with a
+    question: "what do you guys sell?" got the catalogue and no hello at all."""
+    prompt = system_prompt()
+    assert "No first message skips it" in prompt
+    assert "what do you guys sell?" in prompt, "the very message that broke it"
+
+
+def test_the_first_turn_state_block_repeats_the_opening_verbatim():
+    """Last in the prompt and specific to this turn - the strongest place to put it."""
+    state = new_state("s1")
+    state["turn_index"] = 1
+    block = state_block(state)
+
+    assert "This is their FIRST message" in block
+    assert greeting.OPENING in block
+
+    state["turn_index"] = 2
+    assert "FIRST message" not in state_block(state), "said once, then never again"
 
 
 def test_it_states_the_opening_hours_it_was_given():
