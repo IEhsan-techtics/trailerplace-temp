@@ -8,6 +8,7 @@ first - and what happens when the Azure container handling one of them simply go
 from __future__ import annotations
 
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -269,3 +270,82 @@ def test_a_channel_with_nothing_to_render_gets_no_sends():
         "web-1", channel="web", answer=lambda s, m, **k: {"assistant_text": "hi", "listings": []}
     )
     assert results[0]["sends"] is None
+
+
+# ----------------------------------------------------- the whole exchange, end to end
+class _Transport:
+    def __init__(self):
+        self.calls = []
+
+    def send_text(self, session_id, text):
+        self.calls.append(("text", text))
+
+    def send_card(self, session_id, element):
+        self.calls.append(("card", element))
+
+    def send_action(self, session_id, action):
+        self.calls.append(("action", action))
+
+
+def test_a_transport_gets_typing_the_search_line_and_then_the_paced_answer():
+    """Everything the customer sees, in the order they see it - with nothing left for a
+    webhook to decide but how to call the Send API."""
+    from src import turn_status
+
+    transport = _Transport()
+
+    def answer(session_id, message, *, turn_id=None):
+        # What the search node does the moment it starts looking.
+        turn_status.publish(session_id, "One moment while I check what we have in stock.")
+        # Longer than the keep-alive's poll interval, so this stands in for a real turn -
+        # the point being that the line goes out BEFORE the turn returns.
+        time.sleep(0.8)
+        return {
+            "assistant_text": "\n\n".join([
+                "Here is one that fits:",
+                "1. [2026 Diamond C Dump](https://x/2)\n   - Price: $12,500",
+                "Does that work?",
+            ]),
+            "listings": [{"title": "2026 Diamond C Dump", "url": "https://x/2",
+                          "price_display": "$12,500"}],
+        }
+
+    record("mid-1", "show me a dump trailer")
+    try:
+        inbound.drain_inbound(PSID, answer=answer, transport=transport)
+    finally:
+        turn_status.clear(conversation_store.session_uuid_for(PSID))
+
+    kinds = [kind for kind, _ in transport.calls]
+    texts = [payload for kind, payload in transport.calls if kind == "text"]
+
+    assert kinds[:2] == ["action", "action"], "seen, then typing, before anything else"
+    assert "One moment while I check what we have in stock." in texts, (
+        "the search line reached them WHILE we were looking, not with the results"
+    )
+    assert texts.index("One moment while I check what we have in stock.") < texts.index(
+        "Here is one that fits:"
+    ), "and it came first"
+    assert "card" in kinds, "the trailer went as a card"
+    # Typing stops the moment the answer is ready, and the bubbles follow it - so the last
+    # thing they see is the closing question, not an indicator still running.
+    assert transport.calls[-1][1] == "Does that work?"
+    assert "typing_off" in [p for k, p in transport.calls if k == "action"]
+
+
+def test_a_stale_reply_is_rendered_but_never_sent():
+    """They carried on while we were writing. The next turn answers all of it together."""
+    transport = _Transport()
+
+    def answer(session_id, message, *, turn_id=None):
+        if message == "dump trailer":
+            record("mid-2", "actually a tilt", seconds=5)
+        return {"assistant_text": f"answering: {message}", "listings": []}
+
+    record("mid-1", "dump trailer")
+    results = inbound.drain_inbound(PSID, answer=answer, transport=transport)
+
+    assert results[0]["stale"] is True and results[0]["sends"], "rendered"
+    assert results[0]["delivered"] is None, "but not delivered"
+    assert "answering: dump trailer" not in [p for k, p in transport.calls if k == "text"]
+    assert "answering: actually a tilt" in [p for k, p in transport.calls if k == "text"]

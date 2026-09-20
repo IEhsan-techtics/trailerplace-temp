@@ -106,6 +106,15 @@ class Settings:
     # View Trailer button) or as plain bubbles. Off, the trailer still reaches them with a
     # tappable link - see src/domain/cards.py.
     messenger_listing_cards: bool = True
+    # How long to hold between one bubble and the next. Longer than the web UI's pause: a
+    # phone notification per bubble arriving all at once reads as a machine, not a person.
+    messenger_chunk_pause_seconds: float = 0.8
+    # Messenger drops a typing indicator after about 20 s, and a turn takes longer than
+    # that, so it is re-sent on this interval. 0 turns the refresh off.
+    messenger_typing_refresh_seconds: float = 10.0
+    # Send the "let me check what we have" line the moment the search starts, rather than
+    # leaving the customer with nothing until the trailers land.
+    messenger_send_search_status: bool = True
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -171,6 +180,9 @@ class Settings:
             rules_refresh_seconds=_float(os.getenv("RULES_REFRESH_SECONDS"), 30.0),
             admin_api_token=os.getenv("ADMIN_API_TOKEN", ""),
             messenger_listing_cards=_bool(os.getenv("MESSENGER_LISTING_CARDS"), True),
+            messenger_chunk_pause_seconds=_float(os.getenv("MESSENGER_CHUNK_PAUSE_SECONDS"), 0.8),
+            messenger_typing_refresh_seconds=_float(os.getenv("MESSENGER_TYPING_REFRESH_SECONDS"), 10.0),
+            messenger_send_search_status=_bool(os.getenv("MESSENGER_SEND_SEARCH_STATUS"), True),
         )
 
 

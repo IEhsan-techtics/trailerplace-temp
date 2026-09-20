@@ -298,6 +298,7 @@ def drain_inbound(
     *,
     channel: str = DEFAULT_CHANNEL,
     answer: Callable[..., dict[str, Any]] | None = None,
+    transport: Any = None,
 ) -> list[dict[str, Any]]:
     """Answer everything this customer is waiting on, oldest first. Never raises.
 
@@ -306,8 +307,17 @@ def drain_inbound(
     ``message_ids``  the inbound rows that turn covered;
     ``turn_id``      the id it was recorded under;
     ``stale``        True when they sent something else while we were writing, so the
-                     caller should not deliver this one - the next result answers it and
-                     their newer words together.
+                     reply is out of date - the next result answers it and their newer
+                     words together;
+    ``sends``        the reply already rendered for this channel;
+    ``delivered``    how many of those pieces actually went out, when a transport was given.
+
+    Pass a ``transport`` (see src/channel_delivery.py) and the whole exchange is handled:
+    the customer is shown typing while the turn runs, the search line reaches them the
+    moment we start looking rather than with the results, and the answer arrives paced
+    bubble by bubble. A stale reply is rendered but NOT delivered - they have already moved
+    on, and the next turn's answer covers what they said. Without a transport nothing is
+    sent and the caller does the delivering.
 
     An empty list means either that there was nothing to do, or that another instance holds
     the lock and is doing it. Either way there is nothing for the caller to send.
@@ -335,26 +345,48 @@ def drain_inbound(
                 mark_inbound_answered(ids, error="empty message")
                 continue
 
+            # The turn's own session id: the graph publishes its search line under this,
+            # not under the channel's raw identity.
+            turn_session = conversation_store.session_uuid_for(session_id)
             try:
-                result = answer(
-                    conversation_store.session_uuid_for(session_id), message, turn_id=turn_id
-                )
+                with _keep_alive(turn_session, transport):
+                    result = answer(turn_session, message, turn_id=turn_id)
             except Exception as exc:  # noqa: BLE001 - one bad message must not wedge the queue
                 logger.exception("INBOUND turn failed: session=%s messages=%d", session_id, len(ids))
                 mark_inbound_answered(ids, turn_id=turn_id, error=f"{type(exc).__name__}: {exc}")
                 continue
 
             mark_inbound_answered(ids, turn_id=turn_id)
+            # Rendered for the channel it is going to, so a webhook only has to loop and
+            # send. Messenger draws no markdown, so a trailer has to become an actual card
+            # - see src/domain/cards.py.
+            sends = _sends_for(channel, result)
+            stale = has_inbound_beyond(session_id, ids, channel)
+            delivered = None
+            if transport is not None and sends and not stale:
+                from src import channel_delivery
+
+                delivered = channel_delivery.deliver(session_id, sends, transport)
             results.append({
                 **result,
                 "message_ids": ids,
                 "turn_id": str(turn_id),
-                "stale": has_inbound_beyond(session_id, ids, channel),
-                # Already rendered for the channel it is going to, so a webhook only has to
-                # loop and send. Messenger draws no markdown, so a trailer has to become an
-                # actual card - see src/domain/cards.py.
-                "sends": _sends_for(channel, result),
+                "stale": stale,
+                "sends": sends,
+                "delivered": delivered,
             })
+
+
+@contextmanager
+def _keep_alive(turn_session: str, transport: Any):
+    """Show them we are on it while the turn runs. Nothing at all without a transport."""
+    if transport is None:
+        yield None
+        return
+    from src.channel_delivery import TurnKeepAlive
+
+    with TurnKeepAlive(turn_session, transport) as alive:
+        yield alive
 
 
 def _sends_for(channel: str, result: dict[str, Any]) -> list[tuple[str, Any]] | None:
