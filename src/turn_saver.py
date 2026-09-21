@@ -35,6 +35,13 @@ DRAINED ON THE WAY OUT
     The app's lifespan waits for the queue before the process exits, and ``atexit`` catches
     the paths that do not run a lifespan at all.
 
+READ-YOUR-OWN-WRITES, PER CUSTOMER
+    A turn that begins inside the previous turn's save window would load the session as it
+    was BEFORE that turn - their phone number missing, their last answer gone - and answer
+    from it. ``wait_for`` holds the new turn until THIS customer's save has landed. Waiting
+    on the global drain would make one slow commit everybody's problem, so the count is kept
+    per session and nobody waits on a conversation that is not theirs.
+
 AND WHEN IT STILL FAILS, IT SAYS SO
     A failed save is logged at ERROR with the session, the turn and every notification that
     died with it - because at that point the customer has been told something that is no
@@ -60,9 +67,17 @@ MAX_PENDING = 32
 # a container being scaled down is not held past its grace period.
 DRAIN_TIMEOUT_SECONDS = 25.0
 
+# How long a new turn waits for its own session's save. A save is about 2.4 s, so this is
+# several times the expected wait and still short enough that a stuck database costs one
+# customer a stale read rather than their reply: past it we go on and log it.
+WAIT_FOR_SAVE_SECONDS = 5.0
+
 _queue: queue.Queue | None = None
 _worker: threading.Thread | None = None
-_lock = threading.Lock()
+
+# A Condition, not a Lock, because ``wait_for`` has to sleep until a save it did not start
+# reports in. It is still used as a plain lock everywhere else.
+_lock = threading.Condition()
 
 # Turns accepted and not yet committed. NOT the queue length: a job is off the queue while it
 # is being written, and a drain that trusted qsize() would report "all clear" with a commit
@@ -71,6 +86,11 @@ _lock = threading.Lock()
 _outstanding = 0
 _idle = threading.Event()
 _idle.set()
+
+# The same count, broken down by session, so a turn can wait for ITS customer's save without
+# waiting on anyone else's. A session is removed the moment it reaches zero, which keeps the
+# common case a miss on an empty dict.
+_by_session: dict[str, int] = {}
 
 
 def _describe(job: dict[str, Any]) -> str:
@@ -119,21 +139,31 @@ def _loop() -> None:
             _run(job)
         finally:
             _queue.task_done()
-            _finished()
+            if job is not None:
+                _finished(job["session_id"])
 
 
-def _finished() -> None:
+def _finished(session_id: str) -> None:
     global _outstanding
     with _lock:
         _outstanding = max(_outstanding - 1, 0)
+        left = _by_session.get(session_id, 0) - 1
+        if left > 0:
+            _by_session[session_id] = left
+        else:
+            _by_session.pop(session_id, None)
+        # Whether it committed or blew up. A failed save must release the next turn, not
+        # leave it sitting here until the timeout - it has nothing left to wait for.
+        _lock.notify_all()
         if _outstanding == 0:
             _idle.set()
 
 
-def _accepted() -> None:
+def _accepted(session_id: str) -> None:
     global _outstanding
     with _lock:
         _outstanding += 1
+        _by_session[session_id] = _by_session.get(session_id, 0) + 1
         _idle.clear()
 
 
@@ -168,12 +198,12 @@ def submit(
         "outbox_events": list(outbox_events or []),
     }
     worker_queue = _ensure_worker()
-    _accepted()
+    _accepted(session_id)
     try:
         worker_queue.put_nowait(job)
         return True
     except queue.Full:
-        _finished()
+        _finished(session_id)
         logger.warning(
             "TURN saver queue is full (%d pending) - saving inline instead. %s",
             MAX_PENDING, _describe(job),
@@ -185,6 +215,48 @@ def submit(
 def pending() -> int:
     """Turns accepted and not yet committed, including the one being written right now."""
     return _outstanding
+
+
+def wait_for(session_id: str, timeout: float = WAIT_FOR_SAVE_SECONDS) -> bool:
+    """Block until this session has no save in flight. Returns False if the clock ran out.
+
+    Called at the top of a turn, before the session is read. Almost always a miss on an
+    empty dict and no wait at all: it only bites when the same customer sends again inside
+    the previous turn's save window - about 2.4 s - and that is exactly the case that would
+    otherwise answer from the session as it was BEFORE their last message, with the contact
+    they just gave us missing and the email it should have sent stashed instead.
+
+    It waits on ONE session. Another customer's slow commit is not this customer's problem.
+
+    Past the timeout it goes ahead anyway and says so. A stale read is bad; refusing to
+    answer at all because the database is wedged is worse.
+    """
+    if not session_id:
+        return True
+    # Lock-free fast path. A dict lookup under the GIL, on the turn's hottest line: the
+    # answer for a customer whose last save landed long ago is "nothing to wait for".
+    if session_id not in _by_session:
+        return True
+
+    deadline = time.monotonic() + max(timeout, 0.0)
+    started = time.monotonic()
+    with _lock:
+        while _by_session.get(session_id):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                logger.warning(
+                    "TURN starting on a session whose previous save has not landed after "
+                    "%.1fs: session=%s. This turn may not see the last one's state.",
+                    timeout, session_id,
+                )
+                return False
+            _lock.wait(remaining)
+
+    waited = (time.monotonic() - started) * 1000
+    logger.info(
+        "TURN waited %.0fms for the previous turn's save: session=%s", waited, session_id
+    )
+    return True
 
 
 def drain(timeout: float = DRAIN_TIMEOUT_SECONDS) -> bool:
@@ -220,4 +292,6 @@ def reset() -> None:
         _queue = None
         _worker = None
         _outstanding = 0
+        _by_session.clear()
+        _lock.notify_all()
     _idle.set()

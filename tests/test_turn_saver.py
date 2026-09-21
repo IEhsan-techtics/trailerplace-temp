@@ -124,6 +124,72 @@ def test_a_failed_commit_keeps_it(caplog):
     conversation_store.clear_inflight("s3", "t9")
 
 
+# -------------------------------------------------------------- read your own writes
+def test_a_new_turn_waits_for_THIS_session_s_save():
+    """Otherwise the turn reads the session as it stood before the last one: the contact
+    they just gave us missing, and the email it should have sent stashed instead."""
+    release = threading.Event()
+    saved: list[str] = []
+
+    turn_saver.submit(lambda: (release.wait(5), saved.append("saved")),
+                      session_id="s1", turn_id="t1")
+
+    def _start_next():
+        turn_saver.wait_for("s1", timeout=5)
+        saved.append("next turn read the session")
+
+    reader = threading.Thread(target=_start_next)
+    reader.start()
+    time.sleep(0.2)
+    assert saved == [], "it is still waiting on the commit"
+
+    release.set()
+    reader.join(timeout=5)
+    assert saved == ["saved", "next turn read the session"]
+    turn_saver.drain(timeout=10)
+
+
+def test_it_does_not_wait_on_another_customer_s_save():
+    """One slow commit must not be everybody's problem - that is why this is not drain()."""
+    release = threading.Event()
+    turn_saver.submit(lambda: release.wait(5), session_id="slow-customer", turn_id="t1")
+
+    started = time.monotonic()
+    assert turn_saver.wait_for("someone-else", timeout=5) is True
+    assert time.monotonic() - started < 0.5, "it waited on a conversation that was not theirs"
+
+    release.set()
+    turn_saver.drain(timeout=10)
+
+
+def test_nothing_in_flight_is_free():
+    assert turn_saver.wait_for("never-seen", timeout=5) is True
+
+
+def test_a_failed_save_releases_the_next_turn(caplog):
+    """It has nothing left to wait for, so it must not sit here until the timeout."""
+    with caplog.at_level("ERROR"):
+        turn_saver.submit(lambda: (_ for _ in ()).throw(RuntimeError("no")),
+                          session_id="s1", turn_id="t1")
+        started = time.monotonic()
+        assert turn_saver.wait_for("s1", timeout=5) is True
+    assert time.monotonic() - started < 5, "it waited out the timeout instead"
+
+
+def test_a_wedged_save_lets_the_turn_through_and_says_so(caplog):
+    """A stale read is bad. Refusing to answer because the database is wedged is worse."""
+    release = threading.Event()
+    turn_saver.submit(lambda: release.wait(5), session_id="s1", turn_id="t1")
+
+    with caplog.at_level("WARNING"):
+        assert turn_saver.wait_for("s1", timeout=0.2) is False
+    release.set()
+
+    assert "previous save has not landed" in caplog.text
+    assert "session=s1" in caplog.text
+    turn_saver.drain(timeout=10)
+
+
 # ------------------------------------------------------------------------------- shutdown
 def test_the_drain_waits_for_a_slow_commit():
     done: list[str] = []

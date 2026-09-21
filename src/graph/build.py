@@ -185,6 +185,12 @@ def run_turn(
     writes goes in that one transaction, so not reaching it leaves no trace.
     """
     with usage.usage_scope() as turn_usage:
+        # Their last turn commits in the background, so a message sent inside that window
+        # would be answered from the session as it stood BEFORE it - the contact they just
+        # gave us missing, their last answer gone. Normally nothing to wait for; when there
+        # is, it is this customer's save only. See src/turn_saver.py.
+        turn_saver.wait_for(session_id)
+
         # One round trip, not two: both halves come out of the same read of the same row.
         lead_id, snapshot, conversation = conversation_store.open_session(session_id)
         stored_lead_id = lead_id
