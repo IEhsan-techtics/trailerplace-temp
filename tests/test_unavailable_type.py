@@ -144,3 +144,25 @@ def test_the_type_is_named_naturally(requested, label):
     from src.tools.unavailable import _label
 
     assert _label(requested) == label
+
+
+def test_the_reply_invites_them_to_look_at_what_we_do_have(fake_llm, mail):
+    """A list is not an answer on its own. Without something to reply to, a customer told
+    "we don't have that, here's what we do have" has been closed down rather than helped."""
+    fake_llm.push(turn_output(intent="contact_info_provided", name="Dave", phone="979-555-0100"))
+    run_turn("s1", "hi, I'm Dave on 979-555-0100")
+    fake_llm.push(turn_output(unavailable_type_requested="boat trailer"))
+    text = run_turn("s1", "do you have boat trailers?")["assistant_text"]
+
+    assert "Would any of those work for what you need?" in text
+    assert text.count("?") == 1, "one question per reply"
+
+
+def test_but_not_while_we_are_still_asking_who_they_are(fake_llm, mail):
+    """Then the contact request is the question, and two question marks in one reply is how
+    a customer ends up answering neither."""
+    fake_llm.push(turn_output(unavailable_type_requested="boat trailer"))
+    text = run_turn("s2", "do you have boat trailers?")["assistant_text"]
+
+    assert "Would any of those work" not in text
+    assert text.count("?") == 1

@@ -100,3 +100,44 @@ def platform_of(url: str) -> str | None:
         if any(host == domain or host.endswith("." + domain) for domain in domains):
             return platform
     return None
+
+
+def strip_social_links(text: str) -> str:
+    """The text with every Facebook or Instagram URL removed, and the gap tidied up.
+
+    For the team's email. A post URL is opaque - it says nothing about which trailer, it
+    expires, and pasted into a one-line summary it swamps the sentence that matters. The
+    platform is named instead (``shared_platforms``), which is the part that tells the team
+    where the customer saw us.
+
+    OUR OWN listing links are deliberately left alone: trailerplace.com/inventory/... names
+    exactly one trailer, and that is the most useful thing the line can carry.
+    """
+    def _drop(match: re.Match) -> str:
+        url = match.group(0).rstrip(".,;:!?")
+        if not platform_of(url) and not platform_of(unwrap_redirect(url)):
+            return match.group(0)
+        # A Facebook wrapper around one of OUR listings is not a post - it is a trailer,
+        # reached the long way round. Unwrapped in place rather than dropped, so the line
+        # still says which one.
+        ours = normalize_listing_url(unwrap_redirect(url))
+        return ours or ""
+
+    stripped = _URL_RE.sub(_drop, str(text or ""))
+    stripped = re.sub(r"\(\s*\)", "", stripped)           # "(  )" left by a dropped url
+    stripped = re.sub(r"\s+([.,;:!?])", r"\1", stripped)  # " ." left in front of punctuation
+    return re.sub(r"\s{2,}", " ", stripped).strip(" :-")
+
+
+def shared_platforms(texts) -> list[str]:
+    """Which platforms the customer has sent us links from, e.g. ['Facebook']."""
+    platforms: list[str] = []
+    for text in texts:
+        for match in _URL_RE.finditer(str(text or "")):
+            url = match.group(0).rstrip(".,;:!?")
+            # The WRAPPER first: a customer who reached us through l.facebook.com came from
+            # Facebook, whatever our listing page at the other end of it says.
+            platform = platform_of(url) or platform_of(unwrap_redirect(url))
+            if platform and platform not in platforms:
+                platforms.append(platform)
+    return platforms

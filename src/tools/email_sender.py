@@ -27,15 +27,45 @@ def render_email_body(
     phone: str | None,
     reason: str,
     description: str,
+    shared_platforms: list[str] | None = None,
+    chat_url: str | None = None,
 ) -> str:
-    """Exact email body per spec §Tools / milestone.md M7 step 2 — do not paraphrase."""
+    """Exact email body per spec §Tools / milestone.md M7 step 2 — do not paraphrase.
+
+    The description stays ONE short line. A Facebook or Instagram URL is taken out of it and
+    replaced by the platform's name: a post URL is opaque, it expires, and pasted into a
+    one-line summary it swamps the sentence that matters. Our own listing links stay - they
+    say which trailer. The only other link is the one back to the conversation.
+    """
+    from src.domain import links
+
+    line = f"[{reason}] {links.strip_social_links(description)}"
+    if shared_platforms:
+        article = "an" if shared_platforms[0][:1].upper() in "AEIOU" else "a"
+        line += f" | Customer shared {article} {' and '.join(shared_platforms)} link"
+    if chat_url:
+        line += f" | Chat: {chat_url}"
     return (
         f"Full Name: {name or _NOT_PROVIDED}\n"
         f"Email: {email or _NOT_PROVIDED}\n"
         f"Phone Number: {phone or _NOT_PROVIDED}\n"
         f"\n"
-        f"[{reason}] {description}"
+        f"{line}"
     )
+
+
+def chat_session_url(session_id: str | None) -> str | None:
+    """A link to this conversation in the web UI, or None when no UI base is configured.
+
+    Keyed by the session UUID the chatbot_* tables use, so a Messenger PSID links to the
+    same conversation the UI restores.
+    """
+    base = (settings.chat_ui_url or "").strip().rstrip("/")
+    if not base or not session_id:
+        return None
+    from src.conversation_store import as_session_uuid
+
+    return f"{base}/?chat_session={as_session_uuid(session_id)}"
 
 
 def render_subject(*, reason: str, name: str | None, session_id: str) -> str:

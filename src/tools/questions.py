@@ -54,12 +54,23 @@ def is_resolved(state: dict, slot: str) -> bool:
     return is_answered(state, slot) or is_declined(state, slot) or at_attempt_cap(state, slot)
 
 
+# Why a slot was given up on rather than answered: both asks spent, nothing came back. Kept
+# apart from every other decline reason, because the others are the customer ANSWERING - "no
+# preference", "skip that one" - and this one is the question failing to land.
+GAVE_UP_REASON = "attempt_cap"
+
+
 def decline_slot(state: dict, slot: str, reason: str = "unanswered") -> None:
     """Stop pursuing this question. Idempotent."""
     declined = state.setdefault("declined_slots", [])
     if slot not in declined:
         declined.append(slot)
         logger.info("QUESTION declined: slot=%s reason=%s", slot, reason)
+        if reason == GAVE_UP_REASON:
+            # Noted here rather than at either call site: two different paths give up on a
+            # slot (resolve_pending_slot settles the pending one, sweep_exhausted_slots
+            # catches the rest) and a report written in one of them misses the other.
+            state.setdefault("turn_outcome", {}).setdefault("gave_up_on", []).append(slot)
     # A declined slot must not keep a half-value around: the search would filter on it.
     if slot in _slots(state) and _slots(state)[slot] is None:
         _slots(state).pop(slot, None)
@@ -105,7 +116,7 @@ def resolve_pending_slot(state: dict, answered: bool) -> None:
         state["pending_slot"] = None
         return
     if at_attempt_cap(state, slot):
-        decline_slot(state, slot, reason="attempt_cap")
+        decline_slot(state, slot, reason=GAVE_UP_REASON)
         state["pending_slot"] = None
 
 
@@ -117,10 +128,11 @@ def sweep_exhausted_slots(state: dict) -> None:
     to stop raising a question Python has quietly given up on. Run once per turn, after
     the customer's reply has been applied: a slot asked for the second time this turn has
     not been failed yet, it has merely been asked.
+
     """
     for slot in state.get("required_slots") or []:
         if at_attempt_cap(state, slot) and not is_answered(state, slot):
-            decline_slot(state, slot, reason="attempt_cap")
+            decline_slot(state, slot, reason=GAVE_UP_REASON)
 
 
 def required_remaining(state: dict) -> list[str]:

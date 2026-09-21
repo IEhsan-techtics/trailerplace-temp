@@ -75,6 +75,10 @@ class Settings:
     smtp_password: str = ""
     smtp_from: str = ""
     email_to: str = ""
+    # Where the Streamlit frontend is served, so a team email can link straight to the
+    # conversation it is about (app.py restores a session from ?chat_session=<id>). Unset
+    # means no link: a wrong one is worse than none.
+    chat_ui_url: str = ""
     chatbot_api_port: int = 8000
     langsmith_tracing: bool = False
     langsmith_endpoint: str = ""
@@ -177,6 +181,7 @@ class Settings:
             smtp_password=os.getenv("SMTP_PASSWORD", ""),
             smtp_from=os.getenv("SMTP_FROM", ""),
             email_to=os.getenv("EMAIL_TO", ""),
+            chat_ui_url=os.getenv("CHAT_UI_URL", ""),
             chatbot_api_port=_int(os.getenv("CHATBOT_API_PORT"), 8000),
             langsmith_tracing=_bool(os.getenv("LANGSMITH_TRACING")),
             langsmith_endpoint=os.getenv("LANGSMITH_ENDPOINT", ""),

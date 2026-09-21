@@ -152,7 +152,10 @@ def test_a_facebook_link_they_want_is_emailed_naming_the_facebook_post(fake_llm,
     subject, body = mail[0]
     assert "Listing Interest" in subject + body
     assert "Shared a Facebook post link and asked if it is still available" in body
-    assert FACEBOOK in body
+    # The URL itself is NOT in the email. A post URL is opaque, it says nothing about which
+    # trailer and it expires; the platform is what tells the team where they saw us.
+    assert FACEBOOK not in body
+    assert "| Customer shared a Facebook link" in body
     assert no_reply_pass.calls == 1, "the reply pass tells them it went to the team"
 
 

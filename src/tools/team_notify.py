@@ -146,6 +146,8 @@ def _rendered(state: dict, event: dict) -> dict[str, Any]:
                 phone=contact.get("phone"),
                 reason=event["reason"],
                 description=event["description"],
+                shared_platforms=list(state.get("shared_platforms") or []),
+                chat_url=email_sender.chat_session_url(str(state.get("session_id") or "")),
             ),
         },
     }

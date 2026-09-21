@@ -118,13 +118,22 @@ def reply(state: dict, requested: str, status: str, first_turn: bool = False) ->
     if status == "sent":
         tail = (
             "I've passed this on to our team, and they'll contact you shortly to guide you "
-            "to the right option."
+            f"to the right option. {_INVITATION}"
         )
     elif status == "dropped":
-        tail = f"If you'd like help finding an alternative, our team is on {PHONE}."
+        tail = f"If you'd like help finding an alternative, our team is on {PHONE}. {_INVITATION}"
     else:
+        # No invitation here: the contact request IS this reply's question, and two question
+        # marks in one reply is how a customer ends up answering neither.
         tail = "Our team will contact you shortly to guide you to the right option. " + _ask(state)
     return f"{head}\n{bullets}\n\n{tail}".strip()
+
+
+# The list above is not an answer on its own - it is a list. Without something to reply to,
+# a customer told "we don't have that, here's what we do have" has been closed down rather
+# than helped, and the conversation ends on our sentence. One question re-opens it, and it
+# is the same question the whole flow starts from: which of these, if any.
+_INVITATION = "Would any of those work for what you need?"
 
 
 def _ask(state: dict) -> str:

@@ -68,6 +68,7 @@ def apply_node(state: dict, output: Any, user_message: str = "") -> dict:
     state["invalid_retry_reason"] = None
 
     _apply_contact(state, output)
+    _note_shared_platforms(state, user_message)
     # Straight after the contact merge, so a turn that hands over the missing piece sends
     # everything that was waiting on it - and before the FAQ below, so a question asked on
     # that same turn joins the same batch.
@@ -92,6 +93,7 @@ def apply_node(state: dict, output: Any, user_message: str = "") -> dict:
     _apply_question_rules(state, output)
     _apply_haul_item_suggestion(state, result)
     _apply_attempts(state, output, result)
+    _report_questions_we_gave_up_on(state)
     _apply_refined_search(state, output, result)
     _apply_results_gate(state, output)
 
@@ -143,6 +145,20 @@ def _apply_contact(state: dict, output: Any) -> None:
     # compose knows, and setting it from this side meant a first message that named a
     # category ("looking for a 20ft livestock trailer") skipped the question entirely while
     # recording that it had been put - so the lead was lost with no way to notice.
+
+
+def _note_shared_platforms(state: dict, user_message: str) -> None:
+    """Remember that they sent us a Facebook or Instagram link, for the team's email.
+
+    Kept on the session rather than re-read off the transcript when the email is built: the
+    notification may be stashed for several turns waiting on a phone number, and where the
+    customer found us does not stop being true in the meantime.
+    """
+    known = state.setdefault("shared_platforms", [])
+    for platform in links.shared_platforms([user_message]):
+        if platform not in known:
+            known.append(platform)
+            logger.info("LINK platform noted: session=%s %s", state.get("session_id"), platform)
 
 
 def _apply_faq_notification(state: dict, output: Any) -> None:
@@ -736,6 +752,41 @@ def _apply_attempts(state: dict, output: Any, result: Any) -> None:
     # Catches the slot whose two asks were spent on invalid values: those report as
     # "answered", so resolve_pending_slot clears them without ever declining them.
     sweep_exhausted_slots(state)
+
+
+def _report_questions_we_gave_up_on(state: dict) -> None:
+    """A required question asked twice and never answered is worth telling the team about.
+
+    Not because the customer did anything wrong - they can decline anything they like, and
+    a "whatever works" is an answer that closes the question on the spot. This is the other
+    case: two asks spent and nothing came back, which usually means the question did not
+    land. The team is the only one who can see the pattern and change the wording.
+
+    ONCE per conversation, on the first question we lose. A customer who ignores one
+    question usually ignores the next as well, and six emails about one stalled chat is
+    noise the team will learn to filter out - which costs them the first one too. The email
+    carries a link to the conversation, so the rest of the story is one click away.
+
+    A system alert, like the results one: it goes through the gate and waits, and it never
+    chases the customer for anything.
+    """
+    outcome = state.setdefault("turn_outcome", {})
+    given_up = outcome.pop("gave_up_on", [])
+    if not given_up or state.get("gave_up_reported"):
+        return
+    slot = given_up[0]
+    state["gave_up_reported"] = True
+    label = str(slot).replace("_", " ")
+    asked = (state.get("slot_questions") or {}).get(slot)
+    described = f'"{asked}"' if asked else label
+    team_notify.record(
+        state,
+        reason="Unanswered Question",
+        description=f"Asked twice and never answered ({label}): {described}",
+    )
+    logger.info(
+        "QUESTION gave up: session=%s slot=%s - telling the team", state.get("session_id"), slot,
+    )
 
 
 # ------------------------------------------------- 7b. refining an already-shown result set

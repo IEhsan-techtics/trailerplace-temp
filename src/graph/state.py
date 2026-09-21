@@ -88,6 +88,13 @@ class SessionState(TypedDict, total=False):
     # three turns ago still goes out when the customer finally hands over their number.
     pending_email_actions: list[dict[str, Any]]
     contact_followup_pending: str | None
+    # Platforms the customer has sent us links from ("Facebook"). Kept on the session, not
+    # read off the transcript: a notification stashed on the turn they shared the post may
+    # not go out for another three turns, and it should still say where they saw us.
+    shared_platforms: list[str]
+    # Whether the team has already been told this conversation stalled on a question. Once
+    # per conversation: the first one we lose is the signal, and the email links to the chat.
+    gave_up_reported: bool
     # Trailers whose interest we have already told the team about, keyed by listing URL ("" for
     # an interest we could not pin to one row). A customer says "I like that one" more than
     # once; the team should hear about it once.
@@ -160,6 +167,8 @@ def new_state(session_id: str) -> SessionState:
         },
         pending_email_actions=[],
         contact_followup_pending=None,
+        shared_platforms=[],
+        gave_up_reported=False,
         listing_interest_keys=[],
         listing_interest_logged=False,
         interest_listing=None,
