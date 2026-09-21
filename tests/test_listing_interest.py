@@ -380,3 +380,47 @@ def test_showing_a_trailer_again_does_not_duplicate_it():
     _record_shown(state, [GALYEAN, GOOSENECK], a_batch_of_two())
 
     assert [row["stock_number"] for row in state["shown_listings"]] == ["15087", "81419"]
+
+
+# ------------------------------------ the tool is withheld, not left to be refused later
+def tool_names(state, turn):
+    from src.graph.agent import build_tools
+    from src.llm.tools import ToolRunner
+
+    return [t.name for t in build_tools(ToolRunner(state, turn))]
+
+
+def pointing_turn(stock=None, reference=2):
+    output = turn_output(intent="listing_interest", listing_reference=reference)
+    if stock:
+        output.inventory_lookup.is_lookup = True
+        output.inventory_lookup.confidence = "high"
+        output.inventory_lookup.stock_number = stock
+    return output
+
+
+def test_the_lookup_tool_is_withheld_when_the_trailer_is_on_screen():
+    """Live: the reply pass was told the listing was already resolved and called the tool
+    anyway, spending an agent pass to be told "already shown". A handler refusal comes too
+    late - the round trip is paid for the moment the model emits the call."""
+    assert "lookup_inventory" not in tool_names(showing_two_batches(), pointing_turn("81419"))
+
+
+def test_a_bare_reference_withholds_it_too():
+    """"I like the first one" - the index resolved, so there is nothing to fetch."""
+    assert "lookup_inventory" not in tool_names(showing_two_batches(), pointing_turn(reference=1))
+
+
+def test_a_trailer_they_have_never_seen_keeps_the_tool():
+    """"I like the 81419, but is the 12345 available?" points at one on screen AND names one
+    we have never shown. Withholding the tool there would cost them a real answer."""
+    assert "lookup_inventory" in tool_names(showing_two_batches(), pointing_turn("12345"))
+
+
+def test_an_ordinary_turn_keeps_the_tool():
+    assert "lookup_inventory" in tool_names(new_state("s1"), turn_output(intent="qualification_answer"))
+
+
+def test_the_other_tools_are_never_withheld():
+    names = tool_names(showing_two_batches(), pointing_turn("81419"))
+    assert "search_inventory" in names and "escalate" in names

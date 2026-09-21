@@ -33,6 +33,7 @@ from langgraph.prebuilt import ToolNode
 
 from src.config import settings
 from src.llm import usage
+from src.tools.lookup_gate import nothing_left_to_look_up
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +134,14 @@ def build_tools(runner: Any) -> list:
                 "says their last order arrived damaged".
         """
         return runner.call("escalate", json.dumps({"reason": reason, "summary": summary}))
+
+    if nothing_left_to_look_up(getattr(runner, "state", None), getattr(runner, "turn", None)):
+        # Every trailer they named is already on their screen, and the card they are asking
+        # about is in the messages with its full specs. Withheld rather than refused in the
+        # handler: a refusal comes too late, because the model has already spent an agent
+        # pass on the call by the time anything could turn it down.
+        logger.info("AGENT lookup_inventory withheld: the trailer is already on their screen")
+        return [search_inventory, escalate]
 
     return [search_inventory, lookup_inventory, escalate]
 

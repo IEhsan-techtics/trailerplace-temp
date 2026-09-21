@@ -168,6 +168,52 @@ def lookup_requested(turn: Any) -> bool:
     return bool(lookup.model_text) and not _model_text_is_category_word(lookup.model_text)
 
 
+def _shown_rows(state: Any) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """The batch in front of them, and everything shown so far."""
+    state = state or {}
+    batch = [row for row in (state.get("last_shown_listings") or []) if isinstance(row, dict)]
+    running = [row for row in (state.get("shown_listings") or []) if isinstance(row, dict)]
+    return batch, running
+
+
+def identified_listing(state: Any, turn: Any) -> dict[str, Any] | None:
+    """The trailer this turn's IDENTIFIERS name, if we have already shown it.
+
+    Separate from the index, because the two answer different questions. This one asks "is
+    the thing they named already on their screen?" - which is what decides whether a lookup
+    has any work to do. A stock number that matches nothing we have shown is a real lookup
+    and must still run.
+    """
+    batch, running = _shown_rows(state)
+    lookup = getattr(turn, "inventory_lookup", None) if turn else None
+
+    stock = _digits(usable_stock_number(turn))
+    if stock:
+        for row in running or batch:
+            if _digits(row.get("stock_number")) == stock:
+                return row
+
+    url = normalize_listing_url(getattr(lookup, "listing_url", None)) if lookup else None
+    if url:
+        for row in running or batch:
+            if normalize_listing_url(row.get("url")) == url:
+                return row
+    return None
+
+
+def has_an_identifier(turn: Any) -> bool:
+    """Does this turn name a trailer by something other than its place in a list?"""
+    lookup = getattr(turn, "inventory_lookup", None) if turn else None
+    if lookup is None:
+        return False
+    return bool(
+        usable_stock_number(turn)
+        or normalize_listing_url(getattr(lookup, "listing_url", None))
+        or getattr(lookup, "model_text", None)
+        or (getattr(lookup, "year", None) and getattr(lookup, "make", None))
+    )
+
+
 def referenced_listing(state: Any, turn: Any) -> dict[str, Any] | None:
     """The trailer they just pointed at, out of what we have already put on their screen.
 
@@ -183,28 +229,35 @@ def referenced_listing(state: Any, turn: Any) -> dict[str, Any] | None:
     Out of range resolves to nothing rather than to a wrong trailer, and the turn falls
     back to an ordinary lookup.
     """
-    state = state or {}
-    batch = [row for row in (state.get("last_shown_listings") or []) if isinstance(row, dict)]
-    running = [row for row in (state.get("shown_listings") or []) if isinstance(row, dict)]
+    identified = identified_listing(state, turn)
+    if identified is not None:
+        return identified
 
-    lookup = getattr(turn, "inventory_lookup", None) if turn else None
-    stock = _digits(usable_stock_number(turn))
-    if stock:
-        for row in running or batch:
-            if _digits(row.get("stock_number")) == stock:
-                return row
-
-    url = normalize_listing_url(getattr(lookup, "listing_url", None)) if lookup else None
-    if url:
-        for row in running or batch:
-            if normalize_listing_url(row.get("url")) == url:
-                return row
-
+    batch, _running = _shown_rows(state)
     try:
         index = int(getattr(turn, "listing_reference", None) or 0)
     except (TypeError, ValueError):
         return None
     return batch[index - 1] if 1 <= index <= len(batch) else None
+
+
+def nothing_left_to_look_up(state: Any, turn: Any) -> bool:
+    """Is every trailer this turn names already on the customer's screen?
+
+    The reply pass is told which trailer they mean and that its card is already up - and it
+    called lookup_inventory anyway, live, spending a whole agent pass to be told "already
+    shown". The tool is withheld for the turn rather than left to be refused, because by the
+    time a handler could refuse it the round trip has already been paid for.
+
+    Deliberately narrow. "I like the 81419, but is the 12345 available?" points at a trailer
+    on screen AND names one we have never shown: the identifier does not match anything
+    shown, so the tool stays.
+    """
+    if referenced_listing(state, turn) is None:
+        return False
+    if not has_an_identifier(turn):
+        return True  # a bare "the 5th one" - the index resolved, there is nothing to fetch
+    return identified_listing(state, turn) is not None
 
 
 def brand_is_lookup_make(turn: Any, brand: str) -> bool:
