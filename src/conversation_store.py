@@ -13,6 +13,7 @@ in the graph knows the difference.
 from __future__ import annotations
 
 import logging
+import threading
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -273,6 +274,33 @@ def save_turn(
 
 
 # ----------------------------------------------------------------------- turn idempotency
+#
+# Turns whose commit is queued but has not landed yet: (session, turn) -> the reply that was
+# sent. The turn row is the receipt, and while the save is in flight there is no row - so
+# without this, a Messenger redelivery arriving inside that window would find nothing and run
+# the whole turn a second time. Held only until the commit succeeds.
+_INFLIGHT: dict[tuple[str, str], dict[str, Any]] = {}
+_INFLIGHT_LOCK = threading.Lock()
+
+
+def _inflight_key(session_id: str, turn_id: Any) -> tuple[str, str]:
+    return (str(session_id), str(turn_id))
+
+
+def remember_inflight(session_id: str, turn_id: Any, response: dict[str, Any]) -> None:
+    """Answer a redelivery from this reply until the real row exists."""
+    if turn_id is None:
+        return
+    with _INFLIGHT_LOCK:
+        _INFLIGHT[_inflight_key(session_id, turn_id)] = dict(response or {})
+
+
+def clear_inflight(session_id: str, turn_id: Any) -> None:
+    """The commit landed, so the turn row can answer for itself now."""
+    with _INFLIGHT_LOCK:
+        _INFLIGHT.pop(_inflight_key(session_id, turn_id), None)
+
+
 def stored_turn_response(session_id: str, turn_id: Any) -> dict[str, Any] | None:
     """The reply a turn already produced, if this turn has been answered before.
 
@@ -288,6 +316,13 @@ def stored_turn_response(session_id: str, turn_id: Any) -> dict[str, Any] | None
     """
     if turn_id is None:
         return None
+    with _INFLIGHT_LOCK:
+        pending = _INFLIGHT.get(_inflight_key(session_id, turn_id))
+    if pending is not None:
+        logger.info(
+            "TURN replay from an in-flight save: session=%s turn=%s", session_id, turn_id
+        )
+        return dict(pending)
     try:
         if not persistence_enabled():
             record = _MEMORY.get(session_id) or {}

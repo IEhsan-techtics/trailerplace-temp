@@ -34,7 +34,7 @@ from fastapi import FastAPI, HTTPException, Response  # noqa: E402
 from fastapi.responses import StreamingResponse  # noqa: E402
 from pydantic import BaseModel, ConfigDict, Field  # noqa: E402
 
-from src import conversation_store, warmup, db, turn_status  # noqa: E402
+from src import conversation_store, warmup, db, turn_saver, turn_status  # noqa: E402
 from src.config import settings  # noqa: E402
 from src.domain.reply_chunks import split_reply_into_chunks  # noqa: E402
 from src.graph.build import run_turn  # noqa: E402
@@ -70,6 +70,11 @@ async def lifespan(_app: FastAPI):
     # message. On a serverless deployment that is every scale-from-zero.
     warmup.warm_everything()
     yield
+
+    # On the way down. A finished turn whose commit is still queued was answered but not
+    # saved, so the container waits for the queue before it goes - and says so, loudly, if
+    # the clock runs out first.
+    turn_saver.drain()
 
 
 app = FastAPI(title="TrailerPlace chatbot", version="1.0", lifespan=lifespan)

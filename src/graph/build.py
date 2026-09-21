@@ -19,16 +19,18 @@ customer just said.
 from __future__ import annotations
 
 import logging
+import functools
 import time
 import uuid
 from typing import Any, Callable
 
-from src import conversation_log, conversation_store, turn_log
+from src import conversation_log, conversation_store, turn_log, turn_saver
 from src.graph.nodes.apply import apply_node
 from src.graph.nodes.compose import compose_node
 from src.graph.nodes.inventory_lookup import inventory_lookup_node
 from src.graph.nodes.search import search_node
 from src.graph.state import STATE_SCHEMA_VERSION, from_snapshot, to_snapshot
+from src.config import settings
 from src.llm import usage
 from src.llm.client import analyze_turn
 from src.llm.respond import respond_with_tools
@@ -250,7 +252,9 @@ def run_turn(
             return {"abandoned": True, "session_id": session_id, "turn_id": str(turn_id),
                     "usage": turn_usage.as_dict()}
 
-        conversation_store.save_turn(
+        outbox_events = state["turn_outcome"].get("outbox_events")
+        commit = functools.partial(
+            conversation_store.save_turn,
             session_id,
             conversation=state["messages"],
             state_snapshot=to_snapshot(state),
@@ -258,14 +262,27 @@ def run_turn(
             response=response,
             contact=state.get("contact"),
             item_of_interest=conversation_store.describe_interest(state),
-            outbox_events=state["turn_outcome"].get("outbox_events"),
+            outbox_events=outbox_events,
             turn_id=turn_id,
         )
 
-        # After the commit and off the reply path: the customer must never wait on an SMTP
-        # round trip, and a row that fails to send stays pending for the next drain.
-        if state["turn_outcome"].get("outbox_events"):
-            conversation_store.deliver_pending_outbox_async()
+        # The commit happens AFTER the reply is written, so the customer is waiting on a
+        # result they never see - about 2.4 s of it. Queued instead, in order, never dropped,
+        # and drained before the process exits (src/turn_saver.py). The in-memory store is
+        # always saved inline: it is instant, and the tests read it straight back.
+        if settings.background_turn_save and conversation_store.persistence_enabled():
+            # Registered BEFORE it is queued: a redelivery arriving inside the save window
+            # must still be answered from this reply rather than run the turn again.
+            conversation_store.remember_inflight(session_id, turn_id, response)
+            turn_saver.submit(
+                commit, session_id=session_id, turn_id=turn_id, outbox_events=outbox_events
+            )
+        else:
+            commit()
+            # After the commit and off the reply path: the customer must never wait on an
+            # SMTP round trip, and a row that fails to send stays pending for the next drain.
+            if outbox_events:
+                conversation_store.deliver_pending_outbox_async()
 
         logger.info(
             "TURN done: session=%s turn=%s calls=%d tokens=%d cached=%d category=%s complete=%s",

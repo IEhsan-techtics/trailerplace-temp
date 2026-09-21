@@ -79,6 +79,10 @@ class Settings:
     # conversation it is about (app.py restores a session from ?chat_session=<id>). Unset
     # means no link: a wrong one is worse than none.
     chat_ui_url: str = ""
+    # Commit a finished turn off the reply path (src/turn_saver.py). About 2.4 s of every
+    # turn against Azure Postgres from outside the region. Set to 0 to go back to committing
+    # before the customer is answered.
+    background_turn_save: bool = True
     chatbot_api_port: int = 8000
     langsmith_tracing: bool = False
     langsmith_endpoint: str = ""
@@ -182,6 +186,7 @@ class Settings:
             smtp_from=os.getenv("SMTP_FROM", ""),
             email_to=os.getenv("EMAIL_TO", ""),
             chat_ui_url=os.getenv("CHAT_UI_URL", ""),
+            background_turn_save=_bool(os.getenv("BACKGROUND_TURN_SAVE"), True),
             chatbot_api_port=_int(os.getenv("CHATBOT_API_PORT"), 8000),
             langsmith_tracing=_bool(os.getenv("LANGSMITH_TRACING")),
             langsmith_endpoint=os.getenv("LANGSMITH_ENDPOINT", ""),
