@@ -528,6 +528,7 @@ def _record_shown(state: dict, urls: list[str], listings: list[Any] | None = Non
 
     by_url = cards.listings_by_url(listings)
     batch = [_trimmed(by_url[key]) for key in (cards.url_key(url) for url in urls) if key in by_url]
+    _tell_the_team_what_they_saw(state, batch or [{"title": url} for url in urls])
     if not batch:
         return
     # Replaced, not extended: they are counting the list in front of them.
@@ -538,6 +539,34 @@ def _record_shown(state: dict, urls: list[str], listings: list[Any] | None = Non
     running = [row for row in (state.get("shown_listings") or []) if row.get("url") not in
                {row["url"] for row in batch if row.get("url")}]
     state["shown_listings"] = (running + batch)[-_MAX_REMEMBERED_LISTINGS:]
+
+
+def _tell_the_team_what_they_saw(state: dict, batch: list[dict]) -> None:
+    """One notification per turn that put trailers in front of the customer.
+
+    Raised from HERE, and only here, because this is the single place that knows what the
+    customer was actually shown - the search and the lookup both know what they FOUND, which
+    is not the same thing once the reply has chosen what to present.
+
+    ``search_node`` and ``inventory_lookup_node`` each leave a line saying what they were
+    asked for (the category and filters, or the trailer that was looked up); it is consumed
+    here as the detail on the end, so the team's line says both what was shown and why.
+    """
+    from src.tools import team_notify
+
+    outcome = state.setdefault("turn_outcome", {})
+    triggers = outcome.get("system_email_triggers") or []
+    outcome["system_email_triggers"] = []
+    detail = "; ".join(
+        str(trigger.get("description") or "").strip()
+        for trigger in triggers
+        if trigger.get("kind") == "results_shown" and trigger.get("description")
+    )
+    status = team_notify.record_results_shown(state, batch, detail)
+    logger.info(
+        "RESULTS shown: session=%s count=%d status=%s",
+        state.get("session_id"), len(batch), status,
+    )
 
 
 CONTACT_ASK = "Also - who am I speaking with, and what's the best email or phone to reach you on?"
@@ -700,9 +729,10 @@ def _contact_ask_is_due(state: dict) -> bool:
     on the very turn we learned most about them.
 
     The gate decides when: twice at most, never on consecutive turns, never after they have
-    declined or given us both halves.
+    declined or given us both halves - and twice more while a notification is stranded for
+    want of the very details we are asking for.
     """
-    if not greeting.contact_gate_applies(state):
+    if not greeting.contact_ask_is_due(state):
         return False
     # Set by the inventory lookup: they asked about a specific trailer, and the invitation
     # would crowd out the answer. The agent is told the same in the tool result; this holds
@@ -773,6 +803,22 @@ def _closing_part(state: dict, output: Any) -> tuple[str, str | None]:
         # writes it - it can pick the types that fit what they have already said, which a
         # fixed sentence cannot - and ours stands in when it writes nothing, or when it
         # tries to read the whole catalogue out.
+        if state.get("listing_interest_logged"):
+            # They have already told us which trailer they want, and we have logged it for
+            # the team. Live, the very next reply was "Thanks, Ibrahim - I've noted your
+            # email... What type of trailer are you looking for? We have Utility, Enclosed,
+            # Equipment, Dump, Flatbed and many more" - the catalogue read out to a customer
+            # who had picked a trailer two messages earlier.
+            #
+            # Checked BEFORE the model's own proposal, not after: that live question was the
+            # model's, word for word, and the question is the wrong thing to say whoever
+            # wrote it. Which type they want is a question for a customer with nothing on
+            # the table; this one has a trailer on the table.
+            logger.info(
+                "COMPOSE held the category question: session=%s they have already picked one",
+                state.get("session_id"),
+            )
+            return "", None
         proposed = (getattr(output, "next_question_text", None) or "").strip()
         if proposed and not _names_too_many_categories(proposed):
             return proposed, None
@@ -781,18 +827,6 @@ def _closing_part(state: dict, output: Any) -> tuple[str, str | None]:
                 "COMPOSE replaced a question naming too many categories: session=%s",
                 state.get("session_id"),
             )
-        if state.get("listing_interest_logged"):
-            # They have already told us which trailer they want, and we have logged it for
-            # the team. Live, the very next reply was "Thanks, Ibrahim - I've noted your
-            # email... What type of trailer are you looking for? We have Utility, Enclosed,
-            # Equipment..." - the catalogue read out to a customer who had picked a trailer
-            # two messages earlier. The written question exists to give a customer with
-            # nothing on the table something to answer; this one has a trailer on the table.
-            logger.info(
-                "COMPOSE held the category question: session=%s they have already picked one",
-                state.get("session_id"),
-            )
-            return "", None
         return greeting.orientation_question(state), None
 
     # 5. The next required question. Python picks the slot; the model may phrase it.

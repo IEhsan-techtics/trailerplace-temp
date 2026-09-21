@@ -96,6 +96,9 @@ class SessionState(TypedDict, total=False):
     # customer has picked a trailer and we have logged it, "what type of trailer are you
     # looking for?" is the wrong thing to say next.
     listing_interest_logged: bool
+    # The trailer they said they want, by title. It is what the lead row should be called:
+    # a customer who picked one off the list is not shopping for "Livestock | length=32".
+    interest_listing: str | None
 
     turn_index: int
     # Whether listings have been put in front of them at least once. It changes what a
@@ -159,6 +162,7 @@ def new_state(session_id: str) -> SessionState:
         contact_followup_pending=None,
         listing_interest_keys=[],
         listing_interest_logged=False,
+        interest_listing=None,
         turn_index=0,
         results_shown=False,
     )

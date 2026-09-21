@@ -548,8 +548,32 @@ def test_the_catalogue_is_not_read_out_after_their_lead_is_logged(fake_llm, no_s
     fake_llm.push(turn_output(intent="listing_interest", turn_summary="Wants trailer 15131."))
     run_turn("s3", "yeah I am")
 
-    fake_llm.push(turn_output(intent="contact_info_provided", name="Ibrahim", email="i@x.ai"))
+    # The live question was the MODEL's, word for word - so it is pushed as the model's, and
+    # held all the same. Which type they want is a question for a customer with nothing on
+    # the table.
+    fake_llm.push(
+        turn_output(
+            intent="contact_info_provided", name="Ibrahim", email="i@x.ai",
+            next_question_text=(
+                "What type of trailer are you looking for? We have Utility, Enclosed, "
+                "Equipment, Dump, Flatbed and many more - which one fits what you need?"
+            ),
+        )
+    )
     reply = run_turn("s3", "my name is Ibrahim and email is i@x.ai")["assistant_text"]
 
     assert "What type of trailer are you looking for" not in reply
     assert "passed your request on to our team" in reply
+
+
+def test_the_lead_is_named_after_the_trailer_they_picked(fake_llm, no_search):
+    """The lead row's item_of_interest is what the team opens it to see. A customer who
+    asked about one trailer by stock number and said yes to it was filed under "no details
+    yet", because nothing he had said was a category or a slot."""
+    from src.conversation_store import describe_interest
+
+    livestock_customer(fake_llm)
+    fake_llm.push(listing_interest())
+    run_turn("s1", "I like the first one")
+
+    assert describe_interest(state_after()) == "2026 P&amp;C Car Hauler"

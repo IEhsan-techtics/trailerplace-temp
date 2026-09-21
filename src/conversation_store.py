@@ -486,6 +486,13 @@ def describe_interest(state: dict) -> str:
 
     That column is NOT NULL, so it always has to resolve to something.
     """
+    # The trailer they actually said they want beats anything we inferred from the
+    # questions: it IS the thing they are interested in, and it is what the team opens the
+    # lead to see.
+    picked = str(state.get("interest_listing") or "").strip()
+    if picked:
+        return picked
+
     category = state.get("category")
     slots = state.get("slots") or {}
     if not category and not slots:

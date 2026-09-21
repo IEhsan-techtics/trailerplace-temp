@@ -260,3 +260,43 @@ def flush(state: dict) -> int:
     outcome["email_status"] = f"sent {len(events)} stashed notification(s)"
     logger.info("team_notify | flushed %d stashed notification(s)", len(events))
     return len(events)
+
+
+# The team hears about every set of trailers a customer was actually shown, not only about
+# the ones they said yes to. A browsing session that goes quiet is still a lead worth
+# knowing about - somebody looked at six livestock trailers this afternoon - and it is the
+# one thing the transcript cannot tell them at a glance.
+RESULTS_SHOWN_REASON = "Results Shown to User"
+
+# How long the one-line description may run before the tail is cut. A dozen stock numbers is
+# a useful line; forty is a wall.
+_MAX_DESCRIPTION = 300
+
+
+def _name_of(listing: Any) -> str:
+    """How the team refers to a trailer: its stock number, or failing that its title."""
+    get = listing.get if isinstance(listing, dict) else (lambda name: getattr(listing, name, None))
+    return str(get("stock_number") or "").strip() or str(get("title") or "").strip() or "?"
+
+
+def record_results_shown(state: dict, listings: list[Any], detail: str = "") -> str:
+    """Tell the team which trailers were just put in front of this customer.
+
+    Called with what the reply actually SHOWED, never with what the search found: a trailer
+    the reply dropped was never presented, and telling the team otherwise is telling them
+    something that did not happen.
+
+    It goes through the same gate as everything else, so with no way to reach the customer
+    it waits rather than going out as an anonymous "someone saw six trailers" - and it is
+    what keeps the contact request alive on the following turn (greeting.contact_ask_is_due).
+    """
+    if not listings:
+        return "dropped"
+    names = ", ".join(_name_of(listing) for listing in listings)
+    count = len(listings)
+    description = f"Showed {count} trailer{'' if count == 1 else 's'}: {names}"
+    if detail:
+        description = f"{description} - {detail}"
+    if len(description) > _MAX_DESCRIPTION:
+        description = description[: _MAX_DESCRIPTION - 1].rstrip(", ") + "…"
+    return record(state, reason=RESULTS_SHOWN_REASON, description=description)

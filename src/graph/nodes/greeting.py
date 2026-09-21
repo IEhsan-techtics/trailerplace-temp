@@ -50,17 +50,48 @@ def contact_is_complete(contact: dict) -> bool:
     return has_name(contact) and has_reach(contact)
 
 
-def contact_gate_applies(state: dict) -> bool:
-    """True when the reply should carry the contact request rather than only the flow."""
+# The ask budget when a notification is stranded for want of contact details. The ordinary
+# cap is about not pestering someone who is browsing; this is a customer the team has
+# something to say to and no way of reaching. Two more asks, at the same spacing.
+MAX_CONTACT_ASKS_WITH_A_LEAD_WAITING = 4
+
+
+def _gate_applies(state: dict, cap: int) -> bool:
     contact = state.get("contact") or {}
     if contact.get("declined") or contact_is_complete(contact):
         return False
-    if int(contact.get("asks_without_progress") or 0) >= MAX_CONTACT_ASKS:
+    if int(contact.get("asks_without_progress") or 0) >= cap:
         return False
     last_asked = int(contact.get("last_asked_turn") or 0)
     if not last_asked:
         return True
     return int(state.get("turn_index") or 0) - last_asked >= CONTACT_ASK_TURN_GAP
+
+
+def contact_gate_applies(state: dict) -> bool:
+    """True when the reply should carry the contact request rather than only the flow.
+
+    This is also what HOLDS BACK the listings (apply._apply_results_gate, and the search
+    tool's own refusal), so it stops at the ordinary cap whatever else is waiting: a gate
+    that stayed open for a stranded notification would never let the customer see a trailer
+    again. ``contact_ask_is_due`` is the one that asks.
+    """
+    return _gate_applies(state, MAX_CONTACT_ASKS)
+
+
+def contact_ask_is_due(state: dict) -> bool:
+    """Whether the request goes on the end of THIS reply. The gate, with a longer budget
+    while something is waiting to be sent.
+
+    A customer who has been shown six trailers has a notification stashed against their
+    name, and it can never be sent to anyone: the team is told what was shown, and there is
+    no way to say who saw it. That is worth asking about again, once the ordinary budget is
+    spent, and it is exactly the case the ordinary budget was never about.
+    """
+    waiting = bool(state.get("pending_email_actions"))
+    return _gate_applies(
+        state, MAX_CONTACT_ASKS_WITH_A_LEAD_WAITING if waiting else MAX_CONTACT_ASKS
+    )
 
 
 def note_asked(state: dict) -> None:

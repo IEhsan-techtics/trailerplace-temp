@@ -236,6 +236,11 @@ def _apply_listing_interest(state: dict, output: Any) -> None:
     title = str(listing.get("title") or "").strip()
     url = str(listing.get("url") or "").strip()
     state["listing_interest_logged"] = True
+    if title:
+        # What the lead row is FOR. Without it a customer who asked about one trailer by
+        # stock number and said yes to it was filed under "no details yet", because nothing
+        # they said was a category or a slot.
+        state["interest_listing"] = title
 
     recorded = state.setdefault("listing_interest_keys", [])
     if url in recorded:
