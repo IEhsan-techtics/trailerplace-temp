@@ -94,9 +94,7 @@ def record(state: dict, output: Any, requested: str) -> str:
     if key in seen:
         # Asked again. The team already has it (or will, once we can reach them) - a second
         # email about the same boat trailer helps no one.
-        if team_notify.declined(state):
-            return "dropped"
-        return "sent" if team_notify.contact_complete(state) else "stashed"
+        return team_notify.status_now(state)
     seen.append(key)
     # The turn summary used to go here and ran to three sentences. The reason line already
     # names the type; this only has to say that they asked for it.

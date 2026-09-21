@@ -150,3 +150,63 @@ def test_a_session_with_nothing_yet_still_has_a_valid_item_of_interest(fake_llm)
     fake_llm.push(turn_output(intent="smalltalk_other"))
     run_turn("s1", "hi")
     assert load_lead("s1")["item_of_interest"] == "Unspecified"
+
+
+# ------------------------------------------- a refusal stops the asking, not always the send
+#
+# The flag means "this message refuses contact details", which covers two different things:
+# "don't contact me" and "I'd rather not give my name". With an email already on file the
+# second is the one that happened, and throwing that lead away was the old rule taken past
+# its own reason for existing - there was no way to reach them, so there was nothing to send.
+def _state(**contact):
+    return {
+        "session_id": "s1",
+        "contact": {"name": None, "email": None, "phone": None, "declined": False, **contact},
+        "turn_outcome": {},
+    }
+
+
+def test_refusing_the_name_does_not_throw_away_a_reachable_lead():
+    from src.tools import team_notify
+
+    state = _state(email="d@x.ai", declined=True)
+    assert team_notify.record(state, reason="Listing Interest", description="wants it") == "sent"
+    assert len(state["turn_outcome"]["outbox_events"]) == 1
+
+
+def test_refusing_with_no_way_to_reach_them_still_drops_it():
+    from src.tools import team_notify
+
+    state = _state(declined=True)
+    assert team_notify.record(state, reason="Listing Interest", description="wants it") == "dropped"
+    assert not state.get("pending_email_actions"), "nothing to wait for - they said no"
+
+
+def test_a_stash_from_an_earlier_turn_survives_the_refusal():
+    """They asked about a trailer on turn one, gave an email on turn two and would rather
+    not give their name on turn three. The turn-one request is still a real lead."""
+    from src.tools import team_notify
+
+    state = _state(email="d@x.ai", declined=True)
+    state["pending_email_actions"] = [
+        {"reason": "Listing Interest", "description": "wants it", "event_type": "listing_interest"}
+    ]
+    assert team_notify.flush(state) == 1
+    assert state["pending_email_actions"] == []
+
+
+def test_but_we_never_ask_them_again():
+    """The half of the old rule that does not change."""
+    from src.graph.nodes import greeting
+
+    state = _state(email="d@x.ai", declined=True)
+    assert not greeting.contact_gate_applies(state)
+    assert not greeting.contact_ask_is_due(state)
+
+
+def test_the_status_the_customer_is_told_matches():
+    from src.tools import team_notify
+
+    assert team_notify.status_now(_state(email="d@x.ai", declined=True)) == "sent"
+    assert team_notify.status_now(_state(declined=True)) == "dropped"
+    assert team_notify.status_now(_state()) == "stashed"

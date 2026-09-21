@@ -20,7 +20,10 @@ The customer is never made to wait for their answer. They get the canned line im
 plus a request for whichever piece we are missing, worded so they understand WHY - it is so
 someone can get back to them, not paperwork for its own sake.
 
-A refusal ends it. We stop asking, the stash is dropped, and the conversation carries on.
+A refusal stops us ASKING, for good. It only stops us SENDING when we have no way to reach
+them anyway: someone who hands over an email and then would rather not give their name has
+not opted out of anything, and throwing that lead away was the old rule taken past its own
+reason for existing.
 """
 from __future__ import annotations
 
@@ -58,6 +61,29 @@ def contact_complete(state: dict) -> bool:
 
 def declined(state: dict) -> bool:
     return bool(contact_pieces(state).get("declined"))
+
+
+def is_dropped(state: dict) -> bool:
+    """Whether a refusal actually stops the email.
+
+    Only when we cannot reach them regardless. The flag means "this message refuses contact
+    details", which covers both "don't contact me" and "I'd rather not give my name" - and
+    with an email already on file the second is the one that happened. Dropping a lead we
+    can act on is a worse mistake than telling the team about one they can.
+    """
+    return declined(state) and not has_reachable(state)
+
+
+def status_now(state: dict) -> str:
+    """What would happen to a notification raised right now: sent, stashed or dropped.
+
+    Recomputed rather than remembered, because it is about the CONTACT we hold and that
+    changes turn by turn: something stashed three turns ago is "sent" the moment they hand
+    over a number.
+    """
+    if is_dropped(state):
+        return "dropped"
+    return "sent" if contact_complete(state) else "stashed"
 
 
 def missing_pieces(state: dict) -> list[str]:
@@ -243,9 +269,9 @@ def record(state: dict, *, reason: str, description: str) -> str:
     outcome = state.setdefault("turn_outcome", {})
     event = build_event(state, reason=reason, description=description)
 
-    if declined(state):
-        # They refused to be contacted. Recording a lead we can never follow up on is not a
-        # lead, and asking again is the one thing we promised not to do.
+    if is_dropped(state):
+        # They refused AND we have no way to reach them. Recording a lead we can never
+        # follow up on is not a lead, and asking again is the one thing we promised not to do.
         logger.info("team_notify | %s dropped: contact declined", reason)
         outcome["email_status"] = "dropped (contact declined)"
         return "dropped"
@@ -277,7 +303,7 @@ def flush(state: dict) -> int:
     if not stash:
         return 0
 
-    if declined(state):
+    if is_dropped(state):
         state["pending_email_actions"] = []
         state["contact_followup_pending"] = None
         logger.info("team_notify | dropping %d stashed notification(s): declined", len(stash))

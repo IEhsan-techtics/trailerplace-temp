@@ -248,13 +248,10 @@ def _apply_shared_link(state: dict, output: Any, user_message: str) -> None:
 def interest_status(state: dict) -> str:
     """What would happen to a listing-interest email raised right now.
 
-    Recomputed rather than remembered, because it is about the CONTACT we hold, and that
-    changes turn by turn: an interest stashed three turns ago is "sent" the moment they hand
-    over a number, and the customer should be told the true thing each time.
+    Recomputed rather than remembered: it is about the contact we hold, and the customer
+    should be told the true thing each time.
     """
-    if team_notify.declined(state):
-        return "dropped"
-    return "sent" if team_notify.contact_complete(state) else "stashed"
+    return team_notify.status_now(state)
 
 
 def _apply_listing_interest(state: dict, output: Any) -> None:
