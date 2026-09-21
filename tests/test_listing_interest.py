@@ -19,8 +19,9 @@ import pytest
 from src.conversation_store import load_session
 from src.domain import listing_echo
 from src.graph.build import run_turn
-from src.graph.state import from_snapshot
+from src.graph.state import from_snapshot, new_state
 from src.llm.schemas import Quantity
+from src.tools.lookup_gate import referenced_listing
 from src.tools.questions import all_required_resolved
 from src.tools.filters import apply_extracted_fields
 
@@ -209,3 +210,173 @@ def test_pointing_at_a_trailer_does_not_open_an_axle_question(fake_llm, no_searc
     fake_llm.push(the_card_read_back())
     run_turn("s1", THE_MESSAGE)
     assert state_after().get("pending_axle_count") is None
+
+
+# ------------------------------------------------- 2. the batch on their screen is kept
+GALYEAN = "https://www.trailerplace.com/inventory/2026-galyean-32-cattle-trailer-015087/"
+GOOSENECK = "https://www.trailerplace.com/inventory/2026-gooseneck-5-x-32-5-bale-hay-81419/"
+
+
+def a_batch_of_two():
+    return [
+        {"title": "2026 Galyean 32' Cattle Trailer - 015087", "url": GALYEAN,
+         "stock_number": "15087", "price_display": "$32,250", "make": "Galyean",
+         "description": "a paragraph nobody needs two turns later"},
+        {"title": "2026 Gooseneck 5' x 32' 5 Bale Hay Trailer - 81419", "url": GOOSENECK,
+         "stock_number": "81419", "price_display": "$10,495", "make": "Gooseneck"},
+    ]
+
+
+def test_the_batch_is_recorded_in_the_order_it_was_shown():
+    from src.graph.nodes.compose import _record_shown
+
+    state = new_state("s1")
+    _record_shown(state, [GOOSENECK, GALYEAN], a_batch_of_two())
+
+    assert [row["stock_number"] for row in state["last_shown_listings"]] == ["81419", "15087"], (
+        "the order they were CITED in is the order on the customer's screen"
+    )
+
+
+def test_only_the_identifying_fields_are_kept():
+    """A state_snapshot is written every turn; whole listing rows would bloat it."""
+    from src.graph.nodes.compose import _KEPT_LISTING_FIELDS, _record_shown
+
+    state = new_state("s1")
+    _record_shown(state, [GALYEAN], a_batch_of_two())
+    assert set(state["last_shown_listings"][0]) <= set(_KEPT_LISTING_FIELDS)
+    assert "description" not in state["last_shown_listings"][0]
+
+
+def test_a_new_batch_replaces_the_old_one():
+    """"The second one" means the second thing in front of them now."""
+    from src.graph.nodes.compose import _record_shown
+
+    state = new_state("s1")
+    _record_shown(state, [GALYEAN], a_batch_of_two())
+    _record_shown(state, [GOOSENECK], a_batch_of_two())
+
+    assert [row["stock_number"] for row in state["last_shown_listings"]] == ["81419"]
+    assert len(state["shown_urls"]) == 2, "shown_urls still accumulates; only the batch resets"
+
+
+# --------------------------------------------------- 3 & 4. the reference resolves itself
+def state_showing_the_batch():
+    state = new_state("s1")
+    state["last_shown_listings"] = [
+        {k: v for k, v in row.items() if k != "description"} for row in a_batch_of_two()
+    ]
+    state["shown_urls"] = [GALYEAN, GOOSENECK]
+    return state
+
+
+def test_the_reference_resolves_to_that_trailer():
+    state = state_showing_the_batch()
+    listing = referenced_listing(state, turn_output(listing_reference=2))
+    assert listing["stock_number"] == "81419"
+
+
+@pytest.mark.parametrize("ref", [0, 3, None, "fifth"])
+def test_a_reference_we_cannot_count_to_resolves_to_nothing(ref):
+    """Rather than to a wrong trailer: out of range means it counted into a list we do not
+    have, and the turn falls back to an ordinary lookup."""
+    assert referenced_listing(state_showing_the_batch(), turn_output(listing_reference=ref)) is None
+
+
+def test_a_trailer_on_their_screen_is_not_looked_up_again():
+    """The live failure: listing_reference #5 AND stock 81419, so the lookup ran anyway."""
+    from src.graph.build import _route
+
+    output = the_card_read_back()
+    output.listing_reference = 2
+    output.inventory_lookup.is_lookup = True
+    output.inventory_lookup.confidence = "high"
+    output.inventory_lookup.stock_number = "81419"
+
+    assert "inventory_lookup" not in _route(state_showing_the_batch(), output)
+
+
+def test_a_trailer_that_is_not_on_their_screen_still_is():
+    from src.graph.build import _route
+
+    output = turn_output(intent="inventory_lookup")
+    output.inventory_lookup.is_lookup = True
+    output.inventory_lookup.confidence = "high"
+    output.inventory_lookup.stock_number = "99999"
+
+    assert "inventory_lookup" in _route(state_showing_the_batch(), output)
+
+
+def test_the_reply_pass_is_told_which_trailer_and_not_to_fetch_it():
+    from src.llm.respond import build_system_prompt
+
+    prompt = build_system_prompt(state_showing_the_batch(), turn_output(listing_reference=2))
+    assert "ALREADY RESOLVED" in prompt
+    assert "5 Bale Hay Trailer - 81419" in prompt
+    assert "do NOT call a" in prompt
+
+
+def test_without_a_batch_the_reply_pass_is_told_to_look_it_up():
+    from src.llm.respond import build_system_prompt
+
+    output = turn_output(intent="inventory_lookup")
+    output.inventory_lookup.is_lookup = True
+    output.inventory_lookup.confidence = "high"
+    output.inventory_lookup.stock_number = "99999"
+
+    prompt = build_system_prompt(new_state("s1"), output)
+    assert "call lookup_inventory" in prompt
+    assert "ALREADY RESOLVED" not in prompt
+
+
+def showing_two_batches():
+    """The live shape: six trailers, then "show me more", then two more."""
+    state = state_showing_the_batch()
+    state["shown_listings"] = [
+        {k: v for k, v in row.items() if k != "description"} for row in a_batch_of_two()
+    ]
+    state["last_shown_listings"] = [
+        {"title": "2026 Galyean 32' - 15086", "url": GALYEAN.replace("015087", "15086"),
+         "stock_number": "15086", "make": "Galyean"},
+    ]
+    state["shown_listings"] += state["last_shown_listings"]
+    return state
+
+
+def test_a_stock_number_beats_the_index():
+    """Live: the customer said "the 81419" and the model numbered it #4, counting into a
+    batch that by then held two trailers. The number says which trailer; the index does not."""
+    output = turn_output(intent="listing_interest", listing_reference=4)
+    output.inventory_lookup.is_lookup = True
+    output.inventory_lookup.confidence = "high"
+    output.inventory_lookup.stock_number = "81419"
+
+    assert referenced_listing(showing_two_batches(), output)["stock_number"] == "81419"
+
+
+def test_an_index_counts_into_the_batch_in_front_of_them():
+    """With no identifier there is nothing but the index, and it means the newest batch."""
+    listing = referenced_listing(showing_two_batches(), turn_output(listing_reference=1))
+    assert listing["stock_number"] == "15086"
+
+
+def test_a_running_list_is_capped():
+    from src.graph.nodes.compose import _MAX_REMEMBERED_LISTINGS, _record_shown
+
+    state = new_state("s1")
+    for batch in range(_MAX_REMEMBERED_LISTINGS + 5):
+        url = f"https://www.trailerplace.com/inventory/t-{batch}/"
+        _record_shown(state, [url], [{"title": f"T{batch}", "url": url, "stock_number": str(batch)}])
+
+    assert len(state["shown_listings"]) == _MAX_REMEMBERED_LISTINGS
+    assert state["shown_listings"][-1]["stock_number"] == str(_MAX_REMEMBERED_LISTINGS + 4)
+
+
+def test_showing_a_trailer_again_does_not_duplicate_it():
+    from src.graph.nodes.compose import _record_shown
+
+    state = new_state("s1")
+    _record_shown(state, [GALYEAN], a_batch_of_two())
+    _record_shown(state, [GALYEAN, GOOSENECK], a_batch_of_two())
+
+    assert [row["stock_number"] for row in state["shown_listings"]] == ["15087", "81419"]

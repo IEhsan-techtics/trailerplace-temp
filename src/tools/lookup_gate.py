@@ -168,6 +168,45 @@ def lookup_requested(turn: Any) -> bool:
     return bool(lookup.model_text) and not _model_text_is_category_word(lookup.model_text)
 
 
+def referenced_listing(state: Any, turn: Any) -> dict[str, Any] | None:
+    """The trailer they just pointed at, out of what we have already put on their screen.
+
+    Resolved here rather than by the reply model, which was given only the numbering and
+    guessed wrong, quoting a trailer nobody had picked.
+
+    The IDENTIFIER wins over the index. "I like the 81419" arrives as both a stock number
+    and a listing_reference, and the two disagree the moment a "show me more" has been
+    through: the model numbers from the batch it happens to be looking at, while the stock
+    number says exactly which trailer, however far back it was shown.
+
+    An index counts into the LAST batch only - the list in front of them while they type.
+    Out of range resolves to nothing rather than to a wrong trailer, and the turn falls
+    back to an ordinary lookup.
+    """
+    state = state or {}
+    batch = [row for row in (state.get("last_shown_listings") or []) if isinstance(row, dict)]
+    running = [row for row in (state.get("shown_listings") or []) if isinstance(row, dict)]
+
+    lookup = getattr(turn, "inventory_lookup", None) if turn else None
+    stock = _digits(usable_stock_number(turn))
+    if stock:
+        for row in running or batch:
+            if _digits(row.get("stock_number")) == stock:
+                return row
+
+    url = normalize_listing_url(getattr(lookup, "listing_url", None)) if lookup else None
+    if url:
+        for row in running or batch:
+            if normalize_listing_url(row.get("url")) == url:
+                return row
+
+    try:
+        index = int(getattr(turn, "listing_reference", None) or 0)
+    except (TypeError, ValueError):
+        return None
+    return batch[index - 1] if 1 <= index <= len(batch) else None
+
+
 def brand_is_lookup_make(turn: Any, brand: str) -> bool:
     """True when the extracted brand is just the make half of this turn's lookup identifier.
 

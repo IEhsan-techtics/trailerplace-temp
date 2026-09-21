@@ -27,6 +27,7 @@ from typing import Any
 from src.domain import brands, categories, company
 from src.llm.schemas import ReplyOutput
 from src.llm.tools import ToolRunner
+from src.tools.lookup_gate import referenced_listing
 
 logger = logging.getLogger(__name__)
 
@@ -175,8 +176,23 @@ def _state_line(state: dict, turn: Any) -> str:
     question = (getattr(turn, "user_question_to_answer", None) or "").strip()
     if question:
         lines.append(f'- Answer this first, in one or two sentences: "{question}"')
+    referenced = referenced_listing(state, turn)
+    if referenced is not None:
+        lines.append(
+            "- The trailer they are pointing at is ALREADY RESOLVED for you: "
+            f"\"{referenced.get('title') or 'that listing'}\" ({referenced.get('url') or ''}). "
+            "Its card is already on their screen, so do NOT show it again and do NOT call a "
+            "tool to fetch it. Talk about THIS trailer and no other: say what they asked, "
+            "offer the sales team on 979-532-1486, and do not count down the list yourself."
+        )
+        carry_on = carry_on_question(state)
+        if carry_on:
+            lines.append(
+                "- They are mid-way through our questions. After the trailer, end with "
+                f'exactly this question and no other: "{carry_on[1]}"'
+            )
     lookup = _lookup_hint(turn)
-    if lookup:
+    if lookup and referenced is None:
         lines.append(f"- They named one specific trailer: call lookup_inventory with {lookup}.")
         carry_on = carry_on_question(state)
         if carry_on and not (state.get("turn_outcome") or {}).get("link_interest"):

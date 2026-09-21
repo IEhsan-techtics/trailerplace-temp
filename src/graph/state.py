@@ -31,6 +31,15 @@ class SessionState(TypedDict, total=False):
     brand_preference: str | None
     non_metadata_features: list[str]
     shown_urls: list[str]
+    # The LAST batch put in front of them, in the order it was presented, trimmed to the
+    # few fields a later turn needs. This is what "the 5th one" counts into, so it has to
+    # outlive the turn that showed it - and it is replaced, never appended to, because the
+    # customer counts down the list currently on their screen.
+    last_shown_listings: list[dict[str, Any]]
+    # Every trailer shown so far, trimmed the same way and capped. The customer can scroll
+    # back, so "the 81419" may name something from three batches ago; the index counts into
+    # the last batch, but an identifier is matched against all of them.
+    shown_listings: list[dict[str, Any]]
     qualification_complete: bool
     turn_outcome: dict[str, Any]
 
@@ -102,6 +111,8 @@ def new_state(session_id: str) -> SessionState:
         brand_preference=None,
         non_metadata_features=[],
         shown_urls=[],
+        last_shown_listings=[],
+        shown_listings=[],
         qualification_complete=False,
         turn_outcome={},
         required_slots=[],

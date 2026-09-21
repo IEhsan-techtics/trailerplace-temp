@@ -88,7 +88,14 @@ def test_two_sessions_do_not_share_state(fake_llm):
 
 
 def test_the_snapshot_carries_no_listing_payloads(fake_llm, no_search):
-    """turn_outcome is scratch. Persisting it would bloat the row with listing dicts."""
+    """turn_outcome is scratch. Persisting it would bloat the row with listing dicts.
+
+    The one exception is deliberate: ``last_shown_listings`` keeps the batch on the
+    customer's screen, because "I like the 5th one" has to be resolvable on the NEXT turn.
+    It is trimmed to the few fields that identify a trailer - never the whole row.
+    """
+    from src.graph.nodes.compose import _KEPT_LISTING_FIELDS
+
     fake_llm.push(turn_output(category_mentioned="dump", intent="category_selection"))
     run_turn("s1", "dump trailer")
     fake_llm.push(turn_output(intent="skip_all_show_results"))
@@ -96,7 +103,10 @@ def test_the_snapshot_carries_no_listing_payloads(fake_llm, no_search):
 
     snapshot, _conversation, _lead = load_session("s1")
     assert "turn_outcome" not in snapshot
-    assert "listings" not in str(snapshot)
+    assert "\"listings\"" not in str(snapshot), "no raw listing payload"
+
+    for listing in snapshot["last_shown_listings"]:
+        assert set(listing) <= set(_KEPT_LISTING_FIELDS)
 
 
 def test_the_snapshot_is_json_serialisable(fake_llm):

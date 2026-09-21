@@ -32,7 +32,7 @@ from src.graph.state import STATE_SCHEMA_VERSION, from_snapshot, to_snapshot
 from src.llm import usage
 from src.llm.client import analyze_turn
 from src.llm.respond import respond_with_tools
-from src.tools.lookup_gate import lookup_requested
+from src.tools.lookup_gate import lookup_requested, referenced_listing
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +51,11 @@ def _route(state: dict, output: Any) -> list[str]:
 
     # The structural gate, not just is_lookup+confidence: a bare make is a brand preference
     # and a category word is not a model, so neither may hijack the turn with a side query.
-    if lookup_requested(output):
+    #
+    # A trailer already on their screen is not a lookup either. "I like the 81419" is how
+    # people pick one off a list, and it arrives with BOTH a listing_reference and a stock
+    # number: looking it up fetched a trailer we had just shown and printed its card again.
+    if lookup_requested(output) and referenced_listing(state, output) is None:
         targets.append("inventory_lookup")
 
     return targets

@@ -11,6 +11,7 @@ import logging
 import re
 from typing import Any
 
+from src.domain import cards
 from src.domain import company
 from src.domain import axles
 from src.domain import gooseneck as gooseneck_domain
@@ -55,7 +56,7 @@ def compose_node(state: dict, output: Any) -> dict:
         outcome["assistant_text"] = _with_handoff(outcome, outcome["reply_text"])
         outcome["asked_slot"] = None
         _carry_on_after_lookup(state, outcome)
-        _record_shown(state, outcome.get("cited_listing_urls") or [])
+        _record_shown(state, outcome.get("cited_listing_urls") or [], outcome.get("listings"))
         _note_contact_ask(state, outcome["assistant_text"])
         return state
 
@@ -489,12 +490,30 @@ def _person_fallback(state: dict, output: Any, outcome: dict) -> str:
     return f"{answer} {team_notify.ask_for_missing(state)}"
 
 
-def _record_shown(state: dict, urls: list[str]) -> None:
+# What is kept of a listing once the turn that showed it is over. The whole row would
+# bloat every state_snapshot for no benefit; these are the fields a later turn needs to
+# say WHICH trailer the customer just pointed at.
+_KEPT_LISTING_FIELDS = ("title", "url", "stock_number", "price_display", "make")
+
+# How far back "the 81419" can reach. Four batches of six, and a bounded snapshot.
+_MAX_REMEMBERED_LISTINGS = 24
+
+
+def _trimmed(listing: Any) -> dict[str, Any]:
+    get = listing.get if isinstance(listing, dict) else lambda name: getattr(listing, name, None)
+    return {field: get(field) for field in _KEPT_LISTING_FIELDS if get(field)}
+
+
+def _record_shown(state: dict, urls: list[str], listings: list[Any] | None = None) -> None:
     """Mark the trailers the reply actually cited as shown.
 
     Recorded from what the model CITED, not from what the search returned: a "show me more"
     must exclude what the customer has seen, and locking out trailers that never reached the
     reply would hide them for the rest of the conversation.
+
+    The cited order is also the order the customer sees, so ``last_shown_listings`` is
+    built from it: "I like the 5th one" counts down the batch on their screen, and without
+    the rows themselves there was no way to say which trailer that is (src/llm/respond.py).
     """
     if not urls:
         return
@@ -504,6 +523,19 @@ def _record_shown(state: dict, urls: list[str]) -> None:
         cleaned = str(url or "").strip()
         if cleaned and cleaned not in shown:
             shown.append(cleaned)
+
+    by_url = cards.listings_by_url(listings)
+    batch = [_trimmed(by_url[key]) for key in (cards.url_key(url) for url in urls) if key in by_url]
+    if not batch:
+        return
+    # Replaced, not extended: they are counting the list in front of them.
+    state["last_shown_listings"] = batch
+    # The running list is different: they can scroll back, so a trailer named by its stock
+    # number three batches ago is still one they were shown. Capped, because this rides in
+    # every state_snapshot and no customer refers back to the fortieth trailer.
+    running = [row for row in (state.get("shown_listings") or []) if row.get("url") not in
+               {row["url"] for row in batch if row.get("url")}]
+    state["shown_listings"] = (running + batch)[-_MAX_REMEMBERED_LISTINGS:]
 
 
 CONTACT_ASK = "Also - who am I speaking with, and what's the best email or phone to reach you on?"
@@ -838,15 +870,12 @@ def _render_listings(state: dict, outcome: dict) -> str:
     if not listings:
         return _no_results_line(state)
 
-    state["results_shown"] = True
     lines: list[str] = ["Here's what fits:"]
     for index, listing in enumerate(listings, start=1):
         lines.append(_listing_line(index, listing))
-        url = listing.get("url")
-        if url:
-            state.setdefault("shown_urls", [])
-            if url not in state["shown_urls"]:
-                state["shown_urls"].append(url)
+    # Same bookkeeping as the reply-pass path: these cards are numbered on their screen in
+    # exactly this order, so this IS the batch a later "the 3rd one" counts into.
+    _record_shown(state, [str(listing.get("url") or "") for listing in listings], listings)
 
     if outcome.get("filters_relaxed"):
         dropped = outcome.get("relaxed_filters_dropped") or []

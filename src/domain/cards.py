@@ -37,7 +37,7 @@ MESSENGER_TEXT_LIMIT = 2000
 CARD_BUTTON_TITLE = "View Trailer"
 
 
-def _url_key(url: Any) -> str:
+def url_key(url: Any) -> str:
     """How a URL is compared. The same normalisation the reply path uses throughout."""
     return str(url or "").strip().rstrip("/").lower()
 
@@ -53,7 +53,7 @@ def listings_by_url(listings: Iterable[Any] | None) -> dict[str, Any]:
     """The turn's listings, keyed by URL; the first row wins a repeated URL."""
     index: dict[str, Any] = {}
     for listing in listings or []:
-        key = _url_key(_get(listing, "url"))
+        key = url_key(_get(listing, "url"))
         if key:
             index.setdefault(key, listing)
     return index
@@ -82,13 +82,13 @@ def website_bubbles(assistant_text: str, listings: Iterable[Any] | None) -> list
     bubbles: list[dict[str, Any]] = []
 
     for chunk in chunks:
-        linked = {_url_key(url) for url in urls_in_chunk(chunk)}
+        linked = {url_key(url) for url in urls_in_chunk(chunk)}
         matched: list[dict[str, Any]] = []
         if linked:
             for index, listing in enumerate(rows):
                 if index in claimed:
                     continue
-                url = _url_key(_get(listing, "url"))
+                url = url_key(_get(listing, "url"))
                 if url and url in linked:
                     claimed.add(index)
                     matched.append({"rank": index + 1, "listing": listing})
@@ -173,7 +173,7 @@ def _sends_for_chunk(chunk: str, index: dict[str, Any], cards_enabled: bool) -> 
         return [("text", part) for part in split_for_messenger(chunk)]
 
     marker, title, url, body = parsed
-    listing = index.get(_url_key(url)) if cards_enabled else None
+    listing = index.get(url_key(url)) if cards_enabled else None
     if listing is None:
         # No row to build a card from - cards switched off, or a URL this turn did not
         # present. Three plain bubbles: worse than a card, but the trailer still reaches
