@@ -632,13 +632,20 @@ def lookup_inventory(
     exactly one row, so it is exact or nothing. When it matches nothing (sold, or mistyped)
     the other identifiers still run.
 
-    Returns ``{"match_status": "exact"|"no_exact"|"ambiguous"|"none", "matches": [...], "requested_label": str}``.
+    Returns ``{"match_status": "exact"|"no_exact"|"ambiguous"|"none", "matches": [...],
+    "requested_label": str, "total_matched": int}``.
+
+    ``total_matched`` is how many units actually matched, which is NOT ``len(matches)``:
+    matches is capped at ``limit`` for presentation. Asked "do you have any 2026 Galyean
+    trailers?" with six on the lot, the caller was handed five rows and no way to know there
+    were six, and answered "the available unit is 32 ft long".
     """
     url_match = _match_listing_url(listing_url)
     if url_match is not None:
-        return url_match
+        return {**url_match, "total_matched": len(url_match.get("matches") or [])}
     if listing_url and not (year or make or model_text or stock_number):
-        return {"match_status": "none", "matches": [], "requested_label": "that listing"}
+        return {"match_status": "none", "matches": [], "requested_label": "that listing",
+                "total_matched": 0}
 
     identifiers = _Identifiers(
         year=year,
@@ -673,8 +680,14 @@ def lookup_inventory(
     label_parts = [str(year) if year else "", make or "", model_text or ""]
     requested_label = " ".join(part for part in label_parts if part).strip() or "that exact trailer"
 
+    # The genuine count when there is one, falling back to what we are returning. A no_exact
+    # result's exact_match_count is 0 by definition - those rows are substitutes, not matches.
+    exact_count = int(result.get("exact_match_count") or 0)
+    total_matched = max(exact_count, len(top_matches)) if not no_exact_reason else len(top_matches)
+
     return {
         "match_status": match_status,
         "matches": top_matches,
         "requested_label": requested_label,
+        "total_matched": total_matched,
     }

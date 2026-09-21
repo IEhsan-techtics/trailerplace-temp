@@ -260,3 +260,112 @@ def test_a_name_read_off_an_email_address_is_not_used(fake_llm, mail, no_reply_p
     assert state_after()["contact"]["name"] is None, "they never gave one"
     assert "Ibrahim" not in reply
     assert "Thanks - I've got your email." in reply
+
+
+# ------------------------------------------ several trailers, some of them already shown
+# Live, turn 12 of the long-conversation run. Six 2026 Galyean units on the lot, five
+# returned, the first already shown earlier in the chat:
+#   inventory_lookup_result | exact_match_count=6 | matches=5
+#   TOOL inventory_lookup: status=already_shown matches=0
+#   LUNA: "a 2026 Galyean cattle trailer is available... The available unit is 32 ft long."
+# The already-shown check tested matches[0] and threw all five away, so the model answered a
+# stock question from conversation memory - and got the count wrong.
+@pytest.fixture
+def six_galyeans(monkeypatch):
+    rows = [
+        {"title": f"2026 Galyean 32' Cattle Trailer - {stock}",
+         "url": GALYEAN.replace("015087", stock), "stock_number": stock,
+         "year": "2026", "make": "Galyean", "model": "32' Cattle Trailer",
+         "category": "Livestock"}
+        for stock in ("15079", "15087", "15086", "15131", "15189", "15190")
+    ]
+    rows[1]["url"] = GALYEAN
+    frame = inventory_matcher.prepare_inventory(pd.DataFrame(rows))
+    monkeypatch.setattr(inventory_matcher, "prepared_inventory", lambda: frame)
+    return frame
+
+
+def year_make_question(**extra):
+    output = turn_output(intent="inventory_lookup", **extra)
+    output.inventory_lookup.is_lookup = True
+    output.inventory_lookup.confidence = "high"
+    output.inventory_lookup.year = 2026
+    output.inventory_lookup.make = "Galyean"
+    return output
+
+
+def test_a_stock_question_is_answered_even_when_one_of_them_was_shown(six_galyeans):
+    from src.graph.nodes.inventory_lookup import inventory_lookup_node
+
+    state = new_state("s1")
+    state["shown_urls"] = [GALYEAN]
+    state["turn"] = year_make_question()
+    inventory_lookup_node(state)
+
+    outcome = state["turn_outcome"]
+    assert outcome["inventory_match_status"] != "already_shown"
+    assert len(outcome["listings"]) > 1, "one shown unit must not bin the whole result set"
+
+
+def test_the_true_count_survives_the_presentation_limit(six_galyeans):
+    """matches is capped for presentation; the ANSWER to "how many" is not."""
+    from src.graph.nodes.inventory_lookup import inventory_lookup_node
+
+    state = new_state("s1")
+    state["turn"] = year_make_question()
+    inventory_lookup_node(state)
+
+    outcome = state["turn_outcome"]
+    assert outcome["inventory_total_matched"] == 6
+    assert len(outcome["listings"]) <= 6
+
+
+def test_the_model_is_told_the_count_it_cannot_see(six_galyeans):
+    """Six on the lot and a presentation limit of five: it counts the cards in front of it
+    unless we say otherwise, which is exactly how six units became "the available unit"."""
+    from src.llm import tools
+
+    state = new_state("s1")
+    turn = year_make_question()
+    text = tools.ToolRunner(state, turn).call(
+        "lookup_inventory", '{"year": 2026, "make": "Galyean"}'
+    )
+
+    assert "HOW MANY WE HAVE: 6" in text
+    assert "never count the cards" in text
+
+
+def test_picking_one_they_have_seen_still_shows_no_card(six_galyeans):
+    """The user's carve-out: "I like the 15087" logs interest, it does not re-print."""
+    from src.graph.nodes.inventory_lookup import inventory_lookup_node
+
+    state = new_state("s1")
+    state["shown_urls"] = [GALYEAN]
+    output = turn_output(intent="listing_interest", listing_reference=1)
+    output.inventory_lookup.is_lookup = True
+    output.inventory_lookup.confidence = "high"
+    output.inventory_lookup.stock_number = "15087"
+    state["turn"] = output
+    inventory_lookup_node(state)
+
+    outcome = state["turn_outcome"]
+    assert outcome["listings"] == [], "no second card"
+    assert outcome["inventory_match_status"] == "already_shown"
+
+
+def test_a_question_about_one_shown_trailer_is_answered_not_re_pasted(six_galyeans):
+    """Narrow on purpose: "does it have brakes?" wants a sentence, not the card again."""
+    from src.graph.nodes.inventory_lookup import inventory_lookup_node
+
+    state = new_state("s1")
+    state["shown_urls"] = [GALYEAN]
+    output = turn_output(intent="inventory_lookup")
+    output.inventory_lookup.is_lookup = True
+    output.inventory_lookup.confidence = "high"
+    output.inventory_lookup.stock_number = "15087"
+    state["turn"] = output
+    inventory_lookup_node(state)
+
+    outcome = state["turn_outcome"]
+    assert outcome["listings"] == []
+    assert outcome["inventory_match_status"] == "already_shown"

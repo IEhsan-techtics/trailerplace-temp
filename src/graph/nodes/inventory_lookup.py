@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from src.config import settings
 from src.domain.links import normalize_listing_url
@@ -8,6 +9,26 @@ from src.search.inventory_matcher import lookup_inventory
 from src.tools.lookup_gate import lookup_requested, usable_stock_number
 
 logger = logging.getLogger(__name__)
+
+
+def _about_one_trailer(turn: Any, total_matched: int) -> bool:
+    """Is this about a single trailer they have already seen?
+
+    Two ways it can be. They are PICKING one - "I like the 81419", or a link to a card still
+    on their screen - in which case the answer is to log the interest, not to print the card
+    twice. Or their question resolves to exactly one unit, and the reply pass can answer it
+    from that unit's details in a sentence; re-pasting the card they are looking at reads
+    like a bot that was not listening.
+
+    A question that matches SEVERAL units is neither. "Do you have any 2026 Galyean
+    trailers?" collapsed to one here and was answered "the available unit is 32 ft long".
+    There were six.
+    """
+    if bool(getattr(turn, "shared_link_interest", False)):
+        return True
+    if getattr(turn, "intent", "") == "listing_interest":
+        return True
+    return total_matched <= 1
 
 
 def inventory_lookup_node(state: dict) -> dict:
@@ -47,13 +68,20 @@ def inventory_lookup_node(state: dict) -> dict:
     matches = result["matches"]
 
     shown = {normalize_listing_url(url) for url in state.get("shown_urls") or []}
-    if matches and normalize_listing_url(matches[0].get("url")) in shown:
-        # A trailer we already showed them: the card is on their screen, so it is not shown
-        # again. The reply pass still gets its details, to answer their question.
+    total_matched = int(result.get("total_matched") or len(matches))
+    if (
+        matches
+        and normalize_listing_url(matches[0].get("url")) in shown
+        and _about_one_trailer(turn, total_matched)
+    ):
+        # One trailer they have already seen: the card is on their screen, so it is not
+        # printed again and the reply pass answers from its details instead.
         #
-        # Deliberately NOT restricted to the link case it was written for. "I like the
-        # 81419" is how people pick one off a list, and that arrives as a stock number: it
-        # went straight past this check and printed the same card a second time.
+        # The condition used to be the already-shown check ALONE, testing only matches[0] and
+        # then throwing the whole result set away. Asked "do you have any 2026 Galyean
+        # trailers?" with six on the lot, five of them came back, the first had been shown
+        # earlier in the chat, and all five were discarded - so the model answered from
+        # conversation memory and said "the available unit is 32 ft long".
         outcome["inventory_already_shown"] = matches[:1]
         result = {**result, "match_status": "already_shown", "matches": []}
         matches = []
@@ -69,6 +97,7 @@ def inventory_lookup_node(state: dict) -> dict:
     # question asks which one they mean. An earlier titles-only presentation was rolled
     # back — bare names with no link, price, or specs read worse than the cards.
     outcome["listings"] = matches
+    outcome["inventory_total_matched"] = total_matched
     outcome["inventory_result"] = result
     outcome["inventory_match_status"] = result["match_status"]
     # Durable signal the respond node/prompt key off — preserved from the M4 stub

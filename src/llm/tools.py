@@ -407,9 +407,9 @@ class ToolRunner:
         already = outcome.get("inventory_already_shown")
         if already:
             return (
-                "ALREADY SHOWN: that is a trailer you already showed them, so do NOT show "
-                "its card again. Answer what they asked about it in a sentence or two, from "
-                "these details only:\n" + listing_block(already)
+                "ALREADY SHOWN: that is the ONE trailer they mean and you already showed "
+                "them its card, so do NOT show it again. Answer what they asked about it in "
+                "a sentence or two, from these details only:\n" + listing_block(already)
             )
         listings = list(outcome.get("listings") or [])
         label = _lookup_label(turn, outcome)
@@ -421,6 +421,16 @@ class ToolRunner:
         rule = status if listings else "none"
         parts = [f"MATCH STATUS: {status}", lookup_guidance(rule, label)]
         if listings:
+            # How many there ARE, when that is more than we are showing. Without it the model
+            # counts the cards in front of it: five came back of six on the lot, so "do you
+            # have any 2026 Galyean trailers?" was answered "the available unit is 32 ft long".
+            total = int(outcome.get("inventory_total_matched") or len(listings))
+            if total > len(listings):
+                parts.append(
+                    f"HOW MANY WE HAVE: {total} match what they asked for, and the "
+                    f"{len(listings)} below are the ones to show. If they asked how many, or "
+                    f"what we have, the answer is {total} - never count the cards."
+                )
             parts.append(listing_block(listings))
         if outcome.get("contact_invite_suppressed"):
             parts.append(_LOOKUP_CONTACT_RULE)
