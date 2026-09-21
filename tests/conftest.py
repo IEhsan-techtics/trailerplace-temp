@@ -195,6 +195,22 @@ def no_real_email(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def no_chat_link(monkeypatch):
+    """No link back to the chat UI in the email bodies, whatever .env says.
+
+    The link is rendered from CHAT_UI_URL, which is a deployment detail - and with it set
+    locally, every test asserting a body verbatim started failing on a developer machine
+    and passing in CI, or the other way round. A test that wants the link sets it itself
+    (tests/test_team_alerts.py); monkeypatch applies that after this, so it still wins.
+    """
+    from dataclasses import replace
+
+    from src.tools import email_sender
+
+    monkeypatch.setattr(email_sender, "settings", replace(email_sender.settings, chat_ui_url=""))
+
+
+@pytest.fixture(autouse=True)
 def rules_from_seed(monkeypatch):
     """Serve the question rules from src/rules/seed.json, never from the live database.
 
