@@ -45,7 +45,7 @@ from src.rules.engine import apply_rules, mark_user_value
 from src.rules.store import current_rules
 from src.tools.filters import apply_extracted_fields
 from src.tools import team_notify, unavailable
-from src.tools.lookup_gate import brand_is_lookup_make
+from src.tools.lookup_gate import brand_is_lookup_make, referenced_listing
 from src.tools.questions import (
     all_required_resolved,
     decline_slot,
@@ -74,6 +74,7 @@ def apply_node(state: dict, output: Any, user_message: str = "") -> dict:
     team_notify.flush(state)
     _apply_faq_notification(state, output)
     _apply_shared_link(state, output, user_message)
+    _apply_listing_interest(state, output)
     _apply_unavailable_type(state, output)
     handled = _apply_pending_confirmations(state, output, user_message)
     _apply_gooseneck(state, output, user_message)
@@ -191,6 +192,74 @@ def _apply_shared_link(state: dict, output: Any, user_message: str) -> None:
     status = team_notify.record(state, reason="Listing Interest", description=description)
     state.setdefault("turn_outcome", {})["link_interest"] = {"status": status, "label": label}
     logger.info("LINK interest: session=%s %s status=%s", state.get("session_id"), label, status)
+
+
+def interest_status(state: dict) -> str:
+    """What would happen to a listing-interest email raised right now.
+
+    Recomputed rather than remembered, because it is about the CONTACT we hold, and that
+    changes turn by turn: an interest stashed three turns ago is "sent" the moment they hand
+    over a number, and the customer should be told the true thing each time.
+    """
+    if team_notify.declined(state):
+        return "dropped"
+    return "sent" if team_notify.contact_complete(state) else "stashed"
+
+
+def _apply_listing_interest(state: dict, output: Any) -> None:
+    """They said they want one of the trailers we showed. Tell the team - here, not there.
+
+    This used to depend entirely on the reply pass choosing to call ``escalate``. Live, on a
+    turn where every detail was already in front of it, it simply did not:
+
+        > I like the 6th one
+        "The 2026 Calico Trailers HOGPEN/LIVESTOCK TRAILER 16' - 00564 sounds like the one
+         that fits your livestock-hauling needs. Our sales team can help..."
+
+    No email, no lead - on the one turn in the conversation where the customer said yes. The
+    model is the right judge of WHETHER they expressed interest (that is reading a customer,
+    and it is what ``intent`` says); it is not the thing that should decide whether the
+    dealership hears about it. So Python records it, and the reply pass is told it is done -
+    the same shape as a shared link (``_apply_shared_link``).
+
+    Recorded once per trailer. People say "I like that one" more than once about the same
+    trailer, and the team does not need to hear it twice.
+    """
+    if getattr(output, "intent", "") != "listing_interest":
+        return
+    outcome = state.setdefault("turn_outcome", {})
+    if outcome.get("link_interest"):
+        # The link they shared already told the team, with the kind of link named.
+        return
+
+    listing = referenced_listing(state, output) or {}
+    title = str(listing.get("title") or "").strip()
+    url = str(listing.get("url") or "").strip()
+    state["listing_interest_logged"] = True
+
+    recorded = state.setdefault("listing_interest_keys", [])
+    if url in recorded:
+        status = interest_status(state)
+        outcome["listing_interest"] = {"status": status, "title": title, "url": url, "repeat": True}
+        logger.info(
+            "LISTING interest already recorded: session=%s url=%r status=%s",
+            state.get("session_id"), url, status,
+        )
+        return
+    recorded.append(url)
+
+    if title:
+        description = f"Interested in {title}" + (f" ({url})" if url else "")
+    else:
+        description = (getattr(output, "turn_summary", "") or "").strip() or (
+            "Told us they are interested in one of the trailers we showed them."
+        )
+
+    status = team_notify.record(state, reason="Listing Interest", description=description)
+    outcome["listing_interest"] = {"status": status, "title": title, "url": url, "repeat": False}
+    logger.info(
+        "LISTING interest: session=%s title=%r status=%s", state.get("session_id"), title, status,
+    )
 
 
 def _apply_unavailable_type(state: dict, output: Any) -> None:

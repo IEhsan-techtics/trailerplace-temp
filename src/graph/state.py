@@ -88,6 +88,14 @@ class SessionState(TypedDict, total=False):
     # three turns ago still goes out when the customer finally hands over their number.
     pending_email_actions: list[dict[str, Any]]
     contact_followup_pending: str | None
+    # Trailers whose interest we have already told the team about, keyed by listing URL ("" for
+    # an interest we could not pin to one row). A customer says "I like that one" more than
+    # once; the team should hear about it once.
+    listing_interest_keys: list[str]
+    # Whether any listing interest has been recorded in this session. Read by compose: once a
+    # customer has picked a trailer and we have logged it, "what type of trailer are you
+    # looking for?" is the wrong thing to say next.
+    listing_interest_logged: bool
 
     turn_index: int
     # Whether listings have been put in front of them at least once. It changes what a
@@ -149,6 +157,8 @@ def new_state(session_id: str) -> SessionState:
         },
         pending_email_actions=[],
         contact_followup_pending=None,
+        listing_interest_keys=[],
+        listing_interest_logged=False,
         turn_index=0,
         results_shown=False,
     )

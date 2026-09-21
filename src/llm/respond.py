@@ -211,6 +211,18 @@ def _state_line(state: dict, turn: Any) -> str:
             f"recorded for the team - do not call escalate for it. "
             + _reply_instruction(state, answer, link["status"])
         )
+    interest = (state.get("turn_outcome") or {}).get("listing_interest")
+    if interest and not link:
+        from src.domain import canned_responses
+        from src.llm.tools import _reply_instruction
+
+        answer = canned_responses.escalation_answer("listing_interest", interest["status"])
+        what = f"\"{interest['title']}\"" if interest.get("title") else "the trailer they picked"
+        lines.append(
+            f"- They said they want {what}. Their interest is ALREADY recorded for the team - "
+            f"do not call escalate for it. "
+            + _reply_instruction(state, answer, interest["status"])
+        )
     return "\n".join(lines)
 
 

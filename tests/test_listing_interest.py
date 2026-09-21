@@ -424,3 +424,132 @@ def test_an_ordinary_turn_keeps_the_tool():
 def test_the_other_tools_are_never_withheld():
     names = tool_names(showing_two_batches(), pointing_turn("81419"))
     assert "search_inventory" in names and "escalate" in names
+
+
+# ------------------------------------------- 4. saying yes is a lead, whatever the agent does
+#
+# Live, from a conversation where every detail was already in front of the reply pass:
+#
+#     > I like the 6th one
+#     "The 2026 Calico Trailers HOGPEN/LIVESTOCK TRAILER 16' - 00564 sounds like the one
+#      that fits your livestock-hauling needs. Our sales team can help..."
+#
+# The model simply did not call escalate, so no email went out on the one turn in the whole
+# conversation where the customer said yes. Whether they expressed interest is the model's
+# call; whether the dealership hears about it is not.
+@pytest.fixture
+def mail(monkeypatch):
+    """Nothing leaves the machine; record what would have."""
+    from src.tools import email_sender
+
+    sent = []
+    monkeypatch.setattr(
+        email_sender, "send_email", lambda subject, body: sent.append((subject, body)) or True
+    )
+    return sent
+
+
+def listing_interest(reference=1, **extra):
+    return turn_output(intent="listing_interest", listing_reference=reference, **extra)
+
+
+def bodies(mail, reason="Listing Interest"):
+    return [body for subject, body in mail if reason in subject]
+
+
+def test_picking_a_trailer_off_the_list_tells_the_team(fake_llm, no_search, mail):
+    livestock_customer(fake_llm)
+    fake_llm.push(listing_interest())
+    run_turn("s1", "I like the first one")
+
+    sent = bodies(mail)
+    assert len(sent) == 1, "saying yes to a trailer is a lead, with or without the escalate tool"
+    assert "[Listing Interest] Interested in 2026 P&amp;C Car Hauler" in sent[0]
+    assert "https://x/1" in sent[0]
+
+
+def test_the_same_trailer_twice_is_one_email(fake_llm, no_search, mail):
+    livestock_customer(fake_llm)
+    fake_llm.push(listing_interest())
+    run_turn("s1", "I like the first one")
+    fake_llm.push(listing_interest())
+    run_turn("s1", "yeah that one")
+
+    assert len(bodies(mail)) == 1, "people say it twice; the team hears it once"
+
+
+def test_a_different_trailer_is_a_second_email(fake_llm, no_search, mail):
+    livestock_customer(fake_llm)
+    fake_llm.push(listing_interest(reference=1))
+    run_turn("s1", "I like the first one")
+    fake_llm.push(listing_interest(reference=2))
+    run_turn("s1", "actually the second one")
+
+    assert len(bodies(mail)) == 2
+
+
+def test_interest_we_cannot_pin_down_is_still_a_lead(fake_llm, no_search, mail):
+    livestock_customer(fake_llm)
+    fake_llm.push(turn_output(intent="listing_interest", turn_summary="They want one of them."))
+    run_turn("s1", "yeah I am")
+
+    assert "[Listing Interest] They want one of them." in bodies(mail)[0]
+
+
+def test_without_contact_details_the_lead_waits_and_then_goes(fake_llm, no_search, mail):
+    fake_llm.push(turn_output(intent="general_question"))
+    run_turn("s2", "hi")
+    fake_llm.push(turn_output(intent="listing_interest", turn_summary="Wants that trailer."))
+    run_turn("s2", "yeah I am")
+    assert bodies(mail) == [], "no name, no number - nothing to send it about"
+
+    fake_llm.push(turn_output(intent="contact_info_provided", name="Ibrahim", email="i@x.ai"))
+    run_turn("s2", "my name is Ibrahim and email is i@x.ai")
+
+    assert len(bodies(mail)) == 1, "the stashed lead goes out the moment we can reach them"
+    assert "Ibrahim" in bodies(mail)[0]
+
+
+def test_the_escalate_tool_does_not_send_a_second_one():
+    """apply records it; the agent is told so. A tool call anyway must not double up."""
+    import json
+
+    from src.llm.tools import ToolRunner
+
+    state = {
+        "session_id": "s1",
+        "contact": {"name": "Dave", "email": "d@x.ai", "phone": None, "declined": False},
+        "turn_outcome": {"listing_interest": {"status": "sent", "title": "A trailer", "url": "u"}},
+    }
+    runner = ToolRunner(state, turn_output())
+    runner.call("escalate", json.dumps({"reason": "listing_interest", "summary": "wants it"}))
+
+    assert not state["turn_outcome"].get("outbox_events"), "already recorded by apply"
+
+
+def test_the_reply_pass_is_told_the_interest_is_already_recorded():
+    from src.llm.respond import _state_line
+
+    state = dict(
+        new_state("s1"),
+        turn_outcome={"listing_interest": {"status": "sent", "title": "A Trailer", "url": "u"}},
+    )
+    line = _state_line(state, turn_output(intent="listing_interest"))
+    assert "ALREADY recorded" in line and "do not call escalate" in line
+
+
+# ------------------------------- 5. once they have picked one, stop reading out the catalogue
+def test_the_catalogue_is_not_read_out_after_their_lead_is_logged(fake_llm, no_search, mail):
+    """Live: the turn that finally captured the lead ended with "What type of trailer are you
+    looking for? We have Utility, Enclosed, Equipment..." - to a customer who had picked a
+    trailer two messages earlier."""
+    fake_llm.push(turn_output(intent="general_question"))
+    run_turn("s3", "is the trailer 15131 still available?")
+    fake_llm.push(turn_output(intent="listing_interest", turn_summary="Wants trailer 15131."))
+    run_turn("s3", "yeah I am")
+
+    fake_llm.push(turn_output(intent="contact_info_provided", name="Ibrahim", email="i@x.ai"))
+    reply = run_turn("s3", "my name is Ibrahim and email is i@x.ai")["assistant_text"]
+
+    assert "What type of trailer are you looking for" not in reply
+    assert "passed your request on to our team" in reply

@@ -466,10 +466,12 @@ def _person_fallback(state: dict, output: Any, outcome: dict) -> str:
     from src.domain import canned_responses
     from src.tools import team_notify
 
-    link = outcome.get("link_interest")
+    link = outcome.get("link_interest") or outcome.get("listing_interest")
     if link:
-        # The link they shared already told the team (apply._apply_shared_link); a second
-        # record here would email them twice about the same trailer.
+        # Their interest already told the team, from the link they shared
+        # (apply._apply_shared_link) or from the trailer they pointed at
+        # (apply._apply_listing_interest); a second record here would email them twice about
+        # the same trailer.
         key, status = "listing_interest", link["status"]
         answer = canned_responses.escalation_answer(key, status)
         return f"{answer} {team_notify.ask_for_missing(state)}" if status == "stashed" else answer
@@ -779,6 +781,18 @@ def _closing_part(state: dict, output: Any) -> tuple[str, str | None]:
                 "COMPOSE replaced a question naming too many categories: session=%s",
                 state.get("session_id"),
             )
+        if state.get("listing_interest_logged"):
+            # They have already told us which trailer they want, and we have logged it for
+            # the team. Live, the very next reply was "Thanks, Ibrahim - I've noted your
+            # email... What type of trailer are you looking for? We have Utility, Enclosed,
+            # Equipment..." - the catalogue read out to a customer who had picked a trailer
+            # two messages earlier. The written question exists to give a customer with
+            # nothing on the table something to answer; this one has a trailer on the table.
+            logger.info(
+                "COMPOSE held the category question: session=%s they have already picked one",
+                state.get("session_id"),
+            )
+            return "", None
         return greeting.orientation_question(state), None
 
     # 5. The next required question. Python picks the slot; the model may phrase it.

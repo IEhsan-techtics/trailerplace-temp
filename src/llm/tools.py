@@ -460,13 +460,15 @@ class ToolRunner:
         key = str(reason or "other").strip().lower()
         reason_line, canned_key = self._ESCALATION_REASONS.get(key, self._ESCALATION_REASONS["other"])
 
-        link = (self.state.get("turn_outcome") or {}).get("link_interest")
-        if link and canned_key == "listing_interest":
-            # Already sent (or stashed) from the link they shared, with the kind of link named.
-            # A second record would be a second email about the same trailer.
+        outcome_now = self.state.get("turn_outcome") or {}
+        already = outcome_now.get("link_interest") or outcome_now.get("listing_interest")
+        if already and canned_key == "listing_interest":
+            # Already sent (or stashed) by apply: from the link they shared, or from the
+            # trailer they pointed at. A second record would be a second email about the same
+            # trailer - and the customer is told the same thing either way.
             self.ran.append("escalate")
-            answer = canned_responses.escalation_answer(canned_key, link["status"])
-            return _reply_instruction(self.state, answer, link["status"])
+            answer = canned_responses.escalation_answer(canned_key, already["status"])
+            return _reply_instruction(self.state, answer, already["status"])
 
         status = team_notify.record(self.state, reason=reason_line, description=summary)
         outcome = self.state.setdefault("turn_outcome", {})
