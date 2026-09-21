@@ -27,9 +27,10 @@ NUMBER (20.0, 18.5) and never a word.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Callable
 
 from src.domain.axles import is_measurement
+from src.domain import listing_echo
 from src.domain import quantities as quantity_math
 from src.domain import slot_map
 from src.rules.engine import is_default, mark_user_value
@@ -204,9 +205,15 @@ def _log_divergence(slot: str, raw: str, model_value: Any, result: FieldApplicat
             )
 
 
-def _apply_features(state: dict, extracted: Any) -> None:
+def _apply_features(state: dict, extracted: Any, echoed: Callable[[str, Any], bool]) -> None:
     """Merge newly stated non-metadata features, lifting a hitch stated as one."""
-    new_features = list(getattr(extracted, "non_metadata_features", None) or [])
+    new_features = [
+        feature
+        for feature in (getattr(extracted, "non_metadata_features", None) or [])
+        # "adjustable coupler" came back from a turn that said only "I like the 81419": it
+        # is a line off that trailer's own card, not a feature they asked for.
+        if not echoed("non_metadata_features", feature)
+    ]
     if not new_features:
         return
     merged = list(state.get("non_metadata_features") or []) + new_features
@@ -220,7 +227,8 @@ def _apply_features(state: dict, extracted: Any) -> None:
 
 
 def _apply_quantities(state: dict, output: Any, category: str, writable: frozenset[str],
-                      raw_by_slot: dict[str, str], result: FieldApplication) -> set[str]:
+                      raw_by_slot: dict[str, str], result: FieldApplication,
+                      echoed: Callable[[str, Any], bool]) -> set[str]:
     """Store every amount the model read. Returns the slots it settled, one way or another.
 
     A quantity whose unit does not fit its slot is not settled here, so the raw-text parse
@@ -234,6 +242,11 @@ def _apply_quantities(state: dict, output: Any, category: str, writable: frozens
         raw = str(getattr(quantity, "raw_text", "") or "") or raw_by_slot.get(slot, "")
         if _axle_phrase_for_other_slot(slot, raw):
             logger.info("FILTER ignored an axle phrase for another slot: slot=%s raw=%r", slot, raw)
+            settled.add(slot)
+            continue
+        if echoed(slot, raw or getattr(quantity, "low", None)):
+            # Read off the card they are pointing at, not out of their message. Settled, so
+            # the raw-text pass below does not pick the same value back up.
             settled.add(slot)
             continue
 
@@ -280,20 +293,25 @@ def _log_parser_divergence(category: str, slot: str, raw: str, value: float) -> 
         )
 
 
-def apply_extracted_fields(state: dict, output: Any) -> FieldApplication:
+def apply_extracted_fields(state: dict, output: Any, user_message: str = "") -> FieldApplication:
     """Apply everything the customer stated this turn to ``state["slots"]``.
 
     Runs whether or not a category has been chosen (brief S11): configuration volunteered
     before the category is settled is kept, not discarded.
+
+    ``user_message`` is what they actually typed, and it is used for one thing only: on a
+    turn where they point at a trailer we already showed, a value that is nowhere in their
+    message was read off the card and is not theirs to store (src/domain/listing_echo.py).
     """
     result = FieldApplication()
     category = state.get("category") or ""
     extracted = getattr(output, "extracted", None)
     raw_by_slot = raw_text_for_slots(output)
     writable = _writable_slots()
+    echoed = listing_echo.echo_guard(output, user_message)
 
     # 1. The amounts the model read, converted here.
-    settled = _apply_quantities(state, output, category, writable, raw_by_slot, result)
+    settled = _apply_quantities(state, output, category, writable, raw_by_slot, result, echoed)
 
     # 2. Raw text for everything else. Anything the customer worded themselves is parsed
     #    from their words.
@@ -301,6 +319,9 @@ def apply_extracted_fields(state: dict, output: Any) -> FieldApplication:
         if slot in writable and slot not in settled:
             if _axle_phrase_for_other_slot(slot, raw):
                 logger.info("FILTER ignored an axle phrase for another slot: slot=%s raw=%r", slot, raw)
+                settled.add(slot)
+                continue
+            if echoed(slot, raw):
                 settled.add(slot)
                 continue
             _apply_one(state, slot, raw, category, result)
@@ -315,6 +336,8 @@ def apply_extracted_fields(state: dict, output: Any) -> FieldApplication:
                 _log_divergence(slot, raw_by_slot[slot], value, result)
                 continue
             if value is None or (isinstance(value, list) and not value):
+                continue
+            if echoed(slot, value):
                 continue
             _apply_one(state, slot, value, category, result)
 
@@ -332,6 +355,6 @@ def apply_extracted_fields(state: dict, output: Any) -> FieldApplication:
                 continue
             result.no_preference.append(slot)
 
-        _apply_features(state, extracted)
+        _apply_features(state, extracted, echoed)
 
     return result

@@ -92,6 +92,31 @@ def test_a_link_to_a_trailer_no_longer_listed_finds_nothing(catalogue):
     assert result["match_status"] == "none" and result["matches"] == []
 
 
+def test_a_stock_number_already_shown_is_not_shown_again(catalogue):
+    """Live: "I like the 81419" printed the same card a second time.
+
+    The already-shown check was written for links and tested only with one, so a stock
+    number - which is how people actually pick a trailer off a list - walked straight past
+    it. Nothing about the customer's screen depends on which identifier they used.
+    """
+    from src.graph.nodes.inventory_lookup import inventory_lookup_node
+
+    state = new_state("s1")
+    state["shown_urls"] = [GALYEAN]
+    output = turn_output(intent="listing_interest", listing_reference=1)
+    output.inventory_lookup.is_lookup = True
+    output.inventory_lookup.confidence = "high"
+    output.inventory_lookup.stock_number = "15087"
+    state["turn"] = output
+
+    inventory_lookup_node(state)
+
+    outcome = state["turn_outcome"]
+    assert outcome["listings"] == [], "no second card"
+    assert outcome["inventory_already_shown"][0]["stock_number"] == "15087", "details still there"
+    assert outcome["inventory_match_status"] == "already_shown"
+
+
 def test_a_link_already_shown_is_not_shown_again(catalogue):
     from src.graph.nodes.inventory_lookup import inventory_lookup_node
 

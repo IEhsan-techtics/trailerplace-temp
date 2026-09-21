@@ -26,6 +26,7 @@ from typing import Any
 from src.domain import axles
 from src.domain import gooseneck as gooseneck_domain
 from src.domain import links
+from src.domain import listing_echo
 from src.domain import quantities as quantity_math
 from src.graph.nodes import greeting
 from src.domain.slot_map import (
@@ -80,7 +81,7 @@ def apply_node(state: dict, output: Any, user_message: str = "") -> dict:
         _apply_category(state, output)
     _apply_brand(state, output, user_message)
 
-    result = apply_extracted_fields(state, output)
+    result = apply_extracted_fields(state, output, user_message)
     if result.invalid_slot:
         state["invalid_retry_slot"] = result.invalid_slot
         state["invalid_retry_reason"] = result.invalid_reason
@@ -390,6 +391,15 @@ def _apply_brand(state: dict, output: Any, user_message: str) -> None:
     if brand_is_lookup_make(output, brand):
         # It is the make half of this turn's lookup identifier ("I'm looking for an Iron
         # Bull DTB"), not a standing instruction to filter every later search to that make.
+        return
+    if listing_echo.is_pointing_turn(output) and brand.strip().casefold() not in (user_message or "").casefold():
+        # "I like the 81419" came back with brand=Gooseneck, read off that listing's card.
+        # Naming a trailer they like is a finger, not a filter: recorded as a preference it
+        # would narrow every later search to one make on the strength of a single trailer.
+        logger.info(
+            "BRAND ignored: session=%s brand=%r came off a listing they pointed at",
+            state.get("session_id"), brand,
+        )
         return
     state["brand_preference"] = str(brand).strip()
 

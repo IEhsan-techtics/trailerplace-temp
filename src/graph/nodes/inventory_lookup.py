@@ -47,9 +47,13 @@ def inventory_lookup_node(state: dict) -> dict:
     matches = result["matches"]
 
     shown = {normalize_listing_url(url) for url in state.get("shown_urls") or []}
-    if listing_url and matches and normalize_listing_url(matches[0].get("url")) in shown:
-        # A link to a trailer we already showed them: the card is on their screen, so it is
-        # not shown again. The reply pass still gets its details, to answer their question.
+    if matches and normalize_listing_url(matches[0].get("url")) in shown:
+        # A trailer we already showed them: the card is on their screen, so it is not shown
+        # again. The reply pass still gets its details, to answer their question.
+        #
+        # Deliberately NOT restricted to the link case it was written for. "I like the
+        # 81419" is how people pick one off a list, and that arrives as a stock number: it
+        # went straight past this check and printed the same card a second time.
         outcome["inventory_already_shown"] = matches[:1]
         result = {**result, "match_status": "already_shown", "matches": []}
         matches = []

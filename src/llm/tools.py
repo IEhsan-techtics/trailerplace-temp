@@ -407,7 +407,7 @@ class ToolRunner:
         already = outcome.get("inventory_already_shown")
         if already:
             return (
-                "ALREADY SHOWN: that link is a trailer you already showed them, so do NOT show "
+                "ALREADY SHOWN: that is a trailer you already showed them, so do NOT show "
                 "its card again. Answer what they asked about it in a sentence or two, from "
                 "these details only:\n" + listing_block(already)
             )
