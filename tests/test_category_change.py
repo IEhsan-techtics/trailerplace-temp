@@ -249,3 +249,87 @@ def test_the_models_own_line_does_not_claim_the_switch_before_the_keep_question(
     text = run_turn("s1", "actually an equipment trailer")["assistant_text"]
 
     assert text.startswith("Switching to Equipment.")
+
+
+# ------------------------------------------------- the whole live turn that started this
+# Turn 22 of the long-conversation run, on a Dump trailer:
+#   USER: gravel and dirt for a landscaping job
+#   LUNA: That sounds like a good fit for a Dump trailer. For gravel and dirt for a
+#         landscaping job, an Utility trailer is usually the better fit - would you like to
+#         switch to that instead?
+# Three faults in one reply: the wrong category, two sentences contradicting each other, and
+# "an Utility". The model had read it correctly - extracted haul_item was "gravel and dirt".
+def test_dump_cargo_described_at_length_does_not_offer_a_switch(fake_llm):
+    complete_welcome(fake_llm)
+    fake_llm.push(turn_output(category_mentioned="dump trailer", intent="category_selection"))
+    run_turn("s1", "dump trailer")
+
+    fake_llm.push(turn_output(
+        slots={"haul_item": "gravel and dirt for a landscaping job"},
+        extracted={"haul_item": "gravel and dirt"},
+        acknowledgement="That sounds like a good fit for a Dump trailer.",
+    ))
+    result = run_turn("s1", "gravel and dirt for a landscaping job")
+
+    state = state_after()
+    assert state["pending_category_switch"] is None, "gravel and dirt IS dump cargo"
+    assert state["category"] == "Dump"
+    assert "Utility" not in result["assistant_text"]
+    assert "switch" not in result["assistant_text"].lower()
+
+
+def test_the_clean_cargo_is_stored_not_the_whole_sentence(fake_llm):
+    """The sentence also became the text the search matched on."""
+    complete_welcome(fake_llm)
+    fake_llm.push(turn_output(category_mentioned="dump trailer", intent="category_selection"))
+    run_turn("s1", "dump trailer")
+
+    fake_llm.push(turn_output(
+        slots={"haul_item": "gravel and dirt for a landscaping job"},
+        extracted={"haul_item": "gravel and dirt"},
+    ))
+    run_turn("s1", "gravel and dirt for a landscaping job")
+
+    assert state_after()["slots"]["haul_item"] == "gravel and dirt"
+
+
+def test_their_wording_is_still_kept_when_the_model_reads_nothing(fake_llm):
+    """The model's reading wins only when there IS one - never a slot left empty."""
+    complete_welcome(fake_llm)
+    fake_llm.push(turn_output(category_mentioned="dump trailer", intent="category_selection"))
+    run_turn("s1", "dump trailer")
+
+    fake_llm.push(turn_output(slots={"haul_item": "whatever the yard sends over"}))
+    run_turn("s1", "whatever the yard sends over")
+
+    assert state_after()["slots"]["haul_item"] == "whatever the yard sends over"
+
+
+def test_the_models_own_line_does_not_contradict_the_switch_question(fake_llm):
+    """It writes its line knowing only the category they are on, so it praised the Dump
+    trailer in the same breath as asking whether to leave it."""
+    complete_welcome(fake_llm)
+    fake_llm.push(turn_output(category_mentioned="dump trailer", intent="category_selection"))
+    run_turn("s1", "dump trailer")
+
+    fake_llm.push(turn_output(
+        slots={"haul_item": "cattle"},
+        acknowledgement="That sounds like a good fit for a Dump trailer.",
+    ))
+    text = run_turn("s1", "cattle")["assistant_text"]
+
+    assert state_after()["pending_category_switch"]["suggested"] == "Livestock"
+    assert "good fit for a Dump" not in text, "it argued with its own question"
+    assert text.startswith("For cattle,")
+
+
+def test_the_switch_question_says_a_utility_not_an_utility(fake_llm):
+    complete_welcome(fake_llm)
+    fake_llm.push(turn_output(category_mentioned="dump trailer", intent="category_selection"))
+    run_turn("s1", "dump trailer")
+
+    fake_llm.push(turn_output(slots={"haul_item": "a riding lawnmower"}))
+    text = run_turn("s1", "a riding lawnmower")["assistant_text"]
+
+    assert "a Utility trailer" in text
+    assert "an Utility" not in text

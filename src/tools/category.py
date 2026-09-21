@@ -195,18 +195,30 @@ def suggest_category_from_haul_item(state: dict, haul_item: Any) -> dict[str, An
     trailer type. A naming-tier match means they named a type outright, and that is a
     category selection to be handled as one rather than second-guessed.
 
-    Returns None when there is nothing to suggest - no category set yet, the match is the
-    category they are already on, or they have already turned this same suggestion down.
+    Returns None when there is nothing to suggest - no category set yet, the cargo also suits
+    the category they are already on, or they have already turned this same suggestion down.
+
+    "Also suits" is the whole rule. A customer on a Dump trailer who says "gravel and dirt for
+    a landscaping job" named cargo that BELONGS on a dump trailer; that one of their words
+    also happens to belong to Utility is not a reason to talk them out of the right trailer.
+    Only cargo that does not fit where they are is worth a question. The old loop skipped the
+    current category and carried on down the ranked list, so any second match won.
     """
     text = str(haul_item or "").strip()
     current = state.get("category")
     if not text or not current:
         return None
 
-    for candidate, tier in resolve_category_matches(text):
-        if tier != "cargo":
-            continue
-        if candidate == current or not _is_stocked(candidate):
+    cargo_matches = [category for category, tier in resolve_category_matches(text) if tier == "cargo"]
+    if current in cargo_matches:
+        logger.info(
+            "TOOL suggest_category: session=%s haul_item=%r suits %s already - no switch",
+            state.get("session_id"), text, current,
+        )
+        return None
+
+    for candidate in cargo_matches:
+        if not _is_stocked(candidate):
             continue
         pair = f"{current}->{candidate}"
         if pair in (state.get("rejected_switches") or []):

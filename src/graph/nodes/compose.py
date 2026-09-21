@@ -125,6 +125,17 @@ def compose_node(state: dict, output: Any) -> dict:
                 state.get("session_id"), state.get("invalid_retry_slot"),
             )
             acknowledgement = ""
+        if acknowledgement and state.get("pending_category_switch"):
+            # Same reason as the keep question below, and it read worse: the model writes its
+            # line knowing only the category they are on, so live it said "That sounds like a
+            # good fit for a Dump trailer" and Python then asked whether a Utility trailer
+            # would suit them better - one reply arguing with itself. The switch question
+            # carries the whole point on its own.
+            logger.info(
+                "COMPOSE dropped an acknowledgement ahead of the switch question: session=%s",
+                state.get("session_id"),
+            )
+            acknowledgement = ""
         if acknowledgement and state.get("pending_keep_filters"):
             # The model writes its line before Python decides to ask, so live it said "we'll
             # switch your search to a 16-foot Flatbed with tandem 7,000 lb axles" and then asked
@@ -892,16 +903,28 @@ def _closing_part(state: dict, output: Any) -> tuple[str, str | None]:
     return question, slot
 
 
+# "a" or "an" goes by how the name is SAID, not how it is spelled. Picking on the first
+# letter alone produced "an Utility trailer" live, because U is a vowel - but "Utility" is
+# said "yoo-", and takes "a". These are the only category names there are, so the ones that
+# disagree with the letter rule are simply named.
+_SOUNDS_CONSONANT = ("utility", "uni")
+
+
+def _article_for(name: str) -> str:
+    """"a" or "an" for a category name, by sound rather than by spelling."""
+    word = str(name or "").strip().lower()
+    if word.startswith(_SOUNDS_CONSONANT):
+        return "a"
+    return "an" if word[:1] in "aeiou" else "a"
+
+
 def _switch_question(switch: dict) -> str:
     """Offer the better-suited category, saying why."""
     suggested = switch.get("suggested")
     haul_item = switch.get("from_haul_item")
     return (
-        f"For {haul_item}, an {suggested} trailer is usually the better fit - "
-        f"would you like to switch to that instead?"
-        if str(suggested or "")[:1].upper() in "AEIOU"
-        else f"For {haul_item}, a {suggested} trailer is usually the better fit - "
-        f"would you like to switch to that instead?"
+        f"For {haul_item}, {_article_for(suggested)} {suggested} trailer is usually the "
+        f"better fit - would you like to switch to that instead?"
     )
 
 

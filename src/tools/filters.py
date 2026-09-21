@@ -58,6 +58,19 @@ _EXTRACTED_TO_SLOT: dict[str, str] = {
     "haul_item": "haul_item",
 }
 
+# Slots where the model's CONVERTED reading beats its own echo of the customer's words.
+#
+# Everywhere else the customer's wording wins, because it is what they actually said. For
+# free-text cargo it is the wrong way round: asked "What material will you be hauling?",
+# a customer answers "gravel and dirt for a landscaping job" and the model correctly reads
+# haul_item="gravel and dirt" - then the raw echo overwrote it with the whole sentence, and
+# "landscaping" in the tail went on to suggest a Utility trailer to someone who wanted a dump
+# one. The sentence also became the text the search matched on.
+#
+# Same intent as normalize_hitch_answer / normalize_subcategory_answer in domain/slot_map.py:
+# a raw slot_answers entry must never downgrade a clean value to unnormalized text.
+_EXTRACTED_WINS = frozenset({"haul_item"})
+
 # Slots whose value is a measurement and can therefore be stated negatively.
 _MEASUREMENT_SLOTS = frozenset(
     {"length", "width", "height", "payload_capacity", "axle_capacity", "total_axle_capacity_lbs"}
@@ -128,6 +141,20 @@ def raw_text_for_slots(output: Any) -> dict[str, str]:
         if name and text is not None and str(text).strip():
             raw[name] = str(text)
     return raw
+
+
+def _clean_extracted_value(extracted: Any, slot: str) -> Any:
+    """The model's own converted value for a slot, or None if it gave nothing usable."""
+    for field, target in _EXTRACTED_TO_SLOT.items():
+        if target != slot:
+            continue
+        value = getattr(extracted, field, None)
+        if value is None or (isinstance(value, list) and not value):
+            return None
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+    return None
 
 
 def _apply_one(state: dict, slot: str, raw: Any, category: str, result: FieldApplication) -> None:
@@ -315,8 +342,15 @@ def apply_extracted_fields(state: dict, output: Any, user_message: str = "") -> 
 
     # 2. Raw text for everything else. Anything the customer worded themselves is parsed
     #    from their words.
+    deferred_to_extracted: set[str] = set()
     for slot, raw in raw_by_slot.items():
         if slot in writable and slot not in settled:
+            if slot in _EXTRACTED_WINS and _clean_extracted_value(extracted, slot) is not None:
+                logger.info(
+                    "FILTER using the model's reading over their wording: slot=%s raw=%r", slot, raw
+                )
+                deferred_to_extracted.add(slot)
+                continue
             if _axle_phrase_for_other_slot(slot, raw):
                 logger.info("FILTER ignored an axle phrase for another slot: slot=%s raw=%r", slot, raw)
                 settled.add(slot)
@@ -332,7 +366,7 @@ def apply_extracted_fields(state: dict, output: Any, user_message: str = "") -> 
             value = getattr(extracted, field, None)
             if slot in settled:
                 continue
-            if slot in raw_by_slot:
+            if slot in raw_by_slot and slot not in deferred_to_extracted:
                 _log_divergence(slot, raw_by_slot[slot], value, result)
                 continue
             if value is None or (isinstance(value, list) and not value):

@@ -55,15 +55,45 @@ _NAMING_TERMS: dict[str, list[str]] = {
     "Concession": ["concession", "concession trailer", "food trailer", "food trailers"],
 }
 
+# INVARIANT: every category's cargo terms must agree with its CATEGORY_BLURBS line, which is
+# what we TELL the customer the category is for. They disagreed once and it showed: Dump's
+# terms were "scissor lift, hoist, telescopic, front lift" - mechanisms, not cargo - with no
+# gravel, dirt, mulch or debris anywhere, while its blurb read "hydraulic beds for gravel,
+# dirt, mulch and debris" and rules/seed.json asked Dump customers "What material will you be
+# hauling (dirt, gravel, debris, etc.)?". So we asked for gravel, and then told them a Utility
+# trailer would suit them better, because "landscaping" was the only word that matched.
+#
+# A category with NO cargo terms is worse than it looks: it can never be the match that keeps
+# a customer where they are, so every one of them gets offered a switch the moment any other
+# category's word appears. That is why the quiet ones below are filled in too.
+#
+# The bar for adding a term is that it SETTLES the question. "Pallets" and "building
+# materials" ride on a flatbed and on a utility trailer equally happily, so they are listed
+# nowhere: cargo that does not decide anything must match nothing, or it will talk a customer
+# out of the trailer they already correctly chose.
 _CARGO_TERMS: dict[str, list[str]] = {
     "Aluminum": ["lightweight", "won't rust", "wont rust", "will not rust"],
     "Car Hauler": ["trailer without sides","car"],
-    "Equipment": ["skid steer", "mini ex", "mini excavator", "mini excuvator", "tractor"],
+    "Equipment": ["skid steer", "mini ex", "mini excavator", "mini excuvator", "tractor",
+                  "excavator", "backhoe", "bobcat", "forklift", "fork lift"],
     "Enclosed": ["cargo"],
-    "Utility": ["landscape", "lawnmower", "atv", "bike", "motorcycle", "landscaping", "lawn mower", "land scaping"],
-    "Dump": ["scissor lift", "hoist", "telescopic", "front lift"],
+    # "dirt bike" and "dirtbike" are here to outrank Dump's "dirt": same tier, same position,
+    # and the longer term wins the tie - see _ranked_category_matches.
+    "Utility": ["landscape", "lawnmower", "atv", "bike", "motorcycle", "landscaping", "lawn mower", "land scaping",
+                "dirt bike", "dirtbike"],
+    "Dump": ["scissor lift", "hoist", "telescopic", "front lift",
+             "gravel", "dirt", "mulch", "debris", "rock", "rocks", "sand", "soil", "topsoil",
+             "stone", "stones", "rubble", "fill dirt", "aggregate", "asphalt", "millings"],
     "Livestock": ["galyean", "star trailer", "calico trailer", "goats", "hogs", "cattle"],
     "Roll Off": ["roll off", "roll-off", "dumpster","trailer with bins","bin trailer","3 bins"],
+    "Flatbed": ["lumber", "timber", "pipe", "pipes", "steel", "beams", "long loads",
+                "wide loads"],
+    "Tilt": ["low clearance", "low-clearance", "no ramps", "without ramps"],
+    "Race Trailer": ["race car", "race cars", "racing", "track days", "track weekends"],
+    "Fiber": ["fiber reels", "cable reels", "telecom", "splicing"],
+    "Concession": ["food truck", "food trucks", "food service", "vending", "catering",
+                   "coffee business"],
+    "Diesel Tank": ["fuel transport", "refueling", "refuelling", "on-site fuel"],
 }
 
 # Backward-compatible merged view (naming terms first) for callers that only need
@@ -159,7 +189,24 @@ def _ranked_category_matches(text: str) -> list[tuple[str, str, int, int]]:
                 if existing is None or candidate < existing:
                     best_per_category[category] = candidate
 
-    ranked = sorted(best_per_category.items(), key=lambda item: item[1])
+    # A match sitting INSIDE a longer one from another category is an artefact of the words,
+    # not a second opinion: "a dirt bike" is a Utility load, and Dump's "dirt" only appears
+    # because it is the first half of "dirt bike". Left in, it counts as evidence for Dump -
+    # enough, under the suggest_category rule, to keep a customer on the wrong trailer.
+    covered = set()
+    for category, (_rank, start, neg_len) in best_per_category.items():
+        end = start - neg_len
+        for other, (_other_rank, other_start, other_neg_len) in best_per_category.items():
+            if other == category or -other_neg_len <= -neg_len:
+                continue
+            if other_start <= start and end <= other_start - other_neg_len:
+                covered.add(category)
+                break
+
+    ranked = sorted(
+        ((category, key) for category, key in best_per_category.items() if category not in covered),
+        key=lambda item: item[1],
+    )
     return [
         (category, "naming" if key[0] == 0 else "cargo", key[1], key[2])
         for category, key in ranked

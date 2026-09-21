@@ -157,3 +157,87 @@ def test_naming_tier_matches_do_not_trigger_a_suggestion():
     state = new_state("s1")
     set_trailer_category(state, "Utility")
     assert suggest_category_from_haul_item(state, "dump trailer") is None
+
+
+# --------------------------------------------- cargo that ALSO suits where they already are
+# Live, on a Dump trailer: "gravel and dirt for a landscaping job" was answered with "That
+# sounds like a good fit for a Dump trailer. For gravel and dirt for a landscaping job, an
+# Utility trailer is usually the better fit - would you like to switch to that instead?"
+# Gravel and dirt is dump cargo. We asked what material they were hauling and then argued
+# with the answer.
+def test_cargo_that_suits_the_current_category_never_offers_a_switch():
+    state = new_state("s1")
+    set_trailer_category(state, "Dump")
+    assert suggest_category_from_haul_item(state, "gravel and dirt") is None
+
+
+def test_a_second_category_in_the_same_phrase_does_not_win():
+    """"landscaping" is a Utility word, but they named dump cargo first and are on a Dump."""
+    state = new_state("s1")
+    set_trailer_category(state, "Dump")
+    assert suggest_category_from_haul_item(state, "gravel and dirt for a landscaping job") is None
+
+
+@pytest.mark.parametrize(
+    "cargo_text", ["gravel", "dirt", "mulch", "debris", "topsoil", "sand", "rubble"]
+)
+def test_the_material_a_dump_customer_is_asked_for_keeps_them_on_dump(cargo_text):
+    """rules/seed.json asks Dump customers "What material will you be hauling (dirt, gravel,
+    debris, etc.)?" - every answer it invites must be an answer we accept."""
+    state = new_state("s1")
+    set_trailer_category(state, "Dump")
+    assert suggest_category_from_haul_item(state, cargo_text) is None
+
+
+def test_cargo_for_a_genuinely_different_category_still_offers_the_switch():
+    """The rule narrows when we speak up; it must not silence us altogether."""
+    state = new_state("s1")
+    set_trailer_category(state, "Dump")
+    suggestion = suggest_category_from_haul_item(state, "cattle")
+    assert suggestion is not None and suggestion["suggested"] == "Livestock"
+
+
+def test_a_backhoe_on_a_dump_trailer_still_offers_equipment():
+    state = new_state("s1")
+    set_trailer_category(state, "Dump")
+    suggestion = suggest_category_from_haul_item(state, "a backhoe")
+    assert suggestion is not None and suggestion["suggested"] == "Equipment"
+
+
+def test_a_dirt_bike_is_a_utility_load_not_dump_cargo():
+    """"dirt" is a Dump term and "bike" a Utility one; the longer term must win the tie."""
+    state = new_state("s1")
+    set_trailer_category(state, "Dump")
+    suggestion = suggest_category_from_haul_item(state, "a dirt bike")
+    assert suggestion is not None and suggestion["suggested"] == "Utility"
+
+
+def test_cargo_that_settles_nothing_offers_nothing():
+    """Pallets ride on a flatbed and on a utility trailer equally happily."""
+    state = new_state("s1")
+    set_trailer_category(state, "Utility")
+    assert suggest_category_from_haul_item(state, "pallets of brick") is None
+
+
+def test_every_stocked_category_can_hold_its_own_customer():
+    """A category with no cargo terms can never be the match that keeps someone where they
+    are, so every other category's words pull them away from it."""
+    from src.domain import categories
+
+    without_cargo = [
+        category
+        for category in categories._advertised_categories()
+        if not categories._CARGO_TERMS.get(category)
+    ]
+    assert without_cargo == [], f"these can only ever lose a customer: {without_cargo}"
+
+
+def test_cargo_terms_agree_with_what_we_tell_the_customer():
+    """CATEGORY_BLURBS is the promise; the cargo terms are how we keep it. Dump's blurb said
+    "gravel, dirt, mulch and debris" while its terms said "scissor lift, hoist, telescopic"."""
+    from src.domain import categories
+
+    blurb = categories.CATEGORY_BLURBS["Dump"].lower()
+    for word in ("gravel", "dirt", "mulch", "debris"):
+        assert word in blurb
+        assert word in categories._CARGO_TERMS["Dump"], f"{word} is promised but not matched"

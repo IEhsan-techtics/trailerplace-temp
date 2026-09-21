@@ -78,10 +78,11 @@ def test_large_cargo_on_an_equipment_trailer_is_asked_its_width_next(fake_llm):
 
 def test_large_cargo_on_a_width_exempt_category_is_not_asked_width(fake_llm):
     pick(fake_llm, "dump")
-    # A backhoe, not a skid steer: "skid steer" would also offer a switch to Equipment.
-    fake_llm.push(turn_output(slots={"haul_item": "a backhoe"},
-                              haul_classification=cargo("backhoe", "large_or_heavy")))
-    run_turn("s1", "a backhoe")
+    # Cargo that belongs on a dump trailer, so the width rule is what is under test and not
+    # the switch question: "a backhoe" or "a skid steer" would both rightly offer Equipment.
+    fake_llm.push(turn_output(slots={"haul_item": "a load of rubble"},
+                              haul_classification=cargo("rubble", "large_or_heavy")))
+    run_turn("s1", "a load of rubble")
     state = state_after()
     assert "width" not in state["required_slots"]
     assert state["pending_slot"] == "payload_capacity"
