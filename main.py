@@ -34,7 +34,7 @@ from fastapi import FastAPI, HTTPException, Response  # noqa: E402
 from fastapi.responses import StreamingResponse  # noqa: E402
 from pydantic import BaseModel, ConfigDict, Field  # noqa: E402
 
-from src import conversation_store, db, turn_status  # noqa: E402
+from src import conversation_store, warmup, db, turn_status  # noqa: E402
 from src.config import settings  # noqa: E402
 from src.domain.reply_chunks import split_reply_into_chunks  # noqa: E402
 from src.graph.build import run_turn  # noqa: E402
@@ -64,6 +64,11 @@ async def lifespan(_app: FastAPI):
                 db.ensure_schema()
         except Exception:  # the bot still serves; the first turn will try again
             logger.exception("Schema check at startup failed")
+
+    # The connection pool, the question rules and the make inventory: about ten seconds of
+    # first-turn latency that belongs to startup, not to whoever happens to send the first
+    # message. On a serverless deployment that is every scale-from-zero.
+    warmup.warm_everything()
     yield
 
 
@@ -352,8 +357,14 @@ def health(response: Response) -> dict[str, Any]:
 
     from src import db
 
+    # A serverless platform pings this to wake the container, so it is the right place to
+    # load the caches: by the time health says "ok", a turn can be served without paying for
+    # any of it. Free after the first call - warm_everything is idempotent.
+    warmup.warm_everything()
+
     body: dict[str, Any] = {
         "status": "ok",
+        "warm": warmup.is_warm(),
         "model": settings.chat_model,
         "reasoning_effort": settings.chat_reasoning_effort,
         "database": db.database_enabled(),

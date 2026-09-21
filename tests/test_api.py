@@ -201,3 +201,50 @@ def test_streaming_can_be_switched_off_and_app_py_falls_back(client, monkeypatch
     monkeypatch.setattr(main, "STREAM_ENABLED", False)
     response = client.post("/chat/stream", json=_app_payload("hi", str(uuid.uuid4())))
     assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------- the warm-up
+def test_health_warms_the_caches(monkeypatch):
+    """A serverless platform pings /health to wake the container, so that is where the ten
+    seconds of cold-cache loading belongs - not on whoever sends the first message."""
+    import main
+
+    from src import warmup
+
+    warmup.reset()
+    called = []
+    monkeypatch.setattr(warmup, "_STEPS", (("pool", lambda: called.append("pool")),))
+
+    with TestClient(main.app) as client:
+        body = client.get("/health").json()
+
+    assert called == ["pool"]
+    assert body["warm"] is True
+    warmup.reset()
+
+
+def test_a_failing_step_does_not_break_anything(monkeypatch):
+    """A cold cache is not a broken app - everything it warms still loads lazily."""
+    from src import warmup
+
+    warmup.reset()
+
+    def _boom():
+        raise RuntimeError("Azure is having a day")
+
+    monkeypatch.setattr(warmup, "_STEPS", (("rules", _boom),))
+    assert warmup.warm_everything() == {"rules": -1.0}
+    assert warmup.is_warm()
+    warmup.reset()
+
+
+def test_it_only_runs_once(monkeypatch):
+    from src import warmup
+
+    warmup.reset()
+    calls = []
+    monkeypatch.setattr(warmup, "_STEPS", (("pool", lambda: calls.append(1)),))
+    warmup.warm_everything()
+    warmup.warm_everything()
+    assert len(calls) == 1
+    warmup.reset()

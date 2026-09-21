@@ -119,6 +119,55 @@ def ensure_session(session_id: str) -> str:
         return str(lead.lead_id)
 
 
+def open_session(session_id: str) -> tuple[str, dict[str, Any] | None, list[dict[str, Any]]]:
+    """Everything a turn needs to start, in ONE round trip: (lead_id, snapshot, conversation).
+
+    ``ensure_session`` and ``load_session`` each did ``sql.get(ChatbotConversation, ...)`` on
+    the same primary key, one straight after the other. Against Azure Postgres from outside
+    the region a round trip is about 1.1 s, so every returning customer waited twice for the
+    same row before the model call even started.
+
+    The row is created here when it is missing, exactly as ``ensure_session`` does - both are
+    kept, because a caller that only wants one half should not have to take both.
+    """
+    if not persistence_enabled():
+        lead_id = ensure_session(session_id)
+        snapshot, conversation, _lead = load_session(session_id)
+        return lead_id, snapshot, conversation
+
+    session_uuid = _as_uuid(session_id)
+    db.ensure_schema()
+    with db.get_session_factory()() as sql:
+        row = sql.get(ChatbotConversation, session_uuid)
+        if row:
+            return str(row.lead_id), row.state_snapshot, list(row.conversation or [])
+
+        lead = ChatbotLead(
+            lead_id=uuid.uuid4(),
+            psid=None,
+            name=None,
+            phone_number=None,
+            email=None,
+            lead_type="soft",
+            contact_status="missing_contact",
+            item_of_interest=_PLACEHOLDER_ITEM,
+        )
+        sql.add(lead)
+        sql.flush()
+        sql.add(
+            ChatbotConversation(
+                session_id=session_uuid,
+                lead_id=lead.lead_id,
+                conversation=[],
+                state_snapshot=None,
+                state_version=0,
+            )
+        )
+        sql.commit()
+        logger.info("SESSION opened: session=%s lead=%s", session_id, lead.lead_id)
+        return str(lead.lead_id), None, []
+
+
 def load_session(session_id: str) -> tuple[dict[str, Any] | None, list[dict[str, Any]], str]:
     """Return ``(state_snapshot, conversation, lead_id)`` for a session."""
     if not persistence_enabled():

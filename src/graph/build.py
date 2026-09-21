@@ -183,8 +183,9 @@ def run_turn(
     writes goes in that one transaction, so not reaching it leaves no trace.
     """
     with usage.usage_scope() as turn_usage:
-        lead_id = conversation_store.ensure_session(session_id)
-        snapshot, conversation, stored_lead_id = conversation_store.load_session(session_id)
+        # One round trip, not two: both halves come out of the same read of the same row.
+        lead_id, snapshot, conversation = conversation_store.open_session(session_id)
+        stored_lead_id = lead_id
 
         # Before the model call, because that is the expense being avoided. A turn row
         # exists only if that turn committed in full, so its reply is the whole answer.
