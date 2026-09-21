@@ -233,12 +233,12 @@ def _apply_shared_link(state: dict, output: Any, user_message: str) -> None:
         return
     label, url = found[0]
     wants = getattr(getattr(output, "inventory_lookup", None), "wants", None)
-    # The URL is not in the line any more: a social one says nothing about which trailer and
-    # is stripped from the body in any case, and one of ours is better said as its stock
-    # number. Which trailer is what the team needs; the kind of link is appended separately.
-    stock = _stock_in(url) or _stock_in(links.unwrap_redirect(url))
+    # OUR listing URL goes in the line - it is one click to the exact trailer. A social one
+    # does not: it says nothing about which trailer, it expires, and it is stripped out of
+    # the body in any case. The kind of link is appended to the body separately.
+    ours = links.normalize_listing_url(url) or links.normalize_listing_url(links.unwrap_redirect(url))
     site = label.split()[0]
-    what = f"stock {stock}" if stock else f"{'an' if site[:1] in 'AEIOU' else 'a'} {site} listing"
+    what = ours or f"{'an' if site[:1] in 'AEIOU' else 'a'} {site} listing"
     description = _LINK_ASKS.get(wants, _WANTS_IT).format(what=what)
     status = team_notify.record(state, reason="Listing Interest", description=description)
     state.setdefault("turn_outcome", {})["link_interest"] = {"status": status, "label": label}
@@ -304,13 +304,16 @@ def _apply_listing_interest(state: dict, output: Any) -> None:
         return
     recorded.append(url)
 
-    # The stock number, not the title: it is how the dealership refers to a trailer, it is
-    # four digits rather than eleven words, and the chat link opens the card itself.
+    # The listing URL, not the title: it is one click to the exact trailer, and one "word"
+    # rather than eleven. The stock number and the title only stand in when there is no URL
+    # to give - a trailer picked out of a batch we somehow hold no link for.
     stock = str(listing.get("stock_number") or "").strip() or _stock_in(url)
-    if stock:
-        description = f"Interested in stock {stock}"
+    if url:
+        description = f"Customer is interested in {url}"
+    elif stock:
+        description = f"Customer is interested in stock {stock}"
     elif title:
-        description = f"Interested in {title}"
+        description = f"Customer is interested in {title}"
     else:
         description = "Interested in a trailer we showed"
 

@@ -92,8 +92,12 @@ def _normalized(text: Any) -> str:
     dump trailer" / "asked us to call him back"), so keying on the exact string sent the team
     the same lead twice. Keyed on this instead, and truncated, so a genuinely different
     request still gets through.
+
+    Long enough to tell two listing URLs apart: those differ only in the slug on the end,
+    and truncated at 60 characters two trailers from the same make became "the same
+    request" and the team heard about one of them.
     """
-    return re.sub(r"[^a-z0-9 ]+", "", str(text or "").lower())[:60]
+    return re.sub(r"[^a-z0-9 ]+", "", str(text or "").lower())[:120]
 
 
 def _key(event: dict) -> tuple:

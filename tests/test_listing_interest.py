@@ -464,11 +464,9 @@ def test_picking_a_trailer_off_the_list_tells_the_team(fake_llm, no_search, mail
 
     sent = bodies(mail)
     assert len(sent) == 1, "saying yes to a trailer is a lead, with or without the escalate tool"
-    # No URL and no full title: the stock number is how the dealership refers to a
-    # trailer, and the chat link opens the card itself. This fixture's rows carry neither,
-    # so the title stands in.
-    assert "[Listing Interest] Interested in 2026 P&amp;C Car Hauler" in sent[0]
-    assert "https://x/1" not in sent[0]
+    # The listing URL, not the title: one click to the exact trailer, and one "word" rather
+    # than eleven.
+    assert "[Listing Interest] Customer is interested in https://x/1" in sent[0]
 
 
 def test_the_same_trailer_twice_is_one_email(fake_llm, no_search, mail):
@@ -580,3 +578,38 @@ def test_the_lead_is_named_after_the_trailer_they_picked(fake_llm, no_search):
     run_turn("s1", "I like the first one")
 
     assert describe_interest(state_after()) == "2026 P&amp;C Car Hauler"
+
+
+def test_two_trailers_from_one_make_are_two_emails(fake_llm, no_search, mail):
+    """Listing URLs differ only in the slug on the end. Keyed on the first 60 characters,
+    two trailers from the same make normalised to the same string and the team heard about
+    one of them."""
+    from src.tools.team_notify import _key, build_event
+
+    base = "https://www.trailerplace.com/inventory/2026-galyean-32-cattle-trailer-w-butterfly-gates-"
+    events = [
+        build_event({}, reason="Listing Interest", description=f"Customer is interested in {base}{n}/")
+        for n in ("015087", "015086")
+    ]
+    assert _key(events[0]) != _key(events[1])
+
+
+def test_the_agent_raising_it_names_the_trailer_too():
+    """The agent raises this itself when the analysis pass did not read the turn as
+    listing_interest. Same email, so it says the same thing."""
+    import json
+
+    from src.llm.tools import ToolRunner
+
+    state = dict(
+        showing_two_batches(),
+        session_id="s1",
+        contact={"name": "Dave", "email": "d@x.ai", "phone": None, "declined": False},
+        turn_outcome={},
+    )
+    turn = turn_output(intent="team_request_escalation", listing_reference=1)
+    runner = ToolRunner(state, turn)
+    runner.call("escalate", json.dumps({"reason": "listing_interest", "summary": "wants it"}))
+
+    body = state["turn_outcome"]["outbox_events"][0]["payload"]["body"]
+    assert "[Listing Interest] Customer is interested in " in body

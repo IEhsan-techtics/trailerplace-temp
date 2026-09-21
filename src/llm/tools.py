@@ -470,6 +470,17 @@ class ToolRunner:
             answer = canned_responses.escalation_answer(canned_key, already["status"])
             return _reply_instruction(self.state, answer, already["status"])
 
+        if canned_key == "listing_interest":
+            # The agent raises this itself when the analysis pass did not read the turn as
+            # listing_interest (apply._apply_listing_interest is the usual path). Same email,
+            # so it says the same thing: the trailer's own URL beats the agent's prose, and
+            # the team gets one click to it however the interest was noticed.
+            from src.tools.lookup_gate import referenced_listing
+
+            url = str((referenced_listing(self.state, self.turn) or {}).get("url") or "").strip()
+            if url:
+                summary = f"Customer is interested in {url}"
+
         status = team_notify.record(self.state, reason=reason_line, description=summary)
         outcome = self.state.setdefault("turn_outcome", {})
         outcome["escalated"] = True
