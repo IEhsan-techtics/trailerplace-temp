@@ -146,3 +146,54 @@ def test_the_interest_summary_is_never_empty():
 def test_round_tripping_an_empty_session_is_stable():
     state = new_state("s1")
     assert from_snapshot("s1", to_snapshot(state)) == state
+
+
+# --------------------------------------------------------------- the connection budget
+#
+# The server allows 50 and reserves 15 (10 superuser, 5 ordinary), so 35 are available -
+# shared between every replica of this app, the other agents on this database, the control
+# panel and anyone with a SQL client open. SQLAlchemy's defaults take 15 PER PROCESS, so
+# three replicas would ask for 45 of the 35 and be refused. That fails hard, not slowly.
+AVAILABLE_TO_US = 35
+REPLICAS_TO_PLAN_FOR = 3
+
+
+def test_a_replica_cannot_take_more_than_five_connections():
+    from src.config import settings
+
+    assert settings.db_pool_size + settings.db_max_overflow == 5
+
+
+def test_three_replicas_still_fit_in_the_budget():
+    from src.config import settings
+
+    per_replica = settings.db_pool_size + settings.db_max_overflow
+    assert per_replica * REPLICAS_TO_PLAN_FOR <= AVAILABLE_TO_US, (
+        "the pool no longer leaves room for the other agents on this database"
+    )
+
+
+def test_the_engine_is_told_all_of_it(monkeypatch):
+    """Sized, timed out, recycled and named - the name is what makes "who is holding the
+    connections?" answerable from pg_stat_activity next time."""
+    from src import db
+
+    captured = {}
+
+    def _fake_create_engine(url, **kwargs):
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(db, "create_engine", _fake_create_engine)
+    monkeypatch.setattr(db, "database_enabled", lambda: True)
+    db.get_engine.cache_clear()
+    try:
+        db.get_engine()
+    finally:
+        db.get_engine.cache_clear()
+
+    assert captured["pool_size"] == 3 and captured["max_overflow"] == 2
+    assert captured["pool_recycle"] == 1800
+    assert captured["pool_pre_ping"] is True
+    assert captured["connect_args"]["connect_timeout"] == 10
+    assert captured["connect_args"]["application_name"] == db.APPLICATION_NAME

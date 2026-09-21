@@ -83,6 +83,22 @@ class Settings:
     # turn against Azure Postgres from outside the region. Set to 0 to go back to committing
     # before the customer is answered.
     background_turn_save: bool = True
+    # The connection pool. The server allows 50, of which 15 are reserved (10 superuser, 5
+    # ordinary), so 35 are actually available - and they are shared with the other agents on
+    # this database, the control panel and anyone with a SQL client open. SQLAlchemy's
+    # defaults are pool_size=5 + max_overflow=10, so three replicas would ask for 45 of the
+    # 35 and get connection refusals. Five per replica is ample: a turn holds one connection
+    # briefly, twice, and the two background workers hold one each.
+    db_pool_size: int = 3
+    db_max_overflow: int = 2
+    # Waiting beats failing - the turn budget is 150 s, so a burst queues rather than errors.
+    db_pool_timeout: float = 30.0
+    # Azure closes idle connections; recycling means we retire them first rather than
+    # discovering it on checkout.
+    db_pool_recycle_seconds: int = 1800
+    # Without this a TCP connect to an unreachable server hangs for the OS default - which
+    # is how a local server here sat wedged for minutes instead of failing fast.
+    db_connect_timeout: int = 10
     chatbot_api_port: int = 8000
     langsmith_tracing: bool = False
     langsmith_endpoint: str = ""
@@ -187,6 +203,11 @@ class Settings:
             email_to=os.getenv("EMAIL_TO", ""),
             chat_ui_url=os.getenv("CHAT_UI_URL", ""),
             background_turn_save=_bool(os.getenv("BACKGROUND_TURN_SAVE"), True),
+            db_pool_size=_int(os.getenv("DB_POOL_SIZE"), 3),
+            db_max_overflow=_int(os.getenv("DB_MAX_OVERFLOW"), 2),
+            db_pool_timeout=_float(os.getenv("DB_POOL_TIMEOUT"), 30.0),
+            db_pool_recycle_seconds=_int(os.getenv("DB_POOL_RECYCLE_SECONDS"), 1800),
+            db_connect_timeout=_int(os.getenv("DB_CONNECT_TIMEOUT"), 10),
             chatbot_api_port=_int(os.getenv("CHATBOT_API_PORT"), 8000),
             langsmith_tracing=_bool(os.getenv("LANGSMITH_TRACING")),
             langsmith_endpoint=os.getenv("LANGSMITH_ENDPOINT", ""),

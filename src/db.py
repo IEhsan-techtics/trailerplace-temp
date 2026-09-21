@@ -27,12 +27,46 @@ def _database_url() -> str:
     return f"postgresql+psycopg://{settings.pguser}:{password}@{settings.host}:{settings.port}/{settings.database}"
 
 
+# What shows up in pg_stat_activity.application_name. Every connection this app held used to
+# report as blank, which is exactly the wrong answer to "who is using all the connections?".
+APPLICATION_NAME = "luna-chatbot"
+
+
 @lru_cache(maxsize=1)
 def get_engine() -> Engine:
+    """The one engine, sized for a database it does not have to itself.
+
+    The server allows 50 connections and reserves 15 of them (10 superuser, 5 ordinary), so
+    35 are available - shared between every replica of this app, the other agents on this
+    database, the control panel, and whoever has a SQL client open. SQLAlchemy's defaults
+    would take 15 per process, so three replicas would ask for 45 of the 35 and start being
+    refused. That fails hard rather than slowly, which is why it is worth sizing.
+
+    Five per replica is ample for what a turn actually does: one short checkout to read the
+    session, one to write it, and one each for the two background workers.
+    """
     if not database_enabled():
         raise RuntimeError("Database settings are incomplete")
-    connect_args = {} if settings.host in {"localhost", "127.0.0.1", "::1"} else {"sslmode": "require"}
-    return create_engine(_database_url(), connect_args=connect_args, pool_pre_ping=True)
+    local = settings.host in {"localhost", "127.0.0.1", "::1"}
+    connect_args = {
+        "connect_timeout": settings.db_connect_timeout,
+        "application_name": APPLICATION_NAME,
+    }
+    if not local:
+        connect_args["sslmode"] = "require"
+    return create_engine(
+        _database_url(),
+        connect_args=connect_args,
+        pool_pre_ping=True,
+        pool_size=settings.db_pool_size,
+        max_overflow=settings.db_max_overflow,
+        pool_timeout=settings.db_pool_timeout,
+        pool_recycle=settings.db_pool_recycle_seconds,
+        # LIFO keeps a small set of connections hot and lets the rest go idle and be
+        # recycled, so a quiet replica drifts back down to one or two rather than holding
+        # its high-water mark all day.
+        pool_use_lifo=True,
+    )
 
 
 @lru_cache(maxsize=1)
