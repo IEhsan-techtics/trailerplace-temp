@@ -89,8 +89,8 @@ Which type would you like to go with? We carry more types as well if you'd like 
 
 Three or four types we carry, suited to what they said: bold name, dash, one short line.
 Nothing to go on (a name, a hello, a general question) -> a plain sentence instead: "We carry
-Equipment, Dump, Enclosed, Utility, Flatbed and Livestock trailers among many others - which
-type would you like to go with?" Category already settled -> just ask the next question.
+<five or six from OUR CATEGORIES> trailers among many others - which type would you like to go
+with?" Name only types on that list. Category already settled -> just ask the next question.
 Any other answer that is really a set of things (use cases, hitch options, gate styles) -> the
 same bullets, never a buried paragraph.
 """

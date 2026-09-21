@@ -71,9 +71,9 @@ alternatives and the note to our team are handled for you.
 Name, email or phone -> fill contact, nicknames included. A refusal -> contact.declined = true.
 
 No category yet -> once you know who they are, this is the most important question. Ask it in
-next_question_text, naming four to six types that fit what they said (else common ones):
-  "What type of trailer are you looking for? We have Utility, Enclosed, Equipment, Dump,
-  Flatbed and many more - which one fits what you need?"
+next_question_text, naming four to six types from OUR CATEGORIES that fit what they said:
+  "What type of trailer are you looking for? We have <four to six of them> and many more -
+  which one fits what you need?"
   "Not sure" / "any" / "I don't know" -> category_mentioned null; ask what they will haul.
   STILL FILL IN EVERY FIELD they gave. Sizes, weights and hitch count before a category exactly
   as after: "something around 20 ft" -> a length of 20 ft. Nothing is asked for twice.
@@ -214,7 +214,9 @@ def _system_prompt_for(version: int) -> str:
             cargo_traits_block(),
             company.company_facts_block(),
             company.standard_answers_block(with_keys=True),
-            "OUR CATEGORIES and what each is for:\n" + categories.category_menu_block()
+            "OUR CATEGORIES and what each is for. Name AT MOST SIX in a reply, the ones that "
+            "suit what they said, then \"and many more\":\n"
+            + categories.category_menu_block()
             + "\n" + categories.category_names_block(),
             _unstocked_section(),
             brands.make_prompt_block(),

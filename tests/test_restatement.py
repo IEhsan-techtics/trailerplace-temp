@@ -172,3 +172,92 @@ def test_a_question_about_another_slot_is_dropped_from_the_answer():
 ])
 def test_questions_that_are_not_out_of_turn_are_kept(text, slot):
     assert _without_other_questions(text, slot) == text
+
+
+# ------------------------------------------- the category question, which has no slot
+# Live, turn 2 of the long conversation, "what sort of trailers do you carry?":
+#   "We carry Utility, Enclosed, Equipment, Dump, Flatbed and many more. ...
+#    What type of trailer fits what you need? What type of trailer are you looking for?
+#    We have Utility, Enclosed, Equipment, Tilt, Livestock, Flatbed and many more -
+#    which one fits what you need?"
+# The closing comes back with no slot, so _repeats compared a fourteen-word canned menu
+# against a six-word question by word overlap and called them different questions.
+_MENU = (
+    "What type of trailer are you looking for? We have Utility, Enclosed, Equipment, Tilt, "
+    "Livestock, Flatbed and many more - which one fits what you need?"
+)
+_CARRIED = (
+    "We carry Utility, Enclosed, Equipment, Dump, Flatbed and many more. Utility trailers are "
+    "open general-purpose haulers, Enclosed trailers are lockable and weatherproof. "
+    "What type of trailer fits what you need?"
+)
+
+
+@pytest.mark.parametrize("already_asked", [
+    "What type of trailer fits what you need?",
+    "What kind of trailer are you after?",
+    "So what type of trailer would suit you best?",
+    # Live, after the first fix: "Yes - we carry Aluminum, Car Hauler, ... and Roll Off
+    # trailers. Which type fits what you need? What type of trailer are you looking for?
+    # We have..." The phrase never says "trailer", so the narrow topic list missed it.
+    "Which type fits what you need?",
+    "Which kind suits you best?",
+    "What type would work best for you?",
+])
+def test_the_category_menu_is_dropped_when_the_reply_already_asked(already_asked):
+    assert _repeats([already_asked], _MENU, "base_category")
+
+
+def test_the_whole_live_reply_is_caught():
+    assert _repeats([_CARRIED], _MENU, "base_category")
+
+
+@pytest.mark.parametrize("other", [
+    "Would you like our financing number?",
+    "What will you be hauling?",
+    "Can I take your name and number?",
+])
+def test_a_question_about_anything_else_leaves_the_menu_standing(other):
+    assert not _repeats([other], _MENU, "base_category")
+
+
+def test_a_statement_naming_the_types_is_not_a_question_about_them():
+    """Listing what we carry is an answer. The question still has to be asked."""
+    listed = "We carry Utility, Enclosed, Equipment, Dump and Flatbed trailers, among many others."
+    assert not _repeats([listed], _MENU, "base_category")
+
+
+# ---------------------------------------- a question the model wrote twice by itself
+# _repeats compares the CLOSING against the rest of the reply, so a question repeated inside
+# the model's own fields walked straight past it. Live, after the category-menu fix:
+#   "We carry Utility, Enclosed, ... What will you be hauling? What will you be hauling? Why?"
+from src.graph.nodes.compose import _without_a_repeated_question  # noqa: E402
+
+
+def test_the_same_question_twice_becomes_one():
+    text = "We carry Utility and Dump trailers. What will you be hauling? What will you be hauling?"
+    assert _without_a_repeated_question(text).count("What will you be hauling?") == 1
+
+
+def test_typography_does_not_make_it_a_different_question():
+    text = "What’s the rough weight? What's the rough weight?"
+    assert _without_a_repeated_question(text).count("?") == 1
+
+
+def test_two_different_questions_both_stay():
+    text = "What will you be hauling? How long does it need to be?"
+    assert _without_a_repeated_question(text) == text
+
+
+def test_the_category_menu_is_left_alone():
+    """It is deliberately one question written as two sentences."""
+    menu = (
+        "What type of trailer are you looking for? We have Utility, Enclosed, Equipment and "
+        "many more - which one fits what you need?"
+    )
+    assert _without_a_repeated_question(menu) == menu
+
+
+def test_statements_are_never_touched():
+    text = "We carry Dump trailers. We carry Dump trailers."
+    assert _without_a_repeated_question(text) == text, "only questions are de-duplicated"

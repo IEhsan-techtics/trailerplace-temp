@@ -167,7 +167,14 @@ def compose_node(state: dict, output: Any) -> dict:
         # Only while a qualification question is going out: then Python has chosen the one
         # question this reply asks, and any other the model wrote is out of turn.
         parts = [kept for part in parts if (kept := _without_other_questions(part, asked_slot))]
-    if closing and _repeats(parts, closing, asked_slot):
+    # What the closing is ABOUT, which is not always a slot. The category question is the one
+    # that is not: it comes back with asked_slot None, so _repeats fell through to word
+    # overlap and compared a fourteen-word canned menu against a six-word question. Barely
+    # a third of the words are shared, so it read as a different question and went out on top
+    # of the model's own - live, "What type of trailer fits what you need? What type of
+    # trailer are you looking for? We have..." in one breath.
+    topic = asked_slot or _closing_topic(state, closing)
+    if closing and _repeats(parts, closing, topic):
         # The model answered the question AND proposed the same question as its next one, so
         # the reply asked "what type of trailer are you looking for?" twice in a row. The
         # slot is still marked asked below - it WAS asked, once.
@@ -193,7 +200,7 @@ def compose_node(state: dict, output: Any) -> dict:
         parts.append(written or greeting.gate_ask(state))
         greeting.note_asked(state)
 
-    text = " ".join(part for part in parts if part).strip()
+    text = _without_a_repeated_question(" ".join(part for part in parts if part).strip())
     if not text:
         text = "Sorry, could you say that another way?"
 
@@ -319,7 +326,14 @@ _SLOT_TOPICS: dict[str, tuple[str, ...]] = {
     "cargo_size": ("size", "dimension"),
     "trailer_size": ("size", "dimension"),
     "bin_size": ("bin", "yard"),
-    "base_category": ("type of trailer", "kind of trailer", "type of aluminum"),
+    # Broader than the others on purpose. This topic is only ever consulted for the category
+    # question itself (see _closing_topic), and at that point no category is set, so there is
+    # no other "what type?" in flight for it to swallow. Live, the narrow list let "Which type
+    # fits what you need?" through and the canned menu went out right behind it.
+    "base_category": (
+        "type of trailer", "kind of trailer", "type of aluminum",
+        "which type", "what type", "which kind", "what kind",
+    ),
 }
 
 
@@ -401,6 +415,45 @@ def _lift_contact_ask(parts: list[str]) -> tuple[list[str], str]:
         if joined:
             kept.append(joined)
     return kept, " ".join(lifted).strip()
+
+
+def _without_a_repeated_question(text: str) -> str:
+    """Drop a question this reply has already asked, word for word.
+
+    _repeats compares the CLOSING against the rest, so it cannot see a question the model
+    wrote twice inside its own fields - and live it did: "We carry Utility, Enclosed ...
+    What will you be hauling? What will you be hauling? Why?"
+
+    Exact matches only, after collapsing whitespace and typography. Anything cleverer would
+    start eating the category menu, which is deliberately one question in two sentences
+    ("What type of trailer are you looking for? We have ... - which one fits what you need?").
+    """
+    sentences = _SENTENCE_END.split(text)
+    kept: list[str] = []
+    asked: set[str] = set()
+    for sentence in sentences:
+        stripped = sentence.strip()
+        if stripped.endswith("?"):
+            collapsed = _collapse(stripped)
+            if collapsed in asked:
+                logger.info("COMPOSE dropped a question the reply already asked: %r", stripped)
+                continue
+            asked.add(collapsed)
+        kept.append(sentence)
+    return " ".join(part for part in (p.strip() for p in kept) if part).strip()
+
+
+def _closing_topic(state: dict, closing: str) -> str | None:
+    """The _SLOT_TOPICS key a slotless closing question belongs to, if any.
+
+    Only the category question. The pending confirmations - a suggested switch, the keep
+    question, the axle ones - are deliberately left out: those MUST be asked, and a topic
+    would let a question the model happened to word similarly swallow them, leaving the
+    confirmation open with nothing on screen to answer.
+    """
+    from src.graph.nodes import greeting
+
+    return "base_category" if _collapse(closing) == _collapse(greeting.orientation_question(state)) else None
 
 
 def _repeats(parts: list[str], closing: str, slot: str | None = None) -> bool:

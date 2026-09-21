@@ -333,3 +333,42 @@ def test_the_switch_question_says_a_utility_not_an_utility(fake_llm):
 
     assert "a Utility trailer" in text
     assert "an Utility" not in text
+
+
+# -------------------------------------------------- one question, even without a slot
+def test_the_category_question_is_not_asked_twice_in_one_reply(fake_llm):
+    """Live, turn 2 - the same question, twice, in one breath:
+
+    What type of trailer fits what you need? What type of trailer are you looking for?
+    We have Utility, Enclosed, Equipment, Tilt, Livestock, Flatbed and many more - which
+    one fits what you need?
+    """
+    complete_welcome(fake_llm)
+    fake_llm.push(turn_output(
+        intent="category_exploration",
+        answer_to_customer_question=(
+            "We carry Utility, Enclosed, Equipment, Dump, Flatbed and many more. Utility "
+            "trailers are open general-purpose haulers, Enclosed trailers are lockable and "
+            "weatherproof. What type of trailer fits what you need?"
+        ),
+    ))
+    text = run_turn("s1", "what sort of trailers do you carry?")["assistant_text"]
+
+    assert text.count("?") == 1, f"asked more than once: {text}"
+    assert "What type of trailer fits what you need?" in text, "the model's wording is kept"
+
+
+def test_the_category_question_still_goes_out_when_the_model_asks_nothing(fake_llm):
+    """The guard drops a duplicate, never the only question in the reply."""
+    complete_welcome(fake_llm)
+    fake_llm.push(turn_output(
+        intent="category_exploration",
+        answer_to_customer_question="We carry a wide range of trailers.",
+    ))
+    text = run_turn("s1", "what sort of trailers do you carry?")["assistant_text"]
+
+    # The canned menu is one question written as two sentences ("What type of trailer are you
+    # looking for? We have ... - which one fits what you need?"), so it is counted by asking,
+    # not by question marks.
+    assert text.lower().count("type of trailer") == 1
+    assert "which one fits what you need?" in text
