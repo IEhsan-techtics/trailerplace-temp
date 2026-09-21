@@ -62,25 +62,22 @@ def test_showing_trailers_tells_the_team(fake_llm, no_search, mail):
 
     sent = alerts(mail)
     assert len(sent) == 1
-    assert "Showed 2 trailers" in sent[0]
-    assert "2025 Diamond C Dump" in sent[0], "the team is told WHICH trailers"
+    assert "[Results Shown to User] Showed 2 Dump trailers" in sent[0]
 
 
-def test_the_alert_names_the_search_behind_it(fake_llm, no_search, mail):
-    """search_node leaves a line saying what it was asked for; the alert carries it."""
+def test_the_line_is_the_count_and_the_category(fake_llm, no_search, mail):
+    """The stock numbers used to be listed here and made this the longest line the team
+    ever read. They are in the conversation the chat link opens."""
     state = new_state("s2")
-    state["turn_outcome"] = {
-        "system_email_triggers": [
-            {"kind": "results_shown", "description": "Inventory search - 2 results - Dump"}
-        ]
-    }
+    state["category"] = "Livestock"
     state["contact"] = {"name": "Dave", "phone": "979-555-0100", "declined": False}
     from src.graph.nodes.compose import _tell_the_team_what_they_saw
 
     _tell_the_team_what_they_saw(state, [{"stock_number": "15079"}, {"stock_number": "00564"}])
 
     body = state["turn_outcome"]["outbox_events"][0]["payload"]["body"]
-    assert "Showed 2 trailers: 15079, 00564 - Inventory search - 2 results - Dump" in body
+    assert "[Results Shown to User] Showed 2 Livestock trailers" in body
+    assert "15079" not in body
 
 
 def test_a_turn_that_shows_nothing_tells_them_nothing(fake_llm, no_search, mail):

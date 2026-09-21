@@ -129,9 +129,10 @@ def build_tools(runner: Any) -> list:
         Args:
             reason: One of complaint, callback, meeting, quote, pricing, delivery, paperwork,
                 viewing, stock_question, unstocked_type, listing_interest, other.
-            summary: One line the team can act on without reading the transcript, e.g.
-                "wants best price on a dump trailer, asked us to beat $8k" or
-                "says their last order arrived damaged".
+            summary: AT MOST SEVEN WORDS naming what they want - a label, not a report. The
+                email already says what kind of request this is and links to the whole
+                conversation. "Wants best price on a dump trailer" or "Says last order
+                arrived damaged". Anything longer is cut.
         """
         return runner.call("escalate", json.dumps({"reason": reason, "summary": summary}))
 

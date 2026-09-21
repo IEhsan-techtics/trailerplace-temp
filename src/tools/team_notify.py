@@ -113,6 +113,28 @@ def _dedupe(events: list[dict]) -> list[dict]:
     return unique
 
 
+# How long the one-line description may run. It is a LABEL, not a report: the reason line
+# already says what kind of thing this is, and the chat link carries the whole conversation,
+# so the words in between only have to say which customer and which thing. Everything Python
+# authors is written to fit; this is the backstop for the one description it does not write,
+# the agent's own summary on an escalation.
+MAX_DESCRIPTION_WORDS = 7
+
+
+def shorten(description: Any) -> str:
+    """The description, cut to ``MAX_DESCRIPTION_WORDS``.
+
+    Cut on whole words with an ellipsis, so a line that was too long still reads as a
+    sentence that trails off rather than a string that stops mid-word.
+    """
+    words = str(description or "").strip().split()
+    if len(words) <= MAX_DESCRIPTION_WORDS:
+        return " ".join(words)
+    kept = " ".join(words[:MAX_DESCRIPTION_WORDS]).rstrip(".,;:-")
+    logger.info("team_notify | description shortened from %d words", len(words))
+    return f"{kept}…"
+
+
 def build_event(state: dict, *, reason: str, description: str) -> dict[str, Any]:
     """One notification, rendered against whatever contact details we hold RIGHT NOW.
 
@@ -122,7 +144,7 @@ def build_event(state: dict, *, reason: str, description: str) -> dict[str, Any]
     """
     return {
         "reason": reason,
-        "description": str(description or "").strip() or "No detail given.",
+        "description": shorten(description) or "No detail given.",
         "event_type": reason.lower().replace(" ", "_").replace("–", "-")[:64],
     }
 
@@ -270,18 +292,7 @@ def flush(state: dict) -> int:
 # one thing the transcript cannot tell them at a glance.
 RESULTS_SHOWN_REASON = "Results Shown to User"
 
-# How long the one-line description may run before the tail is cut. A dozen stock numbers is
-# a useful line; forty is a wall.
-_MAX_DESCRIPTION = 300
-
-
-def _name_of(listing: Any) -> str:
-    """How the team refers to a trailer: its stock number, or failing that its title."""
-    get = listing.get if isinstance(listing, dict) else (lambda name: getattr(listing, name, None))
-    return str(get("stock_number") or "").strip() or str(get("title") or "").strip() or "?"
-
-
-def record_results_shown(state: dict, listings: list[Any], detail: str = "") -> str:
+def record_results_shown(state: dict, listings: list[Any], category: str = "") -> str:
     """Tell the team which trailers were just put in front of this customer.
 
     Called with what the reply actually SHOWED, never with what the search found: a trailer
@@ -291,14 +302,13 @@ def record_results_shown(state: dict, listings: list[Any], detail: str = "") -> 
     It goes through the same gate as everything else, so with no way to reach the customer
     it waits rather than going out as an anonymous "someone saw six trailers" - and it is
     what keeps the contact request alive on the following turn (greeting.contact_ask_is_due).
+
+    The stock numbers used to be listed here. They are in the conversation the chat link
+    opens, and six of them made this the longest line the team ever read.
     """
     if not listings:
         return "dropped"
-    names = ", ".join(_name_of(listing) for listing in listings)
     count = len(listings)
-    description = f"Showed {count} trailer{'' if count == 1 else 's'}: {names}"
-    if detail:
-        description = f"{description} - {detail}"
-    if len(description) > _MAX_DESCRIPTION:
-        description = description[: _MAX_DESCRIPTION - 1].rstrip(", ") + "…"
+    kind = f"{category} " if category else ""
+    description = f"Showed {count} {kind}trailer{'' if count == 1 else 's'}"
     return record(state, reason=RESULTS_SHOWN_REASON, description=description)

@@ -549,20 +549,15 @@ def _tell_the_team_what_they_saw(state: dict, batch: list[dict]) -> None:
     is not the same thing once the reply has chosen what to present.
 
     ``search_node`` and ``inventory_lookup_node`` each leave a line saying what they were
-    asked for (the category and filters, or the trailer that was looked up); it is consumed
-    here as the detail on the end, so the team's line says both what was shown and why.
+    asked for; those are consumed (and dropped) here so they cannot pile up on a later turn.
+    What the line says is the count and the category - the stock numbers are in the
+    conversation the email's chat link opens.
     """
     from src.tools import team_notify
 
     outcome = state.setdefault("turn_outcome", {})
-    triggers = outcome.get("system_email_triggers") or []
     outcome["system_email_triggers"] = []
-    detail = "; ".join(
-        str(trigger.get("description") or "").strip()
-        for trigger in triggers
-        if trigger.get("kind") == "results_shown" and trigger.get("description")
-    )
-    status = team_notify.record_results_shown(state, batch, detail)
+    status = team_notify.record_results_shown(state, batch, str(state.get("category") or ""))
     logger.info(
         "RESULTS shown: session=%s count=%d status=%s",
         state.get("session_id"), len(batch), status,

@@ -61,7 +61,7 @@ def test_giving_up_on_a_question_tells_the_team(fake_llm, no_search, mail):
 
     sent = bodies(mail, "Unanswered Question")
     assert len(sent) == 1
-    assert "Asked twice and never answered" in sent[0]
+    assert "No answer after two asks" in sent[0]
     assert slot.replace("_", " ") in sent[0], "the team is told WHICH question"
 
 

@@ -464,8 +464,11 @@ def test_picking_a_trailer_off_the_list_tells_the_team(fake_llm, no_search, mail
 
     sent = bodies(mail)
     assert len(sent) == 1, "saying yes to a trailer is a lead, with or without the escalate tool"
+    # No URL and no full title: the stock number is how the dealership refers to a
+    # trailer, and the chat link opens the card itself. This fixture's rows carry neither,
+    # so the title stands in.
     assert "[Listing Interest] Interested in 2026 P&amp;C Car Hauler" in sent[0]
-    assert "https://x/1" in sent[0]
+    assert "https://x/1" not in sent[0]
 
 
 def test_the_same_trailer_twice_is_one_email(fake_llm, no_search, mail):
@@ -493,7 +496,7 @@ def test_interest_we_cannot_pin_down_is_still_a_lead(fake_llm, no_search, mail):
     fake_llm.push(turn_output(intent="listing_interest", turn_summary="They want one of them."))
     run_turn("s1", "yeah I am")
 
-    assert "[Listing Interest] They want one of them." in bodies(mail)[0]
+    assert "[Listing Interest] Interested in a trailer we showed" in bodies(mail)[0]
 
 
 def test_without_contact_details_the_lead_waits_and_then_goes(fake_llm, no_search, mail):

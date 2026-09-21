@@ -151,7 +151,7 @@ def test_a_facebook_link_they_want_is_emailed_naming_the_facebook_post(fake_llm,
     assert len(mail) == 1
     subject, body = mail[0]
     assert "Listing Interest" in subject + body
-    assert "Shared a Facebook post link and asked if it is still available" in body
+    assert "Asked if a Facebook listing is available" in body
     # The URL itself is NOT in the email. A post URL is opaque, it says nothing about which
     # trailer and it expires; the platform is what tells the team where they saw us.
     assert FACEBOOK not in body
@@ -165,7 +165,7 @@ def test_an_instagram_link_on_the_first_message_waits_for_their_details(fake_llm
 
     assert mail == [], "held until we can reach them"
     stashed = state_after()["pending_email_actions"]
-    assert "Shared an Instagram post link and asked about the price" in stashed[0]["description"]
+    assert stashed[0]["description"] == "Asked the price of an Instagram listing"
 
 
 def test_a_link_with_no_interest_sends_nothing(fake_llm, mail):

@@ -98,11 +98,12 @@ def record(state: dict, output: Any, requested: str) -> str:
             return "dropped"
         return "sent" if team_notify.contact_complete(state) else "stashed"
     seen.append(key)
-    summary = (getattr(output, "turn_summary", "") or "").strip()
+    # The turn summary used to go here and ran to three sentences. The reason line already
+    # names the type; this only has to say that they asked for it.
     return team_notify.record(
         state,
         reason=f"Trailer type not in stock - {requested}",
-        description=summary or f"Asked for {_label(requested)}, which we do not currently carry.",
+        description=f"Asked for {_label(requested)} - not stocked",
     )
 
 

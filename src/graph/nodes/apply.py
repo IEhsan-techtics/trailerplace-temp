@@ -21,6 +21,7 @@ The order of the steps is load-bearing:
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from src.domain import axles
@@ -161,6 +162,20 @@ def _note_shared_platforms(state: dict, user_message: str) -> None:
             logger.info("LINK platform noted: session=%s %s", state.get("session_id"), platform)
 
 
+_STOCK_IN_URL_RE = re.compile(r"-(\d{4,6})/?$")
+
+
+def _stock_in(url: Any) -> str:
+    """The stock number on the end of one of our listing URLs, if it is one of ours.
+
+    Our slugs end in the stock number ("...-5-bale-hay-81419/"), which is the one part of a
+    listing URL the team can actually act on.
+    """
+    cleaned = links.normalize_listing_url(url)
+    match = _STOCK_IN_URL_RE.search(str(cleaned or ""))
+    return match.group(1) if match else ""
+
+
 def _apply_faq_notification(state: dict, output: Any) -> None:
     """Every one of the five standard questions is worth telling the team about.
 
@@ -173,20 +188,35 @@ def _apply_faq_notification(state: dict, output: Any) -> None:
     faq_key = getattr(output, "faq_key", None)
     if not faq_key:
         return
-    question = (getattr(output, "user_question_to_answer", None) or "").strip()
     team_notify.record(
         state,
         reason=f"FAQ - {faq_key}",
-        description=question or f"asked about {str(faq_key).replace('_', ' ')}",
+        description=_FAQ_DESCRIPTIONS.get(
+            str(faq_key), f"Asked about {str(faq_key).replace('_', ' ')}"
+        ),
     )
 
 
-# What they asked about the linked trailer, as the team email says it.
-_LINK_ASKS = {
-    "price": "asked about the price",
-    "availability": "asked if it is still available",
-    "details": "asked for details",
+# What each standard question is, in a handful of words. The customer's verbatim question
+# used to go here and ran to a paragraph; the reason line already names the FAQ, and the
+# chat link goes to the question itself.
+_FAQ_DESCRIPTIONS = {
+    "financing": "Asked about financing",
+    "trade_in": "Asked about trade-ins",
+    "service_parts": "Asked about service and parts",
+    "store_info": "Asked about hours or location",
+    "contact_human": "Asked to speak to someone",
 }
+
+
+# What they asked about the linked trailer, as the team email says it. Each one has to read
+# under seven words with the longest thing that can fill {what} ("an Instagram listing").
+_LINK_ASKS = {
+    "price": "Asked the price of {what}",
+    "availability": "Asked if {what} is available",
+    "details": "Asked for details of {what}",
+}
+_WANTS_IT = "Wants {what}"
 
 
 def _apply_shared_link(state: dict, output: Any, user_message: str) -> None:
@@ -203,8 +233,13 @@ def _apply_shared_link(state: dict, output: Any, user_message: str) -> None:
         return
     label, url = found[0]
     wants = getattr(getattr(output, "inventory_lookup", None), "wants", None)
-    article = "an" if label[:1] in "AEIOU" else "a"
-    description = f"Shared {article} {label} and {_LINK_ASKS.get(wants, 'wants this trailer')}: {url}"
+    # The URL is not in the line any more: a social one says nothing about which trailer and
+    # is stripped from the body in any case, and one of ours is better said as its stock
+    # number. Which trailer is what the team needs; the kind of link is appended separately.
+    stock = _stock_in(url) or _stock_in(links.unwrap_redirect(url))
+    site = label.split()[0]
+    what = f"stock {stock}" if stock else f"{'an' if site[:1] in 'AEIOU' else 'a'} {site} listing"
+    description = _LINK_ASKS.get(wants, _WANTS_IT).format(what=what)
     status = team_notify.record(state, reason="Listing Interest", description=description)
     state.setdefault("turn_outcome", {})["link_interest"] = {"status": status, "label": label}
     logger.info("LINK interest: session=%s %s status=%s", state.get("session_id"), label, status)
@@ -269,12 +304,15 @@ def _apply_listing_interest(state: dict, output: Any) -> None:
         return
     recorded.append(url)
 
-    if title:
-        description = f"Interested in {title}" + (f" ({url})" if url else "")
+    # The stock number, not the title: it is how the dealership refers to a trailer, it is
+    # four digits rather than eleven words, and the chat link opens the card itself.
+    stock = str(listing.get("stock_number") or "").strip() or _stock_in(url)
+    if stock:
+        description = f"Interested in stock {stock}"
+    elif title:
+        description = f"Interested in {title}"
     else:
-        description = (getattr(output, "turn_summary", "") or "").strip() or (
-            "Told us they are interested in one of the trailers we showed them."
-        )
+        description = "Interested in a trailer we showed"
 
     status = team_notify.record(state, reason="Listing Interest", description=description)
     outcome["listing_interest"] = {"status": status, "title": title, "url": url, "repeat": False}
@@ -777,12 +815,10 @@ def _report_questions_we_gave_up_on(state: dict) -> None:
     slot = given_up[0]
     state["gave_up_reported"] = True
     label = str(slot).replace("_", " ")
-    asked = (state.get("slot_questions") or {}).get(slot)
-    described = f'"{asked}"' if asked else label
     team_notify.record(
         state,
         reason="Unanswered Question",
-        description=f"Asked twice and never answered ({label}): {described}",
+        description=f"No answer after two asks: {label}",
     )
     logger.info(
         "QUESTION gave up: session=%s slot=%s - telling the team", state.get("session_id"), slot,
