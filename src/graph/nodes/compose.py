@@ -53,7 +53,9 @@ def compose_node(state: dict, output: Any) -> dict:
     # them through a tool and formatted the cards itself). Nothing here reassembles it - the
     # only job left is recording which trailers the customer was actually shown.
     if outcome.get("reply_text"):
-        outcome["assistant_text"] = _with_handoff(outcome, outcome["reply_text"])
+        outcome["assistant_text"] = _no_invented_name(
+            state, _with_handoff(outcome, outcome["reply_text"])
+        )
         outcome["asked_slot"] = None
         _carry_on_after_lookup(state, outcome)
         _record_shown(state, outcome.get("cited_listing_urls") or [], outcome.get("listings"))
@@ -77,7 +79,7 @@ def compose_node(state: dict, output: Any) -> dict:
     # see _contact_ask_is_due - so answering a question and asking for a number are no
     # longer alternatives.
     if greeting.contact_gate_applies(state) and greeting.owns_the_turn(state):
-        outcome["assistant_text"] = _gate_text(state, output)
+        outcome["assistant_text"] = _no_invented_name(state, _gate_text(state, output))
         outcome["asked_slot"] = None
         greeting.note_asked(state)
         return state
@@ -184,9 +186,48 @@ def compose_node(state: dict, output: Any) -> dict:
     if not text:
         text = "Sorry, could you say that another way?"
 
-    outcome["assistant_text"] = text
+    outcome["assistant_text"] = _no_invented_name(state, text)
     outcome["asked_slot"] = asked_slot
     return state
+
+
+# "Thanks, Ibrahim" - a greeting, then a name. Live, the customer had said only "my email is
+# ibrahim.fb@esided.ai": the model read a name out of the address and used it, while the same
+# reply went on to ask "Could I take your name as well?". The analysis pass had it right
+# (contact.name came back empty); it was the prose that guessed.
+_VOCATIVE_RE = re.compile(
+    r"((?i:thanks|thank you|hi|hello|hey|great|perfect|welcome))"
+    r"[,!]\s+([A-Z][a-z]{1,15})"
+)
+
+# Words that follow a greeting and are not somebody's name.
+_NOT_A_NAME = frozenset({"there", "again", "all", "everyone", "and", "for", "so", "we", "you",
+                         "our", "the", "that", "this", "it", "im"})
+
+
+def _no_invented_name(state: dict, text: str) -> str:
+    """Take out a name we were never given.
+
+    Python knows who the customer is - ``contact["name"]`` is set only from what they
+    actually told us - so a name in the prose that is not that one was guessed, and the
+    commonest guess is the local part of the email address they just typed.
+
+    Only the vocative is removed, not the sentence: "Thanks, Ibrahim - I've got your email"
+    becomes "Thanks - I've got your email", which is the line the model meant to write.
+    """
+    known = str((state.get("contact") or {}).get("name") or "").strip().casefold()
+
+    def _drop(match: re.Match) -> str:
+        guessed = match.group(2)
+        if guessed.casefold() in _NOT_A_NAME or (known and guessed.casefold() == known):
+            return match.group(0)
+        logger.info(
+            "COMPOSE dropped an invented name: session=%s name=%r known=%r",
+            state.get("session_id"), guessed, known or None,
+        )
+        return match.group(1)
+
+    return _VOCATIVE_RE.sub(_drop, text or "")
 
 
 # Ways a reply already says the request reached a person. Matched so the confirmation is not

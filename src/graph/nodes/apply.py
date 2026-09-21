@@ -242,6 +242,11 @@ def _apply_shared_link(state: dict, output: Any, user_message: str) -> None:
     description = _LINK_ASKS.get(wants, _WANTS_IT).format(what=what)
     status = team_notify.record(state, reason="Listing Interest", description=description)
     state.setdefault("turn_outcome", {})["link_interest"] = {"status": status, "label": label}
+    # Sharing a link to a trailer IS picking one. Live, the reply that finally captured the
+    # lead still went on to read the catalogue out: "...noted your interest in the trailer
+    # you shared. What type of trailer are you looking for? We have Utility, Enclosed..."
+    # The guard existed but keyed on the other path into the same place.
+    state["listing_interest_logged"] = True
     logger.info("LINK interest: session=%s %s status=%s", state.get("session_id"), label, status)
 
 

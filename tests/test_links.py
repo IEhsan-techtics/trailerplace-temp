@@ -225,3 +225,38 @@ def test_nothing_is_tacked_on_when_the_model_already_asked_it():
     compose_node(state, turn_output())
 
     assert state["turn_outcome"]["assistant_text"].count(question) == 1
+
+
+# ------------------------------------------------- the reply after a link, end to end
+def test_sharing_a_link_stops_the_catalogue_question(fake_llm, mail, no_reply_pass):
+    """Live: the turn that finally captured the lead still read the catalogue out to a
+    customer who had shared a link to the trailer he wanted two messages earlier. The
+    guard existed; it keyed on the other path into the same place."""
+    fake_llm.push(shares(FACEBOOK))
+    run_turn("s1", f"is this one still available? {FACEBOOK}")
+    assert state_after()["listing_interest_logged"] is True
+
+    fake_llm.push(turn_output(intent="contact_info_provided", email="i@x.ai"))
+    reply = run_turn("s1", "my email is i@x.ai")["assistant_text"]
+
+    assert "What type of trailer are you looking for" not in reply
+
+
+def test_a_name_read_off_an_email_address_is_not_used(fake_llm, mail, no_reply_pass):
+    """Live: "my email is ibrahim.fb@esided.ai" came back as "Thanks, Ibrahim - I've got
+    your email", in the same reply that went on to ask "Could I take your name as well?".
+    The analysis pass had it right; the prose guessed."""
+    fake_llm.push(shares(FACEBOOK))
+    run_turn("s1", f"is this one still available? {FACEBOOK}")
+
+    fake_llm.push(
+        turn_output(
+            intent="contact_info_provided", email="ibrahim.fb@esided.ai",
+            acknowledgement="Thanks, Ibrahim - I've got your email.",
+        )
+    )
+    reply = run_turn("s1", "my email is ibrahim.fb@esided.ai")["assistant_text"]
+
+    assert state_after()["contact"]["name"] is None, "they never gave one"
+    assert "Ibrahim" not in reply
+    assert "Thanks - I've got your email." in reply
