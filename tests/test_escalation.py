@@ -118,11 +118,12 @@ def test_it_asks_for_both_when_we_have_neither():
     assert "follow up" in result
 
 
-def test_it_asks_only_for_the_name_when_that_is_all_that_is_missing():
-    """Asking for a number they already gave reads as not having listened."""
+def test_with_a_number_but_no_name_it_goes_out_and_asks_for_nothing():
+    """The request is not waiting on the name, so the reply must not imply it is. The
+    contact gate still chases the name on a later turn - that part is unchanged."""
     result = _escalate(_runner(name=None, email="d@x.ai"))
-    assert "Could I take your name" in result
-    assert "email or phone number so our team" not in result
+    assert "PASSED TO THE TEAM" in result
+    assert "Could I take" not in result
 
 
 def test_it_asks_only_for_a_number_when_that_is_all_that_is_missing():
@@ -374,13 +375,17 @@ def _state(**contact):
     }
 
 
-def test_nothing_is_sent_without_a_name():
+def test_a_way_to_reach_them_is_enough_on_its_own():
+    """A number with no name beside it is still a customer the team can ring. Holding the
+    request back for a formality is how a real lead turns into nothing - the body says
+    "Full Name: Not provided" and someone calls them."""
     from src.tools import team_notify
 
     state = _state(email="d@x.ai")
-    assert team_notify.record(state, reason="Escalation", description="x") == "stashed"
-    assert state["turn_outcome"].get("outbox_events") is None
-    assert len(state["pending_email_actions"]) == 1
+    assert team_notify.record(state, reason="Escalation", description="x") == "sent"
+    assert len(state["turn_outcome"]["outbox_events"]) == 1
+    assert "Full Name: Not provided" in state["turn_outcome"]["outbox_events"][0]["payload"]["body"]
+    assert not state.get("pending_email_actions")
 
 
 def test_nothing_is_sent_without_a_way_to_reach_them():

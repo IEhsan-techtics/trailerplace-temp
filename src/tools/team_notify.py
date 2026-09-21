@@ -3,7 +3,13 @@
 Every email the bot sends is an internal notification about a customer, and it is worth
 nothing without a way to reach that customer. So the rule is absolute:
 
-    NOTHING IS SENT UNTIL WE HOLD A NAME **AND** AN EMAIL OR A PHONE NUMBER.
+    NOTHING IS SENT UNTIL WE CAN REACH THEM - AN EMAIL **OR** A PHONE NUMBER.
+
+A name is not part of that test. It makes the lead easier to work and we still ask for it
+(the contact gate in greeting.py is unchanged, and so is the prompt), but a number with no
+name is a customer the team can call, and holding their request back for a formality is how
+a real lead turns into nothing. The body says "Full Name: Not provided" and the team rings
+the number.
 
 A request that arrives before then is STASHED, never dropped - ``state["pending_email_actions"]``
 carries it, and it survives to the next turn in the state snapshot like everything else. The
@@ -41,8 +47,13 @@ def has_reachable(state: dict) -> bool:
 
 
 def contact_complete(state: dict) -> bool:
-    """The minimum the dealership treats as a real lead."""
-    return has_name(state) and has_reachable(state)
+    """The minimum for an email to be worth sending: a way to reach them.
+
+    Deliberately NOT the same test as ``greeting.contact_is_complete``, which decides
+    whether to keep ASKING and still wants a name. This one decides whether to SEND, and a
+    phone number with no name beside it is a lead the team can act on today.
+    """
+    return has_reachable(state)
 
 
 def declined(state: dict) -> bool:
