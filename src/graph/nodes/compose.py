@@ -106,7 +106,10 @@ def compose_node(state: dict, output: Any) -> dict:
     contact = state.setdefault("contact", {})
     closing_the_gate = greeting.contact_is_complete(contact) and not contact.get("greeted")
 
-    acknowledgement = (getattr(output, "acknowledgement", "") or "").strip()
+    acknowledgement = _without_questions(
+        (getattr(output, "acknowledgement", "") or "").strip(),
+        state.get("session_id"),
+    )
     answer = (getattr(output, "answer_to_customer_question", None) or "").strip()
 
     if closing_the_gate:
@@ -181,6 +184,28 @@ def compose_node(state: dict, output: Any) -> dict:
         parts.append(flushed)
 
     closing, asked_slot = _closing_part(state, output)
+
+    # The menu, said twice. The model is told to put the type question in ONE field, and
+    # when it does not the two readings differ enough in wording that _restates misses
+    # them - so they are compared by the categories they NAME instead. The closing keeps
+    # it, because that is the part carrying the question.
+    # The menu, said twice. The model is told to put the type question in one field, and
+    # when it does not, the two phrasings differ enough that _repeats misses them - so
+    # they are compared by the categories they NAME instead of by their words.
+    #
+    # The CLOSING is what goes, the same way _repeats drops it just below: a customer who
+    # asked what we carry was answered by the answer, and the closing is the part saying
+    # it a second time.
+    if closing and any(_both_recite_the_menu(part, closing) for part in parts):
+        logger.info(
+            "COMPOSE dropped a closing reciting the menu the reply already gave: session=%s",
+            state.get("session_id"),
+        )
+        # Dropping it must not leave the reply with nothing to answer. "We sell Aluminum,
+        # Car Hauler, Equipment, Enclosed and Utility trailers, and many more." is true,
+        # complete, and a dead end - the conversation stops on our full stop. The names
+        # are already above, so what goes back is the question without them.
+        closing = "" if _asks_something(parts) else WHICH_ONE
     if closing and asked_slot:
         # Only while a qualification question is going out: then Python has chosen the one
         # question this reply asks, and any other the model wrote is out of turn.
@@ -357,6 +382,32 @@ _SLOT_TOPICS: dict[str, tuple[str, ...]] = {
 
 def _is_about(question: str, slot: str) -> bool:
     return any(re.search(rf"\b{re.escape(term)}", question) for term in _SLOT_TOPICS[slot])
+
+
+def _without_questions(text: str, session_id: Any = None) -> str:
+    """The acknowledgement, with any question taken out of it.
+
+    Its field description is "one short sentence, no question", and Python picks the one
+    question a reply asks. So a question here is always wrong, whatever it asks - no
+    comparison against the closing is needed, and comparing is what let this through:
+
+        Thanks, Ibrahim - what type of trailer are you looking for? What type of trailer
+        are you looking for? We have Car Hauler, Equipment, Enclosed, Utility, Dump...
+
+    A text that is ONLY a question is left alone. Emptying it would lose the whole part,
+    and on a turn with no closing that question may be all the reply has.
+    """
+    if not text or "?" not in text:
+        return text
+    kept = [
+        sentence
+        for sentence in _SENTENCE_END.split(text)
+        if sentence.strip() and not sentence.rstrip().endswith("?")
+    ]
+    if not kept:
+        return text
+    logger.info("COMPOSE took a question out of the acknowledgement: session=%s", session_id)
+    return " ".join(kept).strip()
 
 
 def _acknowledges_a_rejected_value(state: dict, acknowledgement: str) -> bool:
@@ -722,6 +773,46 @@ def _already_asks_for_contact(text: str) -> bool:
 # Naming a few types helps; reading out all thirteen is a wall of names, not an answer.
 # Six is the most a helpful sentence carries, so past that the written question stands in.
 MAX_CATEGORIES_IN_A_QUESTION = 6
+
+
+# The category question with the menu taken out, for when the reply has already listed
+# them. Short on purpose: everything it would have said is in the sentence above it.
+WHICH_ONE = "Which one fits what you need?"
+
+
+def _asks_something(parts: list[str]) -> bool:
+    """Does the reply already put a question to them?"""
+    return any("?" in (part or "") for part in parts)
+
+
+def _category_names_in(text: str) -> set[str]:
+    """Which of our canonical categories this text names."""
+    from src.domain.categories import CANONICAL_CATEGORIES
+
+    low = (text or "").lower()
+    return {c for c in CANONICAL_CATEGORIES if c.lower() in low}
+
+
+# Two categories could be a comparison ("a Dump or an Equipment trailer?"). Three named
+# twice in one reply is the menu, said twice.
+_MENU_REPEAT_THRESHOLD = 3
+
+
+def _both_recite_the_menu(first: str, second: str) -> bool:
+    """Do two parts of one reply both read out the list of what we carry?
+
+    _restates compares wording and missed this live, because the model phrased it
+    differently each time:
+
+        What type of trailer are you looking for? We have Car Hauler, Equipment,
+        Enclosed, Utility, and Dump and many more. We have Car Hauler, Equipment,
+        Enclosed, Utility, and Dump and many more - which one fits what you need?
+
+    Compared by the categories NAMED rather than by the words around them, which is what
+    makes the two halves the same sentence.
+    """
+    shared = _category_names_in(first) & _category_names_in(second)
+    return len(shared) >= _MENU_REPEAT_THRESHOLD
 
 
 def _names_too_many_categories(text: str) -> bool:
