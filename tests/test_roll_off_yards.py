@@ -84,6 +84,18 @@ def test_a_length_they_gave_answers_the_only_question_the_category_asks():
     assert state["slot_sources"]["bin_size"] == "user"
 
 
+def test_the_bin_they_gave_fills_the_length_too():
+    """It changes no search - the filters work the yardage out either way - but the session
+    then holds the trailer in the terms every other category holds it in, so a change of
+    category can offer to keep the size like any other."""
+    state = {"session_id": "t", "category": "Roll Off", "slots": {"bin_size": 20.0}}
+
+    _apply_roll_off_bin(state)
+
+    assert state["slots"]["length"] == 19.0
+    assert state["slot_sources"]["length"] == "user"
+
+
 def test_a_bin_they_gave_is_left_alone():
     state = {"session_id": "t", "category": "Roll Off", "slots": {"length": 19.0, "bin_size": 30.0}}
 

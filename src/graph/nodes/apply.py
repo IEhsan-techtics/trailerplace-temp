@@ -33,6 +33,7 @@ from src.graph.nodes import greeting
 from src.domain.slot_map import (
     axle_count_out_of_range,
     brand_is_actually_a_hitch,
+    bin_yards_to_length_ft as slot_map_length_ft,
     length_ft_to_bin_yards as slot_map_bin_yards,
     slot_value_kind,
 )
@@ -599,15 +600,27 @@ def _apply_roll_off_bin(state: dict) -> None:
     if state.get("category") != "Roll Off":
         return
     slots = state.setdefault("slots", {})
-    length = slots.get("length")
-    if slots.get("bin_size") or not isinstance(length, (int, float)):
-        return
-    slots["bin_size"] = slot_map_bin_yards(length)
-    mark_user_value(state, "bin_size")
-    logger.info(
-        "ROLL OFF bin read off the length they gave: session=%s %s ft -> %s yd",
-        state.get("session_id"), length, slots["bin_size"],
-    )
+    length, bin_size = slots.get("length"), slots.get("bin_size")
+
+    if bin_size is None and isinstance(length, (int, float)):
+        slots["bin_size"] = slot_map_bin_yards(length)
+        mark_user_value(state, "bin_size")
+        logger.info(
+            "ROLL OFF bin read off the length they gave: session=%s %s ft -> %s yd",
+            state.get("session_id"), length, slots["bin_size"],
+        )
+    elif length is None and isinstance(bin_size, (int, float)):
+        # The other way round. The search already works this out when it builds the
+        # filters, so this changes no result - it puts the trailer they asked for into the
+        # session in the terms every other category keeps it in, so a later change of
+        # category can offer to keep the size like any other, and the state reads as what
+        # they actually want rather than needing the rule applied to be understood.
+        slots["length"] = slot_map_length_ft(bin_size)
+        mark_user_value(state, "length")
+        logger.info(
+            "ROLL OFF length read off the bin they gave: session=%s %s yd -> %s ft",
+            state.get("session_id"), bin_size, slots["length"],
+        )
 
 
 def _apply_question_rules(state: dict, output: Any) -> None:
