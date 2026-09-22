@@ -37,7 +37,8 @@ CANONICAL_CATEGORIES = [
 # _NAMING_TERMS: the category word itself or an unambiguous style name for it.
 # _CARGO_TERMS: cargo items, brands, or attributes that only *suggest* the category.
 _NAMING_TERMS: dict[str, list[str]] = {
-    "Aluminum": ["aluminum"],
+    # "aluminium" is how half the world spells it, and it is the category name itself.
+    "Aluminum": ["aluminum", "aluminium"],
     "Car Hauler": ["car hauler", "toy hauler"],
     "Equipment": ["equipment", "lowboy", "low profile", "deckover", "deck over"],
     "Enclosed": ["enclosed", "box trailer", "v-nose", "v nose", "command trailer"],

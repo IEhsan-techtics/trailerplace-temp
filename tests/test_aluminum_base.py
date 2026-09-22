@@ -22,7 +22,7 @@ def stocks_aluminum(monkeypatch):
     """The shared make fixture carries no Aluma, so Aluminum is not a stocked category
     there and every selection would be rejected. On the real lot it is the biggest one."""
     monkeypatch.setattr(
-        category_tool.brands, "stocked_categories", lambda: ("Aluminum", "Utility", "Enclosed", "Equipment"),
+        category_tool.brands, "stocked_categories", lambda: ("Aluminum", "Utility", "Enclosed", "Equipment", "Dump", "Car Hauler", "Tilt"),
     )
 
 
@@ -30,23 +30,27 @@ def _said(mentioned: str) -> SimpleNamespace:
     return SimpleNamespace(category_mentioned=mentioned, is_category_info_only=False)
 
 
-def test_the_type_beside_aluminum_is_read_off_the_sentence():
-    assert aluminum_base_category("I am looking for an Aluminum utility trailer") == "Utility"
-    assert aluminum_base_category("an aluminum enclosed trailer") == "Enclosed"
+@pytest.mark.parametrize("said, base", [
+    ("I am looking for an Aluminum utility trailer", "Utility"),
+    ("a utility aluminum trailer", "Utility"),           # either order
+    ("I want a utility trailer and it should be aluminum", "Utility"),  # two clauses
+    ("looking for aluminum, utility type", "Utility"),
+    ("do you have aluminum enclosed trailers?", "Enclosed"),
+    ("I need an aluminium dump trailer", "Dump"),        # the other spelling
+    ("aluminum car hauler", "Car Hauler"),               # a two-word type
+    ("I'd like a tilt trailer in aluminum", "Tilt"),
+])
+def test_the_type_beside_aluminum_is_read_off_the_sentence(said, base):
+    assert aluminum_base_category(said) == base
 
 
-def test_aluminum_on_its_own_pairs_with_nothing():
-    assert aluminum_base_category("do you have aluminum trailers?") is None
-
-
-def test_a_type_on_its_own_pairs_with_nothing():
-    assert aluminum_base_category("I need a utility trailer") is None
-
-
-def test_cargo_is_a_load_not_a_second_type():
-    """"An aluminum trailer for my tractor" names one type. The tractor is what they are
-    hauling, and it belongs to the haul-item path, not to base_category."""
-    assert aluminum_base_category("an aluminum trailer for my tractor") is None
+@pytest.mark.parametrize("said", [
+    "aluminum trailer",                  # aluminum alone - the type is still to ask
+    "I need a utility trailer",          # no aluminum - Utility is the category itself
+    "an aluminum trailer for my tractor",  # a load, not a second type
+])
+def test_nothing_is_paired_when_they_named_one_thing(said):
+    assert aluminum_base_category(said) is None
 
 
 def test_both_land_in_one_turn_whichever_way_the_model_read_it():
