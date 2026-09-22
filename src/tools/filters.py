@@ -288,7 +288,7 @@ def _apply_quantities(state: dict, output: Any, category: str, writable: frozens
             settled.add(slot)
             continue
 
-        value = quantity_math.to_canonical(slot, quantity)
+        value = quantity_math.to_canonical(slot, quantity, category)
         if value is None:
             logger.info("QUANTITY unit does not fit: slot=%s unit=%s raw=%r", slot, getattr(quantity, "unit", None), raw)
             continue

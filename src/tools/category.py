@@ -66,6 +66,31 @@ def _is_stocked(category: str) -> bool:
     return not stocked or category in stocked
 
 
+ALUMINUM = "Aluminum"
+
+
+def aluminum_base_category(text: Any) -> str | None:
+    """The trailer TYPE named beside "aluminum" in the same breath.
+
+    "An aluminum utility trailer" names two of our categories at once, and they are not
+    two competing choices: Aluminum is the material - the category we stock it under -
+    and Utility is the kind of trailer they want made of it. That is exactly what the
+    Aluminum ``base_category`` question asks, so a customer who has already said it must
+    never be asked it again.
+
+    Naming tier only. A cargo word that happens to map to a category ("aluminum trailer
+    for my tractor") is a load, not a second trailer type, and it belongs to the
+    haul-item path. Returns None unless the text names Aluminum AND something else.
+    """
+    named = [category for category, tier in resolve_category_matches(str(text or "")) if tier == "naming"]
+    if ALUMINUM not in named:
+        return None
+    for candidate in named:
+        if candidate != ALUMINUM and _is_stocked(candidate):
+            return candidate
+    return None
+
+
 def set_trailer_category(state: dict, category: str) -> dict[str, Any]:
     """Validate, store, and load the category's required questions into the session.
 

@@ -36,7 +36,9 @@ from src.domain.slot_map import (
     slot_value_kind,
 )
 from src.tools.category import (
+    ALUMINUM,
     FEATURES_KEY,
+    aluminum_base_category,
     meaningful_filters,
     normalize_category,
     set_trailer_category,
@@ -82,7 +84,7 @@ def apply_node(state: dict, output: Any, user_message: str = "") -> dict:
     handled = _apply_pending_confirmations(state, output, user_message)
     _apply_gooseneck(state, output, user_message)
     if not handled:
-        _apply_category(state, output)
+        _apply_category(state, output, user_message)
     _apply_brand(state, output, user_message)
 
     result = apply_extracted_fields(state, output, user_message)
@@ -459,6 +461,10 @@ def _apply_keep_filters_answer(state: dict, output: Any) -> bool:
 
     if new_category:
         set_trailer_category(state, new_category)
+        # "Actually make it an aluminum utility trailer" named the type in the same breath
+        # as the change; it survives the keep-or-drop answer, which is about the OLD
+        # category's measurements.
+        _store_aluminum_base(state, pending.get("base_category"))
     logger.info(
         "CATEGORY change confirmed: session=%s -> %s keep=%s",
         state.get("session_id"), new_category, answer,
@@ -494,7 +500,7 @@ def _apply_gooseneck(state: dict, output: Any, user_message: str) -> None:
 
 
 # ------------------------------------------------------------------------ 4. category
-def _apply_category(state: dict, output: Any) -> None:
+def _apply_category(state: dict, output: Any, user_message: str = "") -> None:
     """Select or change the category.
 
     A CHANGE with meaningful filters already collected does not mutate anything: it opens
@@ -504,19 +510,28 @@ def _apply_category(state: dict, output: Any) -> None:
     if not mentioned or getattr(output, "is_category_info_only", False):
         return
 
-    canonical = normalize_category(mentioned)
+    # "An aluminum utility trailer" is one choice, not two. Aluminum is the category, the
+    # other type is its base_category - which is the very question we would otherwise ask
+    # next. Read off the customer's own words, because the model reads this phrase both
+    # ways: one live turn returned "Aluminum utility trailer", another returned "Utility".
+    base = aluminum_base_category(f"{mentioned} {user_message}")
+
+    canonical = ALUMINUM if base else normalize_category(mentioned)
     if not canonical:
         # Unrecognized, or "not sure" / "any" - base_category stays None (brief S7).
         return
 
     current = state.get("category")
     if canonical == current:
+        _store_aluminum_base(state, base)
         return
 
     if current:
         existing = meaningful_filters(state)
         if existing:
-            state["pending_keep_filters"] = {"new_category": canonical, "filters": existing}
+            state["pending_keep_filters"] = {
+                "new_category": canonical, "filters": existing, "base_category": base,
+            }
             logger.info(
                 "CATEGORY change pending: session=%s %s -> %s with %d filters",
                 state.get("session_id"), current, canonical, len(existing),
@@ -524,6 +539,27 @@ def _apply_category(state: dict, output: Any) -> None:
             return
 
     set_trailer_category(state, canonical)
+    _store_aluminum_base(state, base)
+
+
+def _store_aluminum_base(state: dict, base: str | None) -> None:
+    """File the type they want in aluminum, so ``base_category`` is never asked again.
+
+    Only when Aluminum is the category the session is actually on, and only when nothing
+    is filed there already - a later "make it an enclosed one" arrives as a slot answer
+    and goes through the normal path, which is allowed to overwrite.
+    """
+    if not base or state.get("category") != ALUMINUM:
+        return
+    slots = state.setdefault("slots", {})
+    if slots.get("base_category"):
+        return
+    slots["base_category"] = base
+    mark_user_value(state, "base_category")
+    logger.info(
+        "CATEGORY aluminum base read from their words: session=%s base_category=%s",
+        state.get("session_id"), base,
+    )
 
 
 def _apply_brand(state: dict, output: Any, user_message: str) -> None:
@@ -658,7 +694,7 @@ def _hold_unclear_capacity(state: dict, output: Any, user_message: str,
     value = None
     for quantity in getattr(getattr(output, "extracted", None), "quantities", None) or []:
         if getattr(quantity, "slot_name", None) in _CAPACITY_SLOTS:
-            value = quantity_math.to_canonical(quantity.slot_name, quantity)
+            value = quantity_math.to_canonical(quantity.slot_name, quantity, state.get("category"))
             if value:
                 break
     value = value or max(float(result.stored[slot]) for slot in stored)

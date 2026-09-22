@@ -114,6 +114,29 @@ def extract_model_code(model: Any) -> str:
     return ""
 
 
+# A year, not a model. Skipped so "2027" in a model string cannot become the code and match
+# every trailer of that year.
+_YEARLIKE = re.compile(r"(19|20)\d{2}")
+
+
+def requested_model_code(model_text: Any) -> str:
+    """The model code out of what the CUSTOMER asked for.
+
+    ``extract_model_code`` reads our own model column, where the code is always the token
+    with letters in it ("8218ESA-TA-EL-R-RTD"), so it skips bare numbers. A customer does
+    not talk that way: "how much does an Aluma 8218 cost?" names the trailer by its number
+    alone, and skipping it left the lookup with no code at all - which is why that question
+    found nothing while "Iron Bull DTB" worked.
+    """
+    code = extract_model_code(model_text)
+    if code:
+        return code
+    for token in normalize_text(model_text).split():
+        if re.fullmatch(r"\d{3,}", token) and not _YEARLIKE.fullmatch(token):
+            return token
+    return ""
+
+
 def load_inventory(excel_path: str | Path = _LISTINGS_FILE) -> pd.DataFrame:
     return pd.read_excel(excel_path)
 
@@ -449,6 +472,18 @@ def _no_exact_alternative_rows(
     return selected
 
 
+def _number_is_in_the_row(model_code_norm: str, row: pd.Series) -> bool:
+    """A model code that is only digits has to be THERE, not merely close.
+
+    Fuzzy matching is right for letters - a customer typing "Diamnod C" means Diamond C -
+    but 8218 and 8118 are two different trailers, and a ratio of 75 cannot tell the
+    difference. Asked for an 8218 we must not answer with the 8118 as though it were one.
+    """
+    if not model_code_norm or not model_code_norm.isdigit():
+        return True
+    return model_code_norm in str(row.get("model_norm") or "") or model_code_norm in str(row.get("title_norm") or "")
+
+
 def match_inventory(
     identifiers: _Identifiers,
     df: pd.DataFrame | None = None,
@@ -530,6 +565,7 @@ def match_inventory(
             if (not make_norm or item[2]["make_score"] >= 75)
             and (item[2]["model_code_score"] >= 75 or item[2]["model_text_score"] >= 78)
             and item[2]["overall"] >= 58
+            and _number_is_in_the_row(model_code_norm, item[1])
         ]
         if model_make_rows:
             selected = model_make_rows
@@ -650,7 +686,7 @@ def lookup_inventory(
     identifiers = _Identifiers(
         year=year,
         possible_make=make,
-        possible_model_code=extract_model_code(model_text) if model_text else None,
+        possible_model_code=requested_model_code(model_text) if model_text else None,
         possible_model_text=model_text,
         stock_number=stock_number,
     )

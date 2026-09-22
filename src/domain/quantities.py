@@ -66,7 +66,23 @@ def supports(slot: str) -> bool:
     return _kind(slot) is not None
 
 
-def to_canonical(slot: str, quantity: Any) -> float | None:
+def _roll_off_yardage(category: Any, kind: str | None, unit: str) -> bool:
+    """A Roll Off length given in yards is a BIN SIZE, not 3 feet to the yard.
+
+    "I need a 20 yard roll off" is the whole trade's way of naming the bin, and we store
+    that yardage straight into length_ft by a business rule (see slot_map). Converted as a
+    measurement it becomes a 60 ft trailer, which we do not sell and which returns nothing.
+    The raw-text parser already knows this; the quantity path did not, so it depended on
+    which of the two read the answer.
+    """
+    return (
+        kind in {"length_ft", "width_ft", "height_ft"}
+        and unit in _BIN_YARDS
+        and slot_map.normalize_category(str(category or "")) == "Roll Off"
+    )
+
+
+def to_canonical(slot: str, quantity: Any, category: Any = None) -> float | None:
     """The stored number for this slot, or None when the unit does not fit the slot.
 
     A range is its smaller end, whatever the model put first. The sign is kept: a negative
@@ -76,6 +92,8 @@ def to_canonical(slot: str, quantity: Any) -> float | None:
     if kind is None:
         return None
     table = _TABLE_BY_SLOT.get(slot) or _TABLE_BY_KIND[kind]
+    if _roll_off_yardage(category, kind, str(_field(quantity, "unit") or "")):
+        table = _BIN_YARDS
     factor = table.get(str(_field(quantity, "unit") or ""))
     if factor is None:
         return None
