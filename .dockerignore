@@ -17,8 +17,8 @@ __pycache__/
 .env
 .env.*
 
-# Not part of the deployed service.
-app.py
+# Not part of either deployed service. app.py is NOT here: it is the UI image's entrypoint,
+# and one context feeds both builds.
 scripts/
 tests/
 pytest.ini

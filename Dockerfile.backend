@@ -1,5 +1,9 @@
 # The chatbot API. One image, one process: uvicorn serving main:app.
 #
+# Paired with Dockerfile.streamlit, which builds the UI that talks to it. Two images,
+# because they scale on different things: the UI holds a browser session open and does
+# almost nothing, the API does the model calls and the database work.
+#
 # Built for Azure Container Apps, where the container is stopped by SIGTERM and may be
 # scaled to zero between customers. Two consequences shape this file: the signal has to
 # reach uvicorn (see CMD), and a cold start has to be survivable, which is why /health

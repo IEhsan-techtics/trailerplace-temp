@@ -1,0 +1,43 @@
+# The chat UI. Streamlit serving app.py, which talks to the API over HTTP.
+#
+# It holds no session state of its own - every turn is a POST to CHATBOT_API_URL - so this
+# container can be restarted or scaled without a customer losing their conversation. Set
+# CHATBOT_API_URL to the API container app's URL; the default only works when the two run
+# side by side on one machine.
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    STREAMLIT_SERVER_HEADLESS=true \
+    STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
+
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt ./
+RUN python -m pip install -r requirements.txt
+
+COPY . .
+
+# Not root, and it needs a HOME: Streamlit writes ~/.streamlit at startup, so a user
+# without one fails on boot rather than on first request.
+RUN useradd --create-home --uid 10001 trailerplace \
+    && mkdir -p /app/logs \
+    && chown -R trailerplace:trailerplace /app
+USER trailerplace
+
+EXPOSE 8501
+
+# Streamlit's own endpoint, not ours: it reports whether the server is up, which is all
+# this container is responsible for. Whether the API behind it is reachable is the API's
+# health check to answer, and app.py already polls it and tells the customer.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=3)"
+
+CMD ["python", "-m", "streamlit", "run", "app.py", \
+     "--server.address=0.0.0.0", "--server.port=8501"]
