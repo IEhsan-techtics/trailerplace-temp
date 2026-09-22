@@ -372,6 +372,10 @@ def drain_inbound(
                     result = answer(
                         turn_session, message, turn_id=turn_id,
                         abandon_if=None if last_attempt else said_more,
+                        # The raw PSID. The session id above was derived FROM it, and that
+                        # derivation is one-way, so this is the only chance to record which
+                        # customer the lead belongs to.
+                        channel_id=session_id,
                     )
             except Exception as exc:  # noqa: BLE001 - one bad message must not wedge the queue
                 logger.exception("INBOUND turn failed: session=%s messages=%d", session_id, len(ids))

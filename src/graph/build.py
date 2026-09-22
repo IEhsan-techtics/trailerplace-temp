@@ -172,6 +172,7 @@ def run_turn(
     *,
     turn_id: Any = None,
     abandon_if: Callable[[], bool] | None = None,
+    channel_id: str | None = None,
 ) -> dict[str, Any]:
     """One complete turn: load, analyze, apply, tools, compose, persist.
 
@@ -182,6 +183,10 @@ def run_turn(
     redelivery is answered from the stored reply instead of being run a second time.
     Without it every call is a new turn, which is what a browser holding its own request
     open actually wants.
+
+    ``channel_id`` is the raw identity the channel knows this customer by - a Messenger PSID.
+    The session id is derived from it, so nothing needs it to resume; it is stored on the lead
+    so the mapping can be read back the other way, which hashing alone cannot give us.
 
     ``abandon_if`` is for a channel that can tell the customer has said more while we were
     answering. Checked once, just before the save: true and the turn is thrown away whole -
@@ -198,7 +203,7 @@ def run_turn(
         turn_saver.wait_for(session_id)
 
         # One round trip, not two: both halves come out of the same read of the same row.
-        lead_id, snapshot, conversation = conversation_store.open_session(session_id)
+        lead_id, snapshot, conversation = conversation_store.open_session(session_id, channel_id)
         stored_lead_id = lead_id
 
         # Before the model call, because that is the expense being avoided. A turn row
@@ -276,6 +281,7 @@ def run_turn(
             item_of_interest=conversation_store.describe_interest(state),
             outbox_events=outbox_events,
             turn_id=turn_id,
+            channel_id=channel_id,
         )
 
         # The commit happens AFTER the reply is written, so the customer is waiting on a

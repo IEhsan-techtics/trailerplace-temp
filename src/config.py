@@ -42,7 +42,7 @@ class Settings:
     feature_llm_rerank_enabled: bool = True
     feature_rerank_model: str = "gpt-5-nano-2025-08-07"
     # gpt-5-nano is the reverse: it rejects "none", and "minimal" is its lowest.
-    feature_rerank_reasoning_effort: str = "minimal"
+    feature_rerank_reasoning_effort: str = "medium"
     feature_rerank_timeout_seconds: float = 60.0
     feature_rerank_batch_size: int = 20
     feature_rerank_max_parallel_batches: int = 4
@@ -168,7 +168,7 @@ class Settings:
             search_max_recommendations=_int(os.getenv("SEARCH_MAX_RECOMMENDATIONS"), 5),
             feature_llm_rerank_enabled=_bool(os.getenv("FEATURE_LLM_RERANK_ENABLED"), True),
             feature_rerank_model=os.getenv("FEATURE_RERANK_MODEL", "gpt-5-nano-2025-08-07"),
-            feature_rerank_reasoning_effort=os.getenv("FEATURE_RERANK_REASONING_EFFORT", "minimal"),
+            feature_rerank_reasoning_effort=os.getenv("FEATURE_RERANK_REASONING_EFFORT", "medium"),
             feature_rerank_timeout_seconds=_float(os.getenv("FEATURE_RERANK_TIMEOUT_SECONDS"), 60.0),
             feature_rerank_batch_size=_int(os.getenv("FEATURE_RERANK_BATCH_SIZE"), 20),
             feature_rerank_max_parallel_batches=_int(os.getenv("FEATURE_RERANK_MAX_PARALLEL_BATCHES"), 4),

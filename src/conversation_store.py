@@ -69,10 +69,16 @@ def session_uuid_for(channel_id: str) -> str:
 
 
 # --------------------------------------------------------------------------- session setup
-def ensure_session(session_id: str) -> str:
+def ensure_session(session_id: str, channel_id: str | None = None) -> str:
     """Make sure a lead and a conversation row exist. Returns the lead id.
 
     Idempotent: calling it on an existing session returns the lead already attached.
+
+    ``channel_id`` is the raw channel identity - a Messenger PSID - when there is one. The
+    conversation does not need it to be found again (``session_uuid_for`` recomputes the
+    session id from it on every webhook), but the LEAD is stored with it so the mapping can
+    also be read the other way: from a lead back to the customer who made it. That direction
+    cannot be recovered later, because the hash is one-way.
     """
     if not persistence_enabled():
         record = _MEMORY.setdefault(
@@ -95,7 +101,7 @@ def ensure_session(session_id: str) -> str:
         # order is not merely tidy, it is required.
         lead = ChatbotLead(
             lead_id=uuid.uuid4(),
-            psid=None,
+            psid=(str(channel_id)[:255] if channel_id else None),
             name=None,
             phone_number=None,
             email=None,
@@ -120,7 +126,9 @@ def ensure_session(session_id: str) -> str:
         return str(lead.lead_id)
 
 
-def open_session(session_id: str) -> tuple[str, dict[str, Any] | None, list[dict[str, Any]]]:
+def open_session(
+    session_id: str, channel_id: str | None = None
+) -> tuple[str, dict[str, Any] | None, list[dict[str, Any]]]:
     """Everything a turn needs to start, in ONE round trip: (lead_id, snapshot, conversation).
 
     ``ensure_session`` and ``load_session`` each did ``sql.get(ChatbotConversation, ...)`` on
@@ -132,7 +140,7 @@ def open_session(session_id: str) -> tuple[str, dict[str, Any] | None, list[dict
     kept, because a caller that only wants one half should not have to take both.
     """
     if not persistence_enabled():
-        lead_id = ensure_session(session_id)
+        lead_id = ensure_session(session_id, channel_id)
         snapshot, conversation, _lead = load_session(session_id)
         return lead_id, snapshot, conversation
 
@@ -145,7 +153,7 @@ def open_session(session_id: str) -> tuple[str, dict[str, Any] | None, list[dict
 
         lead = ChatbotLead(
             lead_id=uuid.uuid4(),
-            psid=None,
+            psid=(str(channel_id)[:255] if channel_id else None),
             name=None,
             phone_number=None,
             email=None,
@@ -196,6 +204,7 @@ def save_turn(
     item_of_interest: str | None = None,
     outbox_events: list[dict[str, Any]] | None = None,
     turn_id: Any = None,
+    channel_id: str | None = None,
 ) -> None:
     """Persist one completed turn.
 
@@ -225,6 +234,8 @@ def save_turn(
             record["contact"] = dict(contact)
         if item_of_interest:
             record["item_of_interest"] = item_of_interest
+        if channel_id and not record.get("psid"):
+            record["psid"] = str(channel_id)
         return
 
     session_uuid = _as_uuid(session_id)
@@ -267,8 +278,8 @@ def save_turn(
                 )
             )
 
-        if contact or item_of_interest:
-            _update_lead(sql, row.lead_id, contact or {}, item_of_interest)
+        if contact or item_of_interest or channel_id:
+            _update_lead(sql, row.lead_id, contact or {}, item_of_interest, channel_id)
 
         sql.commit()
 
@@ -534,7 +545,13 @@ def enqueue_save_user_feedback(
     _FEEDBACK_POOL.submit(save_user_feedback, session_id, turn_idx, text, timestamp_iso, rating=rating)
 
 
-def _update_lead(sql, lead_id, contact: dict[str, Any], item_of_interest: str | None) -> None:
+def _update_lead(
+    sql,
+    lead_id,
+    contact: dict[str, Any],
+    item_of_interest: str | None,
+    channel_id: str | None = None,
+) -> None:
     """Fill in what we have learned about who this is.
 
     A lead becomes 'hard' the moment we hold a name AND either an email or a phone number -
@@ -545,6 +562,13 @@ def _update_lead(sql, lead_id, contact: dict[str, Any], item_of_interest: str | 
     lead = sql.get(ChatbotLead, lead_id)
     if lead is None:
         return
+
+    # Here rather than on the session read: this transaction has the lead loaded already, so
+    # backfilling costs nothing, where checking it on every turn's read would cost a round
+    # trip. A conversation that started before the column was written picks it up on its
+    # next message.
+    if channel_id and not lead.psid:
+        lead.psid = str(channel_id)[:255]
 
     # Only ever fill a blank. A later turn saying "actually I'm Dave's colleague" must not
     # silently overwrite the contact details the lead was qualified on.
@@ -613,6 +637,7 @@ def load_lead(session_id: str) -> dict[str, Any] | None:
             "contact_status": "complete" if complete
             else ("partial" if (name or email or phone) else "missing_contact"),
             "item_of_interest": record.get("item_of_interest") or _PLACEHOLDER_ITEM,
+            "psid": record.get("psid"),
         }
 
     with db.get_session_factory()() as sql:
@@ -630,4 +655,5 @@ def load_lead(session_id: str) -> dict[str, Any] | None:
             "lead_type": lead.lead_type,
             "contact_status": lead.contact_status,
             "item_of_interest": lead.item_of_interest,
+            "psid": lead.psid,
         }

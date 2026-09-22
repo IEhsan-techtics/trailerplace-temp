@@ -197,3 +197,51 @@ def test_the_engine_is_told_all_of_it(monkeypatch):
     assert captured["pool_pre_ping"] is True
     assert captured["connect_args"]["connect_timeout"] == 10
     assert captured["connect_args"]["application_name"] == db.APPLICATION_NAME
+
+
+# ------------------------------------------------------------------------ channel identity
+def test_the_psid_is_stored_on_the_lead(fake_llm):
+    """The conversation is found by hashing the PSID, so nothing NEEDS it stored. The lead
+    keeps it anyway, because the hash cannot be reversed: without this, a lead can never be
+    traced back to the Messenger customer who made it."""
+    from src.conversation_store import load_lead
+    from src.graph.build import run_turn
+
+    from tests.factories import turn_output
+
+    fake_llm.push(turn_output(intent="contact_info_provided", name="Ibrahim"))
+    run_turn("s-psid", "hi, I'm Ibrahim", channel_id="9988776655")
+
+    assert load_lead("s-psid")["psid"] == "9988776655"
+
+
+def test_a_session_that_started_without_one_is_backfilled_on_its_next_message(fake_llm):
+    """Costs nothing: the save transaction has the lead loaded already. A conversation that
+    began before this existed picks it up the next time the customer writes."""
+    from src.conversation_store import load_lead
+    from src.graph.build import run_turn
+
+    from tests.factories import turn_output
+
+    fake_llm.push(turn_output())
+    run_turn("s-backfill", "hello")
+    assert load_lead("s-backfill")["psid"] is None
+
+    fake_llm.push(turn_output())
+    run_turn("s-backfill", "still here", channel_id="9988776655")
+
+    assert load_lead("s-backfill")["psid"] == "9988776655"
+
+
+def test_web_chat_leaves_it_empty(fake_llm):
+    """A browser has no channel identity to store, and a made-up one would be worse than
+    none - it would look like a Messenger customer who cannot be messaged."""
+    from src.conversation_store import load_lead
+    from src.graph.build import run_turn
+
+    from tests.factories import turn_output
+
+    fake_llm.push(turn_output())
+    run_turn("s-web", "hello")
+
+    assert load_lead("s-web")["psid"] is None
