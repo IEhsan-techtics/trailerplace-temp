@@ -66,8 +66,13 @@ def compose_node(state: dict, output: Any) -> dict:
     # them through a tool and formatted the cards itself). Nothing here reassembles it - the
     # only job left is recording which trailers the customer was actually shown.
     if outcome.get("reply_text"):
-        outcome["assistant_text"] = _no_invented_name(
-            state, _with_handoff(outcome, outcome["reply_text"])
+        # Unescaped here too, not only in the cards below. The reply pass quotes a title
+        # straight out of the row it was handed, so the entities that _listing_line has
+        # always stripped came back the moment the model started writing the listings
+        # itself - live: "Yes, this specific trailer is listed as available: 2026 P&amp;C
+        # Utility - 52746".
+        outcome["assistant_text"] = _unescape(
+            _no_invented_name(state, _with_handoff(outcome, outcome["reply_text"]))
         )
         outcome["asked_slot"] = None
         _carry_on_after_lookup(state, outcome)

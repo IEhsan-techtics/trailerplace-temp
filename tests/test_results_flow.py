@@ -648,3 +648,32 @@ def test_the_welcome_is_said_even_when_the_model_opens_with_the_catalogue(fake_l
     assert text.startswith("Thank you for contacting TrailerPlace")
     assert "We carry Utility" in text, "and the model's answer is kept, not replaced"
     assert "May I get your name" in text, "along with its own ask"
+
+
+def test_a_model_written_reply_does_not_leak_html_entities(fake_llm, no_reply_pass):
+    """22 of 259 titles in trailer_listings carry raw entities. The deterministic card
+    renderer has always stripped them; the reply pass quotes the row it was handed, so the
+    same title reached the customer as "2026 P&amp;C Utility" once the model wrote the
+    listings itself."""
+    from src.graph.build import run_turn
+    from src.llm.schemas import ReplyOutput
+
+    from tests.factories import complete_welcome, turn_output
+
+    complete_welcome(fake_llm)
+    # A category first: with none, "show me what you have" is answered with the website
+    # line and the reply pass never runs.
+    fake_llm.push(turn_output(category_mentioned="utility", intent="category_selection"))
+    run_turn("s1", "utility trailer")
+
+    fake_llm.push(turn_output(intent="skip_all_show_results"))
+    no_reply_pass.push(
+        ReplyOutput(
+            assistant_text="Here it is: 2026 P&amp;C Utility - 52746, ready to go.",
+            cited_listing_urls=[],
+        )
+    )
+    result = run_turn("s1", "just show me what you have")
+
+    assert "P&C Utility" in result["assistant_text"]
+    assert "&amp;" not in result["assistant_text"]
