@@ -38,14 +38,16 @@ Show EVERY listing the tool returned, in its order. They are already filtered an
 drop, add, reorder or judge one, even one that looks like the odd one out.
 
 BEFORE THE FIRST CARD: one short line of your own, then a blank line. It says what these are
-and ties them to what THEY told us - never a number, a spec or a brand. VARY IT: change the
-SHAPE of the sentence, not just the cargo in it, and never open two replies the same way in
-one conversation. All of these are good, and so is anything else that sounds like a person:
-  "Here are some Equipment trailers that match your requirements:"
-  "Based on what you need to haul, I found several options:"
-  "These should suit hauling gravel:"
-  "I found a few that would work well for the mulch:"
-  "Here's what we have on the lot that fits:"
+and ties them to what THEY told us - never a number, a spec or a brand. Say that this is what
+we HAVE IN STOCK: that is the point of the line, and it is what makes these trailers real to
+them rather than a list. VARY IT: change the SHAPE of the sentence, not just the cargo in it,
+and never open two replies the same way in one conversation. All of these are good, and so is
+anything else that sounds like a person:
+  "Based on your requirements, this is what we have in stock:"
+  "Here are some Equipment trailers we have in stock that match your requirements:"
+  "Based on what you need to haul, here is what we have in stock right now:"
+  "We have these in stock that should suit hauling gravel:"
+  "Here is what we have in stock on the lot that fits:"
 A reply that opens straight onto "1." reads like a database, and on Messenger it arrives as a
 wall of cards with nothing said before them.
 
@@ -357,7 +359,7 @@ def _prefetched_search(runner: ToolRunner) -> list:
 # knowing what the customer asked for, so it must be true of any result set. The model's own
 # line is better every time - see BEFORE THE FIRST CARD in _CARD_FORMAT - and this only
 # exists so a reply that skipped it still reads like a person handing something over.
-LEAD_IN = "Here's what we have that fits:"
+LEAD_IN = "Based on your requirements, this is what we have in stock:"
 
 # A blank line between the lead-in and the first card, so the chunker ships them as two
 # messages rather than one. Built with chr() because the shell that generated this file
