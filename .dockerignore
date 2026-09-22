@@ -1,0 +1,26 @@
+# Build context only. Everything here is either rebuilt inside the image or never read by
+# it; without this the context is hundreds of megabytes of virtualenv and git history.
+.venv/
+.git/
+.github/
+logs/
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Secrets stay out of the image. Every setting is read from os.getenv, so Azure Container
+# Apps supplies them as environment variables - baking a .env into a layer puts live
+# credentials in the registry, where anyone who can pull the image can read them.
+.env
+.env.*
+
+# Not part of the deployed service.
+app.py
+scripts/
+tests/
+pytest.ini
+*.md
+~$*
