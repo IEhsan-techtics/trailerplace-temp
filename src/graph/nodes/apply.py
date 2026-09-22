@@ -45,7 +45,7 @@ from src.tools.category import (
 from src.rules.engine import apply_rules, mark_user_value
 from src.rules.store import current_rules
 from src.tools.filters import apply_extracted_fields
-from src.tools import team_notify, unavailable
+from src.tools import scope, team_notify, unavailable
 from src.tools.lookup_gate import brand_is_lookup_make, referenced_listing
 from src.tools.questions import (
     all_required_resolved,
@@ -78,6 +78,7 @@ def apply_node(state: dict, output: Any, user_message: str = "") -> dict:
     _apply_shared_link(state, output, user_message)
     _apply_listing_interest(state, output)
     _apply_unavailable_type(state, output)
+    _apply_off_topic(state, output)
     handled = _apply_pending_confirmations(state, output, user_message)
     _apply_gooseneck(state, output, user_message)
     if not handled:
@@ -324,6 +325,18 @@ def _apply_listing_interest(state: dict, output: Any) -> None:
     logger.info(
         "LISTING interest: session=%s title=%r status=%s", state.get("session_id"), title, status,
     )
+
+
+def _apply_off_topic(state: dict, output: Any) -> None:
+    """They asked about something that has nothing to do with us. Compose says so.
+
+    Nothing is stored and nobody is emailed: there is no lead in "how do I make a sandwich",
+    and a team told about every stray message stops reading the ones that matter.
+    """
+    if not scope.is_off_topic(output):
+        return
+    state.setdefault("turn_outcome", {})["off_topic"] = True
+    logger.info("OFF-TOPIC turn: session=%s", state.get("session_id"))
 
 
 def _apply_unavailable_type(state: dict, output: Any) -> None:

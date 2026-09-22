@@ -49,6 +49,19 @@ def compose_node(state: dict, output: Any) -> dict:
         _note_contact_ask(state, outcome["assistant_text"])
         return state
 
+    # Nothing in the message was about trailers. The decline owns the turn - before the
+    # welcome, so a first message asking for a recipe is answered rather than greeted past,
+    # and greeting.OPENING still leads because it leads every first reply.
+    if outcome.get("off_topic"):
+        from src.tools import scope
+
+        text, slot = scope.reply(state, output, first_turn=_is_first_turn(state))
+        outcome["assistant_text"] = text
+        outcome["asked_slot"] = slot
+        mark_asked(state, slot)
+        _note_contact_ask(state, text)
+        return state
+
     # The reply pass already wrote this turn (it had listings to present, so the model saw
     # them through a tool and formatted the cards itself). Nothing here reassembles it - the
     # only job left is recording which trailers the customer was actually shown.

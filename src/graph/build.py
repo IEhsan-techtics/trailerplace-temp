@@ -114,6 +114,12 @@ def _tools_and_reply(state: dict, output: Any, user_message: str) -> None:
         # A type we do not carry owns the turn: the team has been told and compose writes
         # the fixed reply. Running the reply pass too would risk a second escalation email.
         return
+    if outcome.get("off_topic"):
+        # Nothing here is about trailers, so there is nothing to look up and nothing for the
+        # reply pass to present. Returning is also what keeps the decline a decline: the
+        # reply pass writes freely, and a model asked to answer a question it has been told
+        # to refuse is the one place this could leak.
+        return
     targets = _route(state, output)
     needs_person = _needs_a_person(state, output)
     if not (targets or needs_person):

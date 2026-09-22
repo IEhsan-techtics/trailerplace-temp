@@ -49,7 +49,7 @@ def qualified_state(**kwargs):
 # Raised from 14,000 for the AXLES rule (~750 chars; live 14,303). Without it the model called
 # a bare "14,000 lbs of axle capacity" TOTAL in the same reply that asked per axle or total -
 # half of the clarification questions in the live axles run contradicted themselves.
-MAX_SYSTEM_PROMPT_CHARS = 14_500
+MAX_SYSTEM_PROMPT_CHARS = 15_200
 
 
 def test_the_system_prompt_stays_short():
@@ -58,7 +58,7 @@ def test_the_system_prompt_stays_short():
 
     NOTE: this measures the prompt built from the SIX fixture makes in conftest, not the
     real catalogue. Against the live database the same prompt is about 250 characters
-    longer - measured at 14,528 on 2026-09-21 - so this ceiling is a floor on the real
+    longer - measured at 15,558 on 2026-09-22 - so this ceiling is a floor on the real
     one, not the real one. Use ``python -c "from src.llm.prompt import system_prompt;
     print(len(system_prompt()))"`` against a live .env to see what is actually sent.
     """

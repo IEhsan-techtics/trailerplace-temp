@@ -75,6 +75,7 @@ def empty_output(reason: str = "") -> ChatbotTurnOutput:
         unavailable_type_requested=None,
         listing_reference=None,
         shared_link_interest=False,
+        off_topic=False,
         dropped_fields=[],
         acknowledgement="",
         answer_to_customer_question=None,

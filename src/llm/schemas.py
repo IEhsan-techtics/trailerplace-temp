@@ -195,6 +195,9 @@ class ChatbotTurnOutput(StrictBaseModel):
     shared_link_interest: bool = Field(
         description="They shared a link to a trailer (ours, Facebook, Instagram) and want it or ask about it."
     )
+    off_topic: bool = Field(
+        description="True only when the WHOLE message is nothing to do with us (see OFF TOPIC)."
+    )
     dropped_fields: list[str] = Field(description="Fields they asked to drop.")
 
     # --- reply pieces: there is no second call, so the prose is authored here ---
