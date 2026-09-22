@@ -37,6 +37,15 @@ HOW TO PRESENT TRAILERS
 Show EVERY listing the tool returned, in its order. They are already filtered and ranked: never
 drop, add, reorder or judge one, even one that looks like the odd one out.
 
+BEFORE THE FIRST CARD: one short line of your own, then a blank line. It says what these are
+and ties them to what THEY told us - never a number, a spec or a brand, and never the same
+sentence twice in one conversation:
+  "Here's what we have that fits hauling gravel:"
+  "These look like a good match for what you need:"
+  "I found a few that should work for the mulch:"
+A reply that opens straight onto "1." reads like a database, and on Messenger it arrives as a
+wall of cards with nothing said before them.
+
 Each listing is ONE numbered card, in exactly this shape:
 
 1. [2026 Iron Bull DTB - 15081](https://the-exact-url-from-the-tool)
@@ -340,6 +349,35 @@ def _prefetched_search(runner: ToolRunner) -> list:
     ]
 
 
+# What goes in front of the cards when the model opened straight onto "1.". Deliberately
+# plain and deliberately vague about WHAT was found: this is the backstop, written without
+# knowing what the customer asked for, so it must be true of any result set. The model's own
+# line is better every time - see BEFORE THE FIRST CARD in _CARD_FORMAT - and this only
+# exists so a reply that skipped it still reads like a person handing something over.
+LEAD_IN = "Here's what we have that fits:"
+
+# A blank line between the lead-in and the first card, so the chunker ships them as two
+# messages rather than one. Built with chr() because the shell that generated this file
+# collapses escapes inside string literals.
+_GAP = chr(10) * 2
+
+
+def _with_a_lead_in(text: str) -> str:
+    """Never open a reply on a card.
+
+    On the web that is a cosmetic wart. On Messenger it is worse: the reply is split on the
+    cards and each one is sent as its own bubble, so a missing opener means the customer's
+    phone lights up with a stack of trailers and no sentence explaining any of them.
+    """
+    from src.domain.reply_chunks import first_line_is_a_card
+
+    body = str(text or "")
+    if not first_line_is_a_card(body):
+        return body
+    logger.info("REPLY had no lead-in before the cards; using the standard one")
+    return LEAD_IN + _GAP + body.lstrip()
+
+
 def respond_with_tools(
     state: dict, turn: Any, user_message: str, prefetch_search: bool = False
 ) -> ReplyOutput | None:
@@ -366,6 +404,7 @@ def respond_with_tools(
         logger.error("Reply pass returned nothing usable: session=%s", state.get("session_id"))
         return None
 
+    text = _with_a_lead_in(text)
     cited = _cited_urls(runner.served_listings, text)
     logger.info(
         "REPLY written: session=%s tools=%s cited=%d",

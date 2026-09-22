@@ -368,7 +368,8 @@ def drain_inbound(
                 return has_inbound_beyond(session_id, _ids, channel)
 
             try:
-                with _keep_alive(turn_session, transport):
+                # Both ids: the session for turn_status, the PSID for anything sent.
+                with _keep_alive(turn_session, transport, recipient_id=session_id):
                     result = answer(
                         turn_session, message, turn_id=turn_id,
                         abandon_if=None if last_attempt else said_more,
@@ -410,14 +411,14 @@ def drain_inbound(
 
 
 @contextmanager
-def _keep_alive(turn_session: str, transport: Any):
+def _keep_alive(turn_session: str, transport: Any, *, recipient_id: str | None = None):
     """Show them we are on it while the turn runs. Nothing at all without a transport."""
     if transport is None:
         yield None
         return
     from src.channel_delivery import TurnKeepAlive
 
-    with TurnKeepAlive(turn_session, transport) as alive:
+    with TurnKeepAlive(turn_session, transport, recipient_id=recipient_id) as alive:
         yield alive
 
 

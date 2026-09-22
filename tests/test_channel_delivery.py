@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+import time
+
 import pytest
 
 from src import channel_delivery, config, turn_status
@@ -208,3 +210,42 @@ def _wait_until(predicate, timeout: float = 2.0) -> None:
             return
         time.sleep(0.01)
     raise AssertionError("condition never became true")
+
+
+def test_the_keep_alive_addresses_the_channel_identity_not_the_session():
+    """Live, every keep-alive send was addressed to the turn's UUID and Meta rejected all
+    of them - "(#100) Param recipient[id]". The answer still arrived, because deliver()
+    uses the PSID, so it read as a missing feature rather than a bug: the customer saw
+    their trailers but never the typing dots or the search line."""
+    import uuid
+
+    from src import turn_status
+    from src.channel_delivery import TurnKeepAlive
+
+    psid = "1234567890123456"
+    session = str(uuid.uuid5(uuid.NAMESPACE_URL, f"trailerplace-session:{psid}"))
+    recorded: list[tuple[str, str]] = []
+
+    class Transport:
+        def send_text(self, to, text):
+            recorded.append((to, "text"))
+
+        def send_card(self, to, element):
+            recorded.append((to, "card"))
+
+        def send_action(self, to, action):
+            recorded.append((to, action))
+
+    turn_status.publish(session, "Let me see what we have on the lot for you.")
+    try:
+        with TurnKeepAlive(session, Transport(), recipient_id=psid, poll_seconds=0.05) as alive:
+            time.sleep(0.25)
+    finally:
+        turn_status.clear(session)
+
+    assert recorded, "the keep-alive sent nothing at all"
+    assert {to for to, _ in recorded} == {psid}, (
+        f"everything must go to the PSID; saw {sorted({to for to, _ in recorded})}"
+    )
+    assert session not in {to for to, _ in recorded}
+    assert alive.status_sent, "the search line is keyed by the SESSION, so it must still be found"

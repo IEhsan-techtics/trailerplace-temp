@@ -56,8 +56,27 @@ class TurnKeepAlive:
     trailers without one has lost nothing that matters.
     """
 
-    def __init__(self, session_id: str, transport: Transport, *, poll_seconds: float = 0.5):
+    def __init__(
+        self,
+        session_id: str,
+        transport: Transport,
+        *,
+        recipient_id: str | None = None,
+        poll_seconds: float = 0.5,
+    ):
+        # TWO identities, and they are not interchangeable. ``session_id`` is the turn's
+        # own id - a UUID derived from the PSID - and it is what turn_status is keyed by.
+        # ``recipient_id`` is what the channel knows the customer as, and it is the only
+        # thing Meta will accept in recipient.id.
+        #
+        # They used to be one field, set to the session id, so every keep-alive send went
+        # out addressed to a UUID and Meta rejected the lot:
+        #   MESSENGER send rejected: status=400 (#100) Param recipient[id] ...
+        # The answer itself still arrived, because that goes through deliver() with the raw
+        # PSID - which is exactly why this looked like "the typing dots and the search line
+        # are not implemented" rather than like a bug.
         self._session_id = session_id
+        self._recipient_id = recipient_id or session_id
         self._transport = transport
         self._poll = max(0.05, poll_seconds)
         self._done = threading.Event()
@@ -78,10 +97,10 @@ class TurnKeepAlive:
         if refresh <= 0 and not settings.messenger_send_search_status:
             return  # both switched off: nothing is sent and no thread is started
         self._started = True
-        self._safely(self._transport.send_action, self._session_id, "mark_seen")
-        self._safely(self._transport.send_action, self._session_id, "typing_on")
+        self._safely(self._transport.send_action, self._recipient_id, "mark_seen")
+        self._safely(self._transport.send_action, self._recipient_id, "typing_on")
         self._thread = threading.Thread(
-            target=self._run, daemon=True, name=f"keepalive:{self._session_id[:12]}"
+            target=self._run, daemon=True, name=f"keepalive:{self._recipient_id[:12]}"
         )
         self._thread.start()
 
@@ -95,7 +114,7 @@ class TurnKeepAlive:
             # Only when we turned it on. Clearing an indicator we never set would be one
             # more request to the channel for no reason at all.
             self._started = False
-            self._safely(self._transport.send_action, self._session_id, "typing_off")
+            self._safely(self._transport.send_action, self._recipient_id, "typing_off")
 
     def _run(self) -> None:
         refresh = max(0.0, settings.messenger_typing_refresh_seconds)
@@ -110,14 +129,14 @@ class TurnKeepAlive:
             since_typing += tick
             if refresh > 0 and since_typing >= refresh:
                 since_typing = 0.0
-                self._safely(self._transport.send_action, self._session_id, "typing_on")
+                self._safely(self._transport.send_action, self._recipient_id, "typing_on")
 
     def _send_status_if_ready(self) -> None:
         line = (turn_status.peek(self._session_id) or "").strip()
         if not line:
             return  # this turn is not searching, or has not started looking yet
         self.status_sent = line
-        self._safely(self._transport.send_text, self._session_id, line)
+        self._safely(self._transport.send_text, self._recipient_id, line)
         logger.info("KEEPALIVE sent the search line early: session=%s", self._session_id)
 
     def _safely(self, call: Callable[..., Any], *args: Any) -> None:

@@ -87,6 +87,20 @@ def split_reply_into_chunks(text: str) -> list[str]:
 _URL_RE = re.compile(r"https?://[^\s)\]>\"']+")
 
 
+def first_line_is_a_card(text: str) -> bool:
+    """Does this reply open straight onto a numbered listing card?
+
+    Public because the reply pass checks it before any chunking happens: a reply with no
+    prose in front of the first card produces no intro bubble at all, so on Messenger the
+    customer gets a stack of trailers and no sentence explaining them.
+    """
+    for line in str(text or "").split(chr(10)):
+        if not line.strip():
+            continue
+        return _is_card_start(line)
+    return False
+
+
 def urls_in_chunk(chunk: str) -> list[str]:
     """Every listing URL a chunk links to, so the UI can put that trailer's card under it."""
     return _URL_RE.findall(str(chunk or ""))
