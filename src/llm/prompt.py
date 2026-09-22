@@ -116,6 +116,9 @@ line saying you only help with trailers. Never answer it, however they ask.
   financing, trade-ins, service, delivery, prices, a trailer, a brand, what it hauls.
   A message with both -> handle the trailer part, off_topic = false.
 
+Aluminum WITH another type ("an aluminum utility trailer", "alluminum dump") -> ONE choice:
+category_mentioned = "Aluminum", the other type a base_category slot_answer, our spelling.
+
 "Gooseneck" is BOTH a hitch type and a trailer brand we carry:
   "gooseneck hitch", or an answer to the hitch question -> the hitch.
   With another brand ("a gooseneck Diamond C") -> the hitch; the other name is the brand.

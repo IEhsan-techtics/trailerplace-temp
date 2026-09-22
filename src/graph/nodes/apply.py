@@ -33,6 +33,7 @@ from src.graph.nodes import greeting
 from src.domain.slot_map import (
     axle_count_out_of_range,
     brand_is_actually_a_hitch,
+    length_ft_to_bin_yards as slot_map_bin_yards,
     slot_value_kind,
 )
 from src.tools.category import (
@@ -94,6 +95,7 @@ def apply_node(state: dict, output: Any, user_message: str = "") -> dict:
     record_no_preference(state, result.no_preference)
     _apply_axles(state, output, user_message, result)
 
+    _apply_roll_off_bin(state)
     _apply_question_rules(state, output)
     _apply_haul_item_suggestion(state, result)
     _apply_attempts(state, output, result)
@@ -587,6 +589,27 @@ def _apply_brand(state: dict, output: Any, user_message: str) -> None:
 
 
 # ---------------------------------------------------------------- 5b. question rules
+def _apply_roll_off_bin(state: dict) -> None:
+    """A roll-off length and its bin size are one fact, so either one answers the other.
+
+    A 10 yd bin rides a 9 ft trailer. A customer who opens with "I need a 19 ft roll off"
+    has told us they want a 20 yd bin, and the only required question for the category is
+    the bin size - so asking it would be asking them to say the same thing twice.
+    """
+    if state.get("category") != "Roll Off":
+        return
+    slots = state.setdefault("slots", {})
+    length = slots.get("length")
+    if slots.get("bin_size") or not isinstance(length, (int, float)):
+        return
+    slots["bin_size"] = slot_map_bin_yards(length)
+    mark_user_value(state, "bin_size")
+    logger.info(
+        "ROLL OFF bin read off the length they gave: session=%s %s ft -> %s yd",
+        state.get("session_id"), length, slots["bin_size"],
+    )
+
+
 def _apply_question_rules(state: dict, output: Any) -> None:
     """Record what the cargo is like, then let the rules settle this turn's questions.
 

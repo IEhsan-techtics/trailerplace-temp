@@ -50,11 +50,16 @@ def test_what_they_said_is_stored_correctly(slot, said, reading, stored):
 @pytest.mark.parametrize("slot, unit", [
     ("length", "lb"),        # a weight for a length
     ("payload_capacity", "ft"),
-    ("bin_size", "ft"),      # bins are yardage
     ("tank_capacity", "kg"),
 ])
 def test_a_unit_that_does_not_fit_the_slot_is_refused(slot, unit):
     assert quantities.to_canonical(slot, q(slot, 10, unit)) is None
+
+
+def test_a_bin_answered_in_feet_is_the_trailer_under_it():
+    """A bin and its trailer are one fact, off by one: "a 9 ft one" is a 10 yd bin. Feet
+    used to be refused here, which left the answer to the regex parser."""
+    assert quantities.to_canonical("bin_size", q("bin_size", 9, "ft")) == 10.0
 
 
 def test_slots_without_a_quantity_kind_are_not_handled():

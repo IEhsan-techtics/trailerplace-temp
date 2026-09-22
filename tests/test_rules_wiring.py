@@ -36,6 +36,12 @@ def test_every_category_asks_exactly_what_it_asked_before_the_rules(category):
         # The lightweight-handling note described a behaviour that did not exist; the skip
         # rule is that behaviour now, so the note went.
         assert "lightweight" in before.pop("notes") and "lightweight" not in after.pop("notes")
+    if category == "Roll Off":
+        # The bin guidance used to map a yardage straight onto the length (15 yd -> 15 ft).
+        # A bin and the trailer under it are one fact, off by one - a 10 yd bin rides a 9 ft
+        # trailer - and either number now answers the other, so the wording had to say so.
+        assert "not 45 ft" in before["answer_guidance"].pop("bin_size")
+        assert "off by one" in after["answer_guidance"].pop("bin_size")
     assert after == before
 
 

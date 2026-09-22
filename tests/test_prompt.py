@@ -49,7 +49,12 @@ def qualified_state(**kwargs):
 # Raised from 14,000 for the AXLES rule (~750 chars; live 14,303). Without it the model called
 # a bare "14,000 lbs of axle capacity" TOTAL in the same reply that asked per axle or total -
 # half of the clarification questions in the live axles run contradicted themselves.
-MAX_SYSTEM_PROMPT_CHARS = 15_400
+#
+# Raised from 15,400 for the ALUMINUM rule (~185 chars; live 15,690 on 2026-09-22). A
+# customer who says "an aluminum utility trailer" has made one choice, not two, and
+# Python reads the pairing too - but only from words it recognizes, and people misspell
+# both halves.
+MAX_SYSTEM_PROMPT_CHARS = 15_600
 
 
 def test_the_system_prompt_stays_short():

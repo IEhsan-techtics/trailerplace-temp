@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+
+from rapidfuzz import fuzz
 from dataclasses import dataclass
 from typing import Optional
 
@@ -221,6 +223,40 @@ def _direct_category_from_text(text: str) -> Optional[str]:
 def _direct_category_tier_from_text(text: str) -> Optional[str]:
     matches = _ranked_category_matches((text or "").lower())
     return matches[0][1] if matches else None
+
+
+def closest_category_name(text: str) -> Optional[str]:
+    """The category a MISSPELLED type name was reaching for, or None.
+
+    The term lists are exact, so "utilty" or "alluminum" resolve to nothing at all - and a
+    slot answer that resolves to nothing is recorded as "no preference", which quietly
+    throws away a choice the customer did make. People misspell these words constantly, and
+    the model passes the misspelling straight through when it is quoting them.
+
+    Deliberately narrow. A one-word term is matched word by word, a phrase against the
+    whole answer, and nothing under 88 counts - so "whatever is in stock" is not read as
+    Livestock on the strength of one word. What it finds is a SPELLING, which then goes
+    through the ordinary resolver, so this can never name a category that resolver would
+    not.
+    """
+    low = (text or "").lower()
+    words = [word for word in re.findall(r"[a-z]+", low) if len(word) >= 4]
+    if not words:
+        return None
+
+    best_term, best_score = "", 0.0
+    for terms in _NAMING_TERMS.values():
+        for term in terms:
+            if " " in term:
+                score = fuzz.ratio(term, low)
+            else:
+                score = max(fuzz.ratio(word, term) for word in words)
+            if score >= 88 and score > best_score:
+                best_term, best_score = term, score
+    if not best_term:
+        return None
+    matches = resolve_categories_from_text(best_term)
+    return matches[0] if matches else None
 
 
 def resolve_categories_from_text(text: str) -> list[str]:

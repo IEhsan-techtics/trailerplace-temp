@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from src.domain.categories import resolve_categories_from_text
+from src.domain.categories import closest_category_name, resolve_categories_from_text
 from src.domain.normalizer import normalize_category
 from src.domain.units import (
     _range_candidates,
@@ -96,7 +96,12 @@ def normalize_subcategory_answer(raw_answer: Any) -> Any:
     if not text:
         return None
     matches = resolve_categories_from_text(text)
-    return matches[0] if matches else None
+    if matches:
+        return matches[0]
+    # "utilty", "alluminum": the model quotes the customer, and people misspell these
+    # words constantly. Dropped, the answer counts as no preference and the choice they
+    # did make is lost.
+    return closest_category_name(text)
 
 
 # "I want it in Gooseneck" is a hitch. "I want a Gooseneck" is... also usually a hitch —
@@ -301,12 +306,33 @@ def _is_number(value: Any) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
-def _normalize_roll_off_bin_size_as_length(value: Any) -> float | None:
-    """Bin size is yardage, mapped directly to a length_ft NUMBER (15 yd -> 15, not a unit
-    conversion) - so it follows the same range/vague rules as any other measurement: a
-    range ("15-20 yd") takes the smallest side, and a vague answer with no number at all
-    ("as big as you have") is null.
-    """
+# A roll-off bin and the trailer that carries it are one fact, off by one: a 10 yd bin
+# rides a 9 ft trailer, a 20 yd bin a 19 ft one. It is a yardage against a length, so it is
+# not a unit conversion (3 ft to the yard would make a 20 yd bin a 60 ft trailer, longer
+# than anything built). Either number tells us the other, which is why a customer who gives
+# one is never asked for the other.
+_BIN_YARDS_OVER_TRAILER_FEET = 1.0
+
+
+def bin_yards_to_length_ft(yards: float) -> float:
+    """The trailer under a bin of this many yards."""
+    return round(float(yards) - _BIN_YARDS_OVER_TRAILER_FEET, 2)
+
+
+def length_ft_to_bin_yards(feet: float) -> float:
+    """The bin a trailer of this length carries."""
+    return round(float(feet) + _BIN_YARDS_OVER_TRAILER_FEET, 2)
+
+
+# Which unit they said it in. A roll-off answer is a bare number more often than not, so
+# the markers decide only when there are any; the SLOT decides otherwise - the bin question
+# is answered in yards, a length in feet.
+_FEET_SAID = re.compile(r"(?<!\w)(ft|foot|feet)(?!\w)|['′]")
+_YARDS_SAID = re.compile(r"(?<!\w)(yd|yds|yard|yards|cy)(?!\w)|cu\.?\s*yd")
+
+
+def _smallest_number_in(value: Any) -> float | None:
+    """The number an answer carries: a range takes its smaller side, vague text is null."""
     if _is_number(value):
         return float(value)
     text = str(value or "").strip().lower().replace(",", "")
@@ -321,13 +347,41 @@ def _normalize_roll_off_bin_size_as_length(value: Any) -> float | None:
     return float(matches[0]) if matches else None
 
 
+def roll_off_bin_yards(value: Any) -> float | None:
+    """What a roll-off answer means as a BIN SIZE, in yards.
+
+    "20", "20 yd" and "20 cubic yards" are all a 20 yd bin. "19 ft" is the trailer, and the
+    bin it carries is 20 yd - so answering the bin question with a length still answers it.
+    """
+    number = _smallest_number_in(value)
+    if number is None:
+        return None
+    text = str(value or "").lower()
+    if _FEET_SAID.search(text) and not _YARDS_SAID.search(text):
+        return length_ft_to_bin_yards(number)
+    return number
+
+
+def roll_off_length_ft(value: Any) -> float | None:
+    """What a roll-off answer means as a trailer LENGTH, in feet.
+
+    Yardage is a bin, so it comes back one foot shorter. Anything else is already a length.
+    """
+    number = _smallest_number_in(value)
+    if number is None:
+        return None
+    if _YARDS_SAID.search(str(value or "").lower()):
+        return bin_yards_to_length_ft(number)
+    return number
+
+
 def normalize_slot_value(category: str, key: str, value: Any) -> Any:
     if _is_number(value):
         return float(value)
 
     if key in {"length_ft", "width_ft", "height_ft"}:
         if key == "length_ft" and normalize_category(category) == "Roll Off":
-            return _normalize_roll_off_bin_size_as_length(value)
+            return roll_off_length_ft(value)
         # "8x25"/"8x25x6.5" carries multiple dimensions: pull out the one this key asks for.
         dims = parse_dimensions(value)
         if dims:
@@ -362,6 +416,10 @@ def normalize_slot_targets(category: str, slot_name: str, value: Any) -> dict[st
     spreads across the targets when the answer really does carry several dimensions
     ("8x25", "8x20x7").
     """
+    if slot_name == "bin_size":
+        yards = roll_off_bin_yards(value)
+        return {"length_ft": bin_yards_to_length_ft(yards)} if yards else {}
+
     targets = _SLOT_METADATA_FILTER_MAP.get(slot_name, ())
     dimension_targets = set(targets) & _DIMENSION_TARGETS
     one_number_only = len(dimension_targets) > 1 and parse_dimensions(value) is None
@@ -582,6 +640,11 @@ def normalize_answer_for_slot(category: str, slot_name: str, value: Any) -> Any:
     hitch_type, or a vague reply for subcategory - is null. Free-text slots (haul_item and
     similar) have no kind here and are stored completely as-is, however vague.
     """
+    if slot_name == "bin_size":
+        # Yards, not feet: the slot holds the BIN, and the trailer under it is worked out
+        # when the filters are built. A length answers it too ("a 19 ft one" is a 20 yd bin).
+        yards = roll_off_bin_yards(value)
+        return None if not yards else yards
     kind = _SLOT_VALUE_KIND.get(slot_name)
     if kind is None:
         return None if is_non_answer(value) else value

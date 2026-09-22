@@ -66,20 +66,13 @@ def supports(slot: str) -> bool:
     return _kind(slot) is not None
 
 
-def _roll_off_yardage(category: Any, kind: str | None, unit: str) -> bool:
-    """A Roll Off length given in yards is a BIN SIZE, not 3 feet to the yard.
-
-    "I need a 20 yard roll off" is the whole trade's way of naming the bin, and we store
-    that yardage straight into length_ft by a business rule (see slot_map). Converted as a
-    measurement it becomes a 60 ft trailer, which we do not sell and which returns nothing.
-    The raw-text parser already knows this; the quantity path did not, so it depended on
-    which of the two read the answer.
-    """
-    return (
-        kind in {"length_ft", "width_ft", "height_ft"}
-        and unit in _BIN_YARDS
-        and slot_map.normalize_category(str(category or "")) == "Roll Off"
-    )
+def _smaller_end(quantity: Any) -> float | None:
+    """The number as meant: a range is its smaller end, whatever the model put first."""
+    low = _field(quantity, "low")
+    if low is None:
+        return None
+    high = _field(quantity, "high")
+    return min(float(low), float(high)) if high is not None else float(low)
 
 
 def to_canonical(slot: str, quantity: Any, category: Any = None) -> float | None:
@@ -91,17 +84,30 @@ def to_canonical(slot: str, quantity: Any, category: Any = None) -> float | None
     kind = _kind(slot)
     if kind is None:
         return None
+    unit = str(_field(quantity, "unit") or "")
+    value = _smaller_end(quantity)
+    if value is None:
+        return None
+
+    # Roll Off: a bin's yardage and the trailer's length are one fact, off by one (10 yd on
+    # 9 ft). Converted as a measurement instead - 3 ft to the yard - a 20 yd bin becomes a
+    # 60 ft trailer, longer than anything built, and the search returns nothing. The
+    # raw-text parser has always known this; the quantity path did not, so which of the two
+    # read the answer decided what we searched for.
+    roll_off = slot_map.normalize_category(str(category or "")) == "Roll Off"
+    if slot == "bin_size":
+        if unit in _BIN_YARDS:
+            return round(value, 2)
+        if unit in _TO_FEET:
+            return slot_map.length_ft_to_bin_yards(value * _TO_FEET[unit])
+        return None
+    if roll_off and kind == "length_ft" and unit in _BIN_YARDS:
+        return slot_map.bin_yards_to_length_ft(value)
+
     table = _TABLE_BY_SLOT.get(slot) or _TABLE_BY_KIND[kind]
-    if _roll_off_yardage(category, kind, str(_field(quantity, "unit") or "")):
-        table = _BIN_YARDS
-    factor = table.get(str(_field(quantity, "unit") or ""))
+    factor = table.get(unit)
     if factor is None:
         return None
-    low = _field(quantity, "low")
-    if low is None:
-        return None
-    high = _field(quantity, "high")
-    value = min(float(low), float(high)) if high is not None else float(low)
     return round(value * factor, 2)
 
 

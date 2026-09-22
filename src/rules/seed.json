@@ -183,7 +183,7 @@
         "cdl_concern": "Is staying under CDL weight thresholds a concern for you?"
       },
       "answer_guidance": {
-        "bin_size": "Store the requested bin size, including cubic-yard wording such as 10 yd or 20 yd. For search, map its numeric value directly to trailer length_ft: 15 yd means length_ft='15 ft', not 45 ft; for a range, use the smallest value.",
+        "bin_size": "Store the requested bin size in cubic yards, such as 10 yd or 20 yd; for a range, use the smallest value. A bin and the trailer under it are one fact, off by one - a 10 yd bin rides a 9 ft trailer - so a length answers this question too, and Python works out the other number for the search.",
         "deck_style": "Store the preferred deck style such as step deck or standard deck.",
         "cdl_concern": "Store whether staying under CDL-related limits matters to the customer."
       },
