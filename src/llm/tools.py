@@ -357,7 +357,10 @@ class ToolRunner:
                 f"NOT {brand.upper()}: nothing from {brand} matched their requirements, so these "
                 f"are the closest we have from OTHER makes. OPEN your reply with one honest "
                 f"sentence saying we do not currently have a {brand} matching what they asked "
-                "for, and that these are close alternatives from other brands. Then show every "
+                "for, and that these are close alternatives from other brands - like: "
+                f"\"We don't currently have a {brand} matching your requirements in our "
+                'inventory, but here are a few alternatives from other brands that could work '
+                'well for you:". Your own natural words, same meaning. Then show every '
                 f"card as normal. Never imply any of these IS a {brand}."
             )
 
@@ -368,9 +371,12 @@ class ToolRunner:
                 "ALTERNATIVES, NOT EXACT MATCHES: nothing in stock met every requirement they "
                 f"gave, so these are the closest we have{on}. OPEN your reply with one honest, "
                 "matter-of-fact sentence saying BOTH that no trailer matches all their "
-                "requirements and that these are close alternatives that could still suit them. "
-                "Then show every card as normal. Never present these as exact matches, and "
-                "never imply one meets the requirement it misses."
+                "requirements and that these are close alternatives that could still suit them "
+                "- like: \"We don't currently have a trailer in our inventory that matches all "
+                f"of your requirements{on}, but here are a few close alternatives that could "
+                'work well for you:". Your own natural words, same meaning. Then show every '
+                "card as normal. Never present these as exact matches, and never imply one "
+                "meets the requirement it misses."
             )
 
         return ""
