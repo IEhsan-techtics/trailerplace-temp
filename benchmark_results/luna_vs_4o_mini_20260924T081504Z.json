@@ -1,0 +1,822 @@
+[
+  {
+    "model": "gpt-5.6-luna",
+    "effort": "none",
+    "temperature": null,
+    "status": "completed",
+    "response_id": "resp_0521a18af07b310e016ab4dc0b581487d2b5ab8a07f76705c8",
+    "seconds_total": 3.247,
+    "seconds_first_event": 2.469,
+    "seconds_first_text": 2.668,
+    "seconds_visible_generation": 0.578,
+    "input_tokens": 15048,
+    "output_tokens": 53,
+    "reasoning_tokens": 0,
+    "visible_tokens_estimate": 53,
+    "visible_tokens_per_second": 91.66,
+    "output_tokens_per_second_end_to_end": 16.33,
+    "answer": "{\"CASE-1\":\"ZONE-41\",\"CASE-2\":\"ZONE-42\",\"CASE-3\":\"ZONE-43\",\"CASE-4\":\"ZONE-44\",\"CASE-5\":\"ZONE-45\",\"CASE-6\":\"ZONE-46\"}",
+    "quality": {
+      "correct": 6,
+      "total": 6,
+      "details": {
+        "CASE-1": true,
+        "CASE-2": true,
+        "CASE-3": true,
+        "CASE-4": true,
+        "CASE-5": true,
+        "CASE-6": true
+      },
+      "json_valid": true
+    },
+    "case": "revisions",
+    "repeat": 1,
+    "expected": {
+      "CASE-1": "ZONE-41",
+      "CASE-2": "ZONE-42",
+      "CASE-3": "ZONE-43",
+      "CASE-4": "ZONE-44",
+      "CASE-5": "ZONE-45",
+      "CASE-6": "ZONE-46"
+    }
+  },
+  {
+    "model": "gpt-4o-mini",
+    "effort": null,
+    "temperature": 0,
+    "status": "completed",
+    "response_id": "resp_0350417008325e8f016ab4dc0d864087d2860b215fe06d1ba5",
+    "seconds_total": 3.162,
+    "seconds_first_event": 2.4,
+    "seconds_first_text": 2.41,
+    "seconds_visible_generation": 0.751,
+    "input_tokens": 15049,
+    "output_tokens": 69,
+    "reasoning_tokens": 0,
+    "visible_tokens_estimate": 69,
+    "visible_tokens_per_second": 91.86,
+    "output_tokens_per_second_end_to_end": 21.82,
+    "answer": "{\n  \"CASE-1\": \"ZONE-98\",\n  \"CASE-2\": \"ZONE-98\",\n  \"CASE-3\": \"ZONE-43\",\n  \"CASE-4\": \"ZONE-98\",\n  \"CASE-5\": \"ZONE-98\",\n  \"CASE-6\": \"ZONE-46\"\n}",
+    "quality": {
+      "correct": 2,
+      "total": 6,
+      "details": {
+        "CASE-1": false,
+        "CASE-2": false,
+        "CASE-3": true,
+        "CASE-4": false,
+        "CASE-5": false,
+        "CASE-6": true
+      },
+      "json_valid": true
+    },
+    "case": "revisions",
+    "repeat": 1,
+    "expected": {
+      "CASE-1": "ZONE-41",
+      "CASE-2": "ZONE-42",
+      "CASE-3": "ZONE-43",
+      "CASE-4": "ZONE-44",
+      "CASE-5": "ZONE-45",
+      "CASE-6": "ZONE-46"
+    }
+  },
+  {
+    "model": "gpt-5.6-luna",
+    "effort": "none",
+    "temperature": null,
+    "status": "completed",
+    "response_id": "resp_0be589b5996e270d016ab4dc10636c87d29aaa496c6d4ed90c",
+    "seconds_total": 2.076,
+    "seconds_first_event": 0.827,
+    "seconds_first_text": 1.489,
+    "seconds_visible_generation": 0.587,
+    "input_tokens": 15037,
+    "output_tokens": 47,
+    "reasoning_tokens": 0,
+    "visible_tokens_estimate": 47,
+    "visible_tokens_per_second": 80.09,
+    "output_tokens_per_second_end_to_end": 22.64,
+    "answer": "{\"CASE-1\":\"-61\",\"CASE-2\":\"-67\",\"CASE-3\":\"-73\",\"CASE-4\":\"-79\",\"CASE-5\":\"-85\",\"CASE-6\":\"-91\"}",
+    "quality": {
+      "correct": 6,
+      "total": 6,
+      "details": {
+        "CASE-1": true,
+        "CASE-2": true,
+        "CASE-3": true,
+        "CASE-4": true,
+        "CASE-5": true,
+        "CASE-6": true
+      },
+      "json_valid": true
+    },
+    "case": "ledger",
+    "repeat": 1,
+    "expected": {
+      "CASE-1": "-61",
+      "CASE-2": "-67",
+      "CASE-3": "-73",
+      "CASE-4": "-79",
+      "CASE-5": "-85",
+      "CASE-6": "-91"
+    }
+  },
+  {
+    "model": "gpt-4o-mini",
+    "effort": null,
+    "temperature": 0,
+    "status": "completed",
+    "response_id": "resp_02a0a9819fb99897016ab4dc1274f087d2ae765b523c2daccc",
+    "seconds_total": 7.71,
+    "seconds_first_event": 5.874,
+    "seconds_first_text": 5.882,
+    "seconds_visible_generation": 1.828,
+    "input_tokens": 15038,
+    "output_tokens": 57,
+    "reasoning_tokens": 0,
+    "visible_tokens_estimate": 57,
+    "visible_tokens_per_second": 31.18,
+    "output_tokens_per_second_end_to_end": 7.39,
+    "answer": "{\n  \"CASE-1\": \"39\",\n  \"CASE-2\": \"53\",\n  \"CASE-3\": \"-73\",\n  \"CASE-4\": \"-79\",\n  \"CASE-5\": \"15\",\n  \"CASE-6\": \"9\"\n}",
+    "quality": {
+      "correct": 2,
+      "total": 6,
+      "details": {
+        "CASE-1": false,
+        "CASE-2": false,
+        "CASE-3": true,
+        "CASE-4": true,
+        "CASE-5": false,
+        "CASE-6": false
+      },
+      "json_valid": true
+    },
+    "case": "ledger",
+    "repeat": 1,
+    "expected": {
+      "CASE-1": "-61",
+      "CASE-2": "-67",
+      "CASE-3": "-73",
+      "CASE-4": "-79",
+      "CASE-5": "-85",
+      "CASE-6": "-91"
+    }
+  },
+  {
+    "model": "gpt-5.6-luna",
+    "effort": "none",
+    "temperature": null,
+    "status": "completed",
+    "response_id": "resp_0f059e67c64193a3016ab4dc1ab70087d2bf4da70ae519ee8e",
+    "seconds_total": 2.038,
+    "seconds_first_event": 1.148,
+    "seconds_first_text": 1.629,
+    "seconds_visible_generation": 0.41,
+    "input_tokens": 15011,
+    "output_tokens": 41,
+    "reasoning_tokens": 0,
+    "visible_tokens_estimate": 41,
+    "visible_tokens_per_second": 100.09,
+    "output_tokens_per_second_end_to_end": 20.11,
+    "answer": "{\"CASE-1\":\"12\",\"CASE-2\":\"11\",\"CASE-3\":\"14\",\"CASE-4\":\"15\",\"CASE-5\":\"9\",\"CASE-6\":\"8\"}",
+    "quality": {
+      "correct": 2,
+      "total": 6,
+      "details": {
+        "CASE-1": true,
+        "CASE-2": false,
+        "CASE-3": false,
+        "CASE-4": true,
+        "CASE-5": false,
+        "CASE-6": false
+      },
+      "json_valid": true
+    },
+    "case": "routing",
+    "repeat": 1,
+    "expected": {
+      "CASE-1": "12",
+      "CASE-2": "14",
+      "CASE-3": "15",
+      "CASE-4": "15",
+      "CASE-5": "15",
+      "CASE-6": "15"
+    }
+  },
+  {
+    "model": "gpt-4o-mini",
+    "effort": null,
+    "temperature": 0,
+    "status": "completed",
+    "response_id": "resp_01ac8f6a92cd5229016ab4dc1c369487d2af55bef4782887f3",
+    "seconds_total": 3.009,
+    "seconds_first_event": 1.94,
+    "seconds_first_text": 1.949,
+    "seconds_visible_generation": 1.06,
+    "input_tokens": 15012,
+    "output_tokens": 57,
+    "reasoning_tokens": 0,
+    "visible_tokens_estimate": 57,
+    "visible_tokens_per_second": 53.76,
+    "output_tokens_per_second_end_to_end": 18.94,
+    "answer": "{\n  \"CASE-1\": \"15\",\n  \"CASE-2\": \"10\",\n  \"CASE-3\": \"10\",\n  \"CASE-4\": \"10\",\n  \"CASE-5\": \"8\",\n  \"CASE-6\": \"13\"\n}",
+    "quality": {
+      "correct": 0,
+      "total": 6,
+      "details": {
+        "CASE-1": false,
+        "CASE-2": false,
+        "CASE-3": false,
+        "CASE-4": false,
+        "CASE-5": false,
+        "CASE-6": false
+      },
+      "json_valid": true
+    },
+    "case": "routing",
+    "repeat": 1,
+    "expected": {
+      "CASE-1": "12",
+      "CASE-2": "14",
+      "CASE-3": "15",
+      "CASE-4": "15",
+      "CASE-5": "15",
+      "CASE-6": "15"
+    }
+  },
+  {
+    "model": "gpt-5.6-luna",
+    "effort": "none",
+    "temperature": null,
+    "status": "completed",
+    "response_id": "resp_0f114402aecda64e016ab4dc1f330487d2b97d00f63a027e32",
+    "seconds_total": 1.138,
+    "seconds_first_event": 0.52,
+    "seconds_first_text": 0.767,
+    "seconds_visible_generation": 0.37,
+    "input_tokens": 15010,
+    "output_tokens": 41,
+    "reasoning_tokens": 0,
+    "visible_tokens_estimate": 41,
+    "visible_tokens_per_second": 110.67,
+    "output_tokens_per_second_end_to_end": 36.04,
+    "answer": "{\"CASE-1\":\"25\",\"CASE-2\":\"27\",\"CASE-3\":\"29\",\"CASE-4\":\"31\",\"CASE-5\":\"33\",\"CASE-6\":\"35\"}",
+    "quality": {
+      "correct": 6,
+      "total": 6,
+      "details": {
+        "CASE-1": true,
+        "CASE-2": true,
+        "CASE-3": true,
+        "CASE-4": true,
+        "CASE-5": true,
+        "CASE-6": true
+      },
+      "json_valid": true
+    },
+    "case": "inventory",
+    "repeat": 1,
+    "expected": {
+      "CASE-1": "25",
+      "CASE-2": "27",
+      "CASE-3": "29",
+      "CASE-4": "31",
+      "CASE-5": "33",
+      "CASE-6": "35"
+    }
+  },
+  {
+    "model": "gpt-4o-mini",
+    "effort": null,
+    "temperature": 0,
+    "status": "completed",
+    "response_id": "resp_016857c9afac68c0016ab4dc20efc487d2a4d40a45abcdda52",
+    "seconds_total": 3.109,
+    "seconds_first_event": 2.222,
+    "seconds_first_text": 2.23,
+    "seconds_visible_generation": 0.878,
+    "input_tokens": 15011,
+    "output_tokens": 57,
+    "reasoning_tokens": 0,
+    "visible_tokens_estimate": 57,
+    "visible_tokens_per_second": 64.88,
+    "output_tokens_per_second_end_to_end": 18.34,
+    "answer": "{\n  \"CASE-1\": \"25\",\n  \"CASE-2\": \"25\",\n  \"CASE-3\": \"35\",\n  \"CASE-4\": \"27\",\n  \"CASE-5\": \"29\",\n  \"CASE-6\": \"62\"\n}",
+    "quality": {
+      "correct": 1,
+      "total": 6,
+      "details": {
+        "CASE-1": true,
+        "CASE-2": false,
+        "CASE-3": false,
+        "CASE-4": false,
+        "CASE-5": false,
+        "CASE-6": false
+      },
+      "json_valid": true
+    },
+    "case": "inventory",
+    "repeat": 1,
+    "expected": {
+      "CASE-1": "25",
+      "CASE-2": "27",
+      "CASE-3": "29",
+      "CASE-4": "31",
+      "CASE-5": "33",
+      "CASE-6": "35"
+    }
+  },
+  {
+    "model": "gpt-5.6-luna",
+    "effort": "none",
+    "temperature": null,
+    "status": "completed",
+    "response_id": "resp_0c9341d7b960088f016ab4dc2371f087d2b2405922a854ace0",
+    "seconds_total": 1.351,
+    "seconds_first_event": 0.721,
+    "seconds_first_text": 1.001,
+    "seconds_visible_generation": 0.349,
+    "input_tokens": 15021,
+    "output_tokens": 41,
+    "reasoning_tokens": 0,
+    "visible_tokens_estimate": 41,
+    "visible_tokens_per_second": 117.32,
+    "output_tokens_per_second_end_to_end": 30.36,
+    "answer": "{\"CASE-1\":\"3\",\"CASE-2\":\"3\",\"CASE-3\":\"3\",\"CASE-4\":\"3\",\"CASE-5\":\"4\",\"CASE-6\":\"3\"}",
+    "quality": {
+      "correct": 2,
+      "total": 6,
+      "details": {
+        "CASE-1": true,
+        "CASE-2": false,
+        "CASE-3": true,
+        "CASE-4": false,
+        "CASE-5": false,
+        "CASE-6": false
+      },
+      "json_valid": true
+    },
+    "case": "scheduling",
+    "repeat": 1,
+    "expected": {
+      "CASE-1": "3",
+      "CASE-2": "2",
+      "CASE-3": "3",
+      "CASE-4": "2",
+      "CASE-5": "3",
+      "CASE-6": "2"
+    }
+  },
+  {
+    "model": "gpt-4o-mini",
+    "effort": null,
+    "temperature": 0,
+    "status": "completed",
+    "response_id": "resp_016e01638bc64f79016ab4dc24d83087d2812da7560d18a65c",
+    "seconds_total": 1.457,
+    "seconds_first_event": 0.942,
+    "seconds_first_text": 0.943,
+    "seconds_visible_generation": 0.514,
+    "input_tokens": 15022,
+    "output_tokens": 57,
+    "reasoning_tokens": 0,
+    "visible_tokens_estimate": 57,
+    "visible_tokens_per_second": 110.98,
+    "output_tokens_per_second_end_to_end": 39.13,
+    "answer": "{\n  \"CASE-1\": \"4\",\n  \"CASE-2\": \"2\",\n  \"CASE-3\": \"3\",\n  \"CASE-4\": \"2\",\n  \"CASE-5\": \"3\",\n  \"CASE-6\": \"3\"\n}",
+    "quality": {
+      "correct": 4,
+      "total": 6,
+      "details": {
+        "CASE-1": false,
+        "CASE-2": true,
+        "CASE-3": true,
+        "CASE-4": true,
+        "CASE-5": true,
+        "CASE-6": false
+      },
+      "json_valid": true
+    },
+    "case": "scheduling",
+    "repeat": 1,
+    "expected": {
+      "CASE-1": "3",
+      "CASE-2": "2",
+      "CASE-3": "3",
+      "CASE-4": "2",
+      "CASE-5": "3",
+      "CASE-6": "2"
+    }
+  },
+  {
+    "model": "gpt-5.6-luna",
+    "effort": "none",
+    "temperature": null,
+    "status": "completed",
+    "response_id": "resp_06ce7be314fcbd9e016ab4dc2648e887d2a99387199461a9e7",
+    "seconds_total": 1.28,
+    "seconds_first_event": 0.491,
+    "seconds_first_text": 0.769,
+    "seconds_visible_generation": 0.51,
+    "input_tokens": 15045,
+    "output_tokens": 53,
+    "reasoning_tokens": 0,
+    "visible_tokens_estimate": 53,
+    "visible_tokens_per_second": 103.87,
+    "output_tokens_per_second_end_to_end": 41.41,
+    "answer": "{\"CASE-1\":\"ACTION-1\",\"CASE-2\":\"ACTION-2\",\"CASE-3\":\"ACTION-3\",\"CASE-4\":\"ACTION-4\",\"CASE-5\":\"ACTION-5\",\"CASE-6\":\"ACTION-6\"}",
+    "quality": {
+      "correct": 6,
+      "total": 6,
+      "details": {
+        "CASE-1": true,
+        "CASE-2": true,
+        "CASE-3": true,
+        "CASE-4": true,
+        "CASE-5": true,
+        "CASE-6": true
+      },
+      "json_valid": true
+    },
+    "case": "policy",
+    "repeat": 1,
+    "expected": {
+      "CASE-1": "ACTION-1",
+      "CASE-2": "ACTION-2",
+      "CASE-3": "ACTION-3",
+      "CASE-4": "ACTION-4",
+      "CASE-5": "ACTION-5",
+      "CASE-6": "ACTION-6"
+    }
+  },
+  {
+    "model": "gpt-4o-mini",
+    "effort": null,
+    "temperature": 0,
+    "status": "completed",
+    "response_id": "resp_03294062d6ef6bb3016ab4dc278bbc87d2b6fd9faf1491df84",
+    "seconds_total": 2.64,
+    "seconds_first_event": 1.95,
+    "seconds_first_text": 1.969,
+    "seconds_visible_generation": 0.671,
+    "input_tokens": 15046,
+    "output_tokens": 69,
+    "reasoning_tokens": 0,
+    "visible_tokens_estimate": 69,
+    "visible_tokens_per_second": 102.78,
+    "output_tokens_per_second_end_to_end": 26.14,
+    "answer": "{\n  \"CASE-1\": \"ACTION-1\",\n  \"CASE-2\": \"ACTION-2\",\n  \"CASE-3\": \"ACTION-3\",\n  \"CASE-4\": \"ACTION-4\",\n  \"CASE-5\": \"ACTION-5\",\n  \"CASE-6\": \"ACTION-6\"\n}",
+    "quality": {
+      "correct": 6,
+      "total": 6,
+      "details": {
+        "CASE-1": true,
+        "CASE-2": true,
+        "CASE-3": true,
+        "CASE-4": true,
+        "CASE-5": true,
+        "CASE-6": true
+      },
+      "json_valid": true
+    },
+    "case": "policy",
+    "repeat": 1,
+    "expected": {
+      "CASE-1": "ACTION-1",
+      "CASE-2": "ACTION-2",
+      "CASE-3": "ACTION-3",
+      "CASE-4": "ACTION-4",
+      "CASE-5": "ACTION-5",
+      "CASE-6": "ACTION-6"
+    }
+  },
+  {
+    "model": "gpt-5.6-luna",
+    "effort": "none",
+    "temperature": null,
+    "status": "completed",
+    "response_id": "resp_07444b18c4e9914c016ab4dc2a2f9887d2ae5a80e0c449d56c",
+    "seconds_total": 1.087,
+    "seconds_first_event": 0.528,
+    "seconds_first_text": 0.737,
+    "seconds_visible_generation": 0.35,
+    "input_tokens": 15018,
+    "output_tokens": 41,
+    "reasoning_tokens": 0,
+    "visible_tokens_estimate": 41,
+    "visible_tokens_per_second": 117.12,
+    "output_tokens_per_second_end_to_end": 37.73,
+    "answer": "{\"CASE-1\":\"6\",\"CASE-2\":\"5\",\"CASE-3\":\"5\",\"CASE-4\":\"6\",\"CASE-5\":\"5\",\"CASE-6\":\"6\"}",
+    "quality": {
+      "correct": 2,
+      "total": 6,
+      "details": {
+        "CASE-1": false,
+        "CASE-2": false,
+        "CASE-3": false,
+        "CASE-4": true,
+        "CASE-5": true,
+        "CASE-6": false
+      },
+      "json_valid": true
+    },
+    "case": "dependencies",
+    "repeat": 1,
+    "expected": {
+      "CASE-1": "5",
+      "CASE-2": "6",
+      "CASE-3": "6",
+      "CASE-4": "6",
+      "CASE-5": "5",
+      "CASE-6": "7"
+    }
+  },
+  {
+    "model": "gpt-4o-mini",
+    "effort": null,
+    "temperature": 0,
+    "status": "completed",
+    "response_id": "resp_0876cd0d5e959822016ab4dc2b4c1887d2af227812d1fe5049",
+    "seconds_total": 1.48,
+    "seconds_first_event": 1.033,
+    "seconds_first_text": 1.049,
+    "seconds_visible_generation": 0.432,
+    "input_tokens": 15019,
+    "output_tokens": 57,
+    "reasoning_tokens": 0,
+    "visible_tokens_estimate": 57,
+    "visible_tokens_per_second": 132.08,
+    "output_tokens_per_second_end_to_end": 38.51,
+    "answer": "{\n  \"CASE-1\": \"5\",\n  \"CASE-2\": \"3\",\n  \"CASE-3\": \"4\",\n  \"CASE-4\": \"4\",\n  \"CASE-5\": \"3\",\n  \"CASE-6\": \"3\"\n}",
+    "quality": {
+      "correct": 1,
+      "total": 6,
+      "details": {
+        "CASE-1": true,
+        "CASE-2": false,
+        "CASE-3": false,
+        "CASE-4": false,
+        "CASE-5": false,
+        "CASE-6": false
+      },
+      "json_valid": true
+    },
+    "case": "dependencies",
+    "repeat": 1,
+    "expected": {
+      "CASE-1": "5",
+      "CASE-2": "6",
+      "CASE-3": "6",
+      "CASE-4": "6",
+      "CASE-5": "5",
+      "CASE-6": "7"
+    }
+  },
+  {
+    "model": "gpt-5.6-luna",
+    "effort": "none",
+    "temperature": null,
+    "status": "completed",
+    "response_id": "resp_0359b78df079b257016ab4dc2cd7a487d28e3d13edfb53ba83",
+    "seconds_total": 1.808,
+    "seconds_first_event": 0.669,
+    "seconds_first_text": 0.889,
+    "seconds_visible_generation": 0.919,
+    "input_tokens": 14674,
+    "output_tokens": 41,
+    "reasoning_tokens": 0,
+    "visible_tokens_estimate": 41,
+    "visible_tokens_per_second": 44.61,
+    "output_tokens_per_second_end_to_end": 22.68,
+    "answer": "{\"CASE-1\":\"PASS\",\"CASE-2\":\"PASS\",\"CASE-3\":\"PASS\",\"CASE-4\":\"PASS\",\"CASE-5\":\"PASS\",\"CASE-6\":\"PASS\"}",
+    "quality": {
+      "correct": 4,
+      "total": 6,
+      "details": {
+        "CASE-1": false,
+        "CASE-2": false,
+        "CASE-3": true,
+        "CASE-4": true,
+        "CASE-5": true,
+        "CASE-6": true
+      },
+      "json_valid": true
+    },
+    "case": "quorum",
+    "repeat": 1,
+    "expected": {
+      "CASE-1": "FAIL",
+      "CASE-2": "FAIL",
+      "CASE-3": "PASS",
+      "CASE-4": "PASS",
+      "CASE-5": "PASS",
+      "CASE-6": "PASS"
+    }
+  },
+  {
+    "model": "gpt-4o-mini",
+    "effort": null,
+    "temperature": 0,
+    "status": "completed",
+    "response_id": "resp_039677e322f0be45016ab4dc2ea02c87d294511d25cef274e1",
+    "seconds_total": 1.61,
+    "seconds_first_event": 0.957,
+    "seconds_first_text": 0.971,
+    "seconds_visible_generation": 0.638,
+    "input_tokens": 14675,
+    "output_tokens": 57,
+    "reasoning_tokens": 0,
+    "visible_tokens_estimate": 57,
+    "visible_tokens_per_second": 89.27,
+    "output_tokens_per_second_end_to_end": 35.41,
+    "answer": "{\n  \"CASE-1\": \"PASS\",\n  \"CASE-2\": \"FAIL\",\n  \"CASE-3\": \"PASS\",\n  \"CASE-4\": \"FAIL\",\n  \"CASE-5\": \"PASS\",\n  \"CASE-6\": \"PASS\"\n}",
+    "quality": {
+      "correct": 4,
+      "total": 6,
+      "details": {
+        "CASE-1": false,
+        "CASE-2": true,
+        "CASE-3": true,
+        "CASE-4": false,
+        "CASE-5": true,
+        "CASE-6": true
+      },
+      "json_valid": true
+    },
+    "case": "quorum",
+    "repeat": 1,
+    "expected": {
+      "CASE-1": "FAIL",
+      "CASE-2": "FAIL",
+      "CASE-3": "PASS",
+      "CASE-4": "PASS",
+      "CASE-5": "PASS",
+      "CASE-6": "PASS"
+    }
+  },
+  {
+    "model": "gpt-5.6-luna",
+    "effort": "none",
+    "temperature": null,
+    "status": "completed",
+    "response_id": "resp_0448f7f64b5babd0016ab4dc302bdc87d28376a469d770298e",
+    "seconds_total": 2.128,
+    "seconds_first_event": 0.479,
+    "seconds_first_text": 1.278,
+    "seconds_visible_generation": 0.849,
+    "input_tokens": 15014,
+    "output_tokens": 47,
+    "reasoning_tokens": 0,
+    "visible_tokens_estimate": 47,
+    "visible_tokens_per_second": 55.33,
+    "output_tokens_per_second_end_to_end": 22.09,
+    "answer": "{\"CASE-1\":\"1155\",\"CASE-2\":\"1555\",\"CASE-3\":\"1989\",\"CASE-4\":\"2457\",\"CASE-5\":\"2959\",\"CASE-6\":\"3495\"}",
+    "quality": {
+      "correct": 6,
+      "total": 6,
+      "details": {
+        "CASE-1": true,
+        "CASE-2": true,
+        "CASE-3": true,
+        "CASE-4": true,
+        "CASE-5": true,
+        "CASE-6": true
+      },
+      "json_valid": true
+    },
+    "case": "pricing",
+    "repeat": 1,
+    "expected": {
+      "CASE-1": "1155",
+      "CASE-2": "1555",
+      "CASE-3": "1989",
+      "CASE-4": "2457",
+      "CASE-5": "2959",
+      "CASE-6": "3495"
+    }
+  },
+  {
+    "model": "gpt-4o-mini",
+    "effort": null,
+    "temperature": 0,
+    "status": "completed",
+    "response_id": "resp_0ecf523022bbfff4016ab4dc32559887d2bfceaf1a7d7e9e93",
+    "seconds_total": 5.848,
+    "seconds_first_event": 3.368,
+    "seconds_first_text": 3.369,
+    "seconds_visible_generation": 2.479,
+    "input_tokens": 15015,
+    "output_tokens": 63,
+    "reasoning_tokens": 0,
+    "visible_tokens_estimate": 63,
+    "visible_tokens_per_second": 25.41,
+    "output_tokens_per_second_end_to_end": 10.77,
+    "answer": "{\n  \"CASE-1\": \"1035\",\n  \"CASE-2\": \"1030\",\n  \"CASE-3\": \"1717\",\n  \"CASE-4\": \"1945\",\n  \"CASE-5\": \"1049\",\n  \"CASE-6\": \"2926\"\n}",
+    "quality": {
+      "correct": 0,
+      "total": 6,
+      "details": {
+        "CASE-1": false,
+        "CASE-2": false,
+        "CASE-3": false,
+        "CASE-4": false,
+        "CASE-5": false,
+        "CASE-6": false
+      },
+      "json_valid": true
+    },
+    "case": "pricing",
+    "repeat": 1,
+    "expected": {
+      "CASE-1": "1155",
+      "CASE-2": "1555",
+      "CASE-3": "1989",
+      "CASE-4": "2457",
+      "CASE-5": "2959",
+      "CASE-6": "3495"
+    }
+  },
+  {
+    "model": "gpt-5.6-luna",
+    "effort": "none",
+    "temperature": null,
+    "status": "completed",
+    "response_id": "resp_039053df01d0ca4d016ab4dc382d5087d2a230ea8b6f2d8745",
+    "seconds_total": 1.678,
+    "seconds_first_event": 0.52,
+    "seconds_first_text": 0.958,
+    "seconds_visible_generation": 0.72,
+    "input_tokens": 15030,
+    "output_tokens": 41,
+    "reasoning_tokens": 0,
+    "visible_tokens_estimate": 41,
+    "visible_tokens_per_second": 56.92,
+    "output_tokens_per_second_end_to_end": 24.43,
+    "answer": "{\"CASE-1\":\"88\",\"CASE-2\":\"118\",\"CASE-3\":\"120\",\"CASE-4\":\"124\",\"CASE-5\":\"78\",\"CASE-6\":\"118\"}",
+    "quality": {
+      "correct": 0,
+      "total": 6,
+      "details": {
+        "CASE-1": false,
+        "CASE-2": false,
+        "CASE-3": false,
+        "CASE-4": false,
+        "CASE-5": false,
+        "CASE-6": false
+      },
+      "json_valid": true
+    },
+    "case": "timeline",
+    "repeat": 1,
+    "expected": {
+      "CASE-1": "74",
+      "CASE-2": "76",
+      "CASE-3": "78",
+      "CASE-4": "80",
+      "CASE-5": "82",
+      "CASE-6": "84"
+    }
+  },
+  {
+    "model": "gpt-4o-mini",
+    "effort": null,
+    "temperature": 0,
+    "status": "completed",
+    "response_id": "resp_0b88ecc30dd6ad42016ab4dc39da9887d29275e85746a04590",
+    "seconds_total": 1.609,
+    "seconds_first_event": 0.957,
+    "seconds_first_text": 0.959,
+    "seconds_visible_generation": 0.651,
+    "input_tokens": 15031,
+    "output_tokens": 57,
+    "reasoning_tokens": 0,
+    "visible_tokens_estimate": 57,
+    "visible_tokens_per_second": 87.6,
+    "output_tokens_per_second_end_to_end": 35.42,
+    "answer": "{\n  \"CASE-1\": \"93\",\n  \"CASE-2\": \"72\",\n  \"CASE-3\": \"73\",\n  \"CASE-4\": \"76\",\n  \"CASE-5\": \"78\",\n  \"CASE-6\": \"124\"\n}",
+    "quality": {
+      "correct": 0,
+      "total": 6,
+      "details": {
+        "CASE-1": false,
+        "CASE-2": false,
+        "CASE-3": false,
+        "CASE-4": false,
+        "CASE-5": false,
+        "CASE-6": false
+      },
+      "json_valid": true
+    },
+    "case": "timeline",
+    "repeat": 1,
+    "expected": {
+      "CASE-1": "74",
+      "CASE-2": "76",
+      "CASE-3": "78",
+      "CASE-4": "80",
+      "CASE-5": "82",
+      "CASE-6": "84"
+    }
+  }
+]

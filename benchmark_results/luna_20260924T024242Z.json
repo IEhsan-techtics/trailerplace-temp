@@ -1,0 +1,802 @@
+[
+  {
+    "model": "gpt-5.6-luna",
+    "effort": "none",
+    "status": "completed",
+    "response_id": "resp_0d50d3127d0a5b56016ab48e2527ec87d2be497375a4a199c1",
+    "seconds_total": 2.517,
+    "seconds_first_event": 1.962,
+    "seconds_first_text": 2.128,
+    "seconds_visible_generation": 0.389,
+    "input_tokens": 14975,
+    "output_tokens": 59,
+    "reasoning_tokens": 0,
+    "visible_tokens_estimate": 59,
+    "visible_tokens_per_second": 151.48,
+    "output_tokens_per_second_end_to_end": 23.44,
+    "answer": "{\"INC-0136\":\"ZONE-80\",\"INC-0131\":\"ZONE-71\",\"INC-0046\":\"ZONE-82\",\"INC-0145\":\"ZONE-73\",\"INC-0063\":\"ZONE-84\",\"INC-0236\":\"ZONE-75\"}",
+    "quality": {
+      "correct": 6,
+      "total": 6,
+      "details": {
+        "INC-0046": true,
+        "INC-0063": true,
+        "INC-0131": true,
+        "INC-0136": true,
+        "INC-0145": true,
+        "INC-0236": true
+      },
+      "json_valid": true
+    },
+    "case": "incidents",
+    "repeat": 1,
+    "expected": {
+      "INC-0046": "ZONE-82",
+      "INC-0063": "ZONE-84",
+      "INC-0131": "ZONE-71",
+      "INC-0136": "ZONE-80",
+      "INC-0145": "ZONE-73",
+      "INC-0236": "ZONE-75"
+    }
+  },
+  {
+    "model": "gpt-6-luna",
+    "effort": "none",
+    "status": "completed",
+    "response_id": "resp_00039e1a4efc4d93016ab48e2670bc87d28fcb819143027ddb",
+    "seconds_total": 1.307,
+    "seconds_first_event": 0.557,
+    "seconds_first_text": 0.9,
+    "seconds_visible_generation": 0.407,
+    "input_tokens": 14975,
+    "output_tokens": 59,
+    "reasoning_tokens": 0,
+    "visible_tokens_estimate": 59,
+    "visible_tokens_per_second": 144.84,
+    "output_tokens_per_second_end_to_end": 45.13,
+    "answer": "{\"INC-0136\":\"ZONE-80\",\"INC-0131\":\"ZONE-71\",\"INC-0046\":\"ZONE-82\",\"INC-0145\":\"ZONE-73\",\"INC-0063\":\"ZONE-84\",\"INC-0236\":\"ZONE-75\"}",
+    "quality": {
+      "correct": 6,
+      "total": 6,
+      "details": {
+        "INC-0046": true,
+        "INC-0063": true,
+        "INC-0131": true,
+        "INC-0136": true,
+        "INC-0145": true,
+        "INC-0236": true
+      },
+      "json_valid": true
+    },
+    "case": "incidents",
+    "repeat": 1,
+    "expected": {
+      "INC-0046": "ZONE-82",
+      "INC-0063": "ZONE-84",
+      "INC-0131": "ZONE-71",
+      "INC-0136": "ZONE-80",
+      "INC-0145": "ZONE-73",
+      "INC-0236": "ZONE-75"
+    }
+  },
+  {
+    "model": "gpt-5.6-luna",
+    "effort": "none",
+    "status": "completed",
+    "response_id": "resp_0e7fd562c76f7c55016ab48e27bb5087d293329d6b2ec52a53",
+    "seconds_total": 1.917,
+    "seconds_first_event": 0.977,
+    "seconds_first_text": 1.392,
+    "seconds_visible_generation": 0.525,
+    "input_tokens": 14975,
+    "output_tokens": 59,
+    "reasoning_tokens": 0,
+    "visible_tokens_estimate": 59,
+    "visible_tokens_per_second": 112.47,
+    "output_tokens_per_second_end_to_end": 30.78,
+    "answer": "{\"CON-0200\":\"ZONE-80\",\"CON-0086\":\"ZONE-71\",\"CON-0155\":\"ZONE-82\",\"CON-0219\":\"ZONE-73\",\"CON-0060\":\"ZONE-84\",\"CON-0130\":\"ZONE-75\"}",
+    "quality": {
+      "correct": 6,
+      "total": 6,
+      "details": {
+        "CON-0060": true,
+        "CON-0086": true,
+        "CON-0130": true,
+        "CON-0155": true,
+        "CON-0200": true,
+        "CON-0219": true
+      },
+      "json_valid": true
+    },
+    "case": "contracts",
+    "repeat": 1,
+    "expected": {
+      "CON-0060": "ZONE-84",
+      "CON-0086": "ZONE-71",
+      "CON-0130": "ZONE-75",
+      "CON-0155": "ZONE-82",
+      "CON-0200": "ZONE-80",
+      "CON-0219": "ZONE-73"
+    }
+  },
+  {
+    "model": "gpt-6-luna",
+    "effort": "none",
+    "status": "completed",
+    "response_id": "resp_01cff0f5818ac189016ab48e29a23087d283c0d3ae0b9a2a8b",
+    "seconds_total": 1.396,
+    "seconds_first_event": 0.706,
+    "seconds_first_text": 0.968,
+    "seconds_visible_generation": 0.428,
+    "input_tokens": 14975,
+    "output_tokens": 59,
+    "reasoning_tokens": 0,
+    "visible_tokens_estimate": 59,
+    "visible_tokens_per_second": 137.8,
+    "output_tokens_per_second_end_to_end": 42.26,
+    "answer": "{\"CON-0200\":\"ZONE-80\",\"CON-0086\":\"ZONE-71\",\"CON-0155\":\"ZONE-82\",\"CON-0219\":\"ZONE-73\",\"CON-0060\":\"ZONE-84\",\"CON-0130\":\"ZONE-75\"}",
+    "quality": {
+      "correct": 6,
+      "total": 6,
+      "details": {
+        "CON-0060": true,
+        "CON-0086": true,
+        "CON-0130": true,
+        "CON-0155": true,
+        "CON-0200": true,
+        "CON-0219": true
+      },
+      "json_valid": true
+    },
+    "case": "contracts",
+    "repeat": 1,
+    "expected": {
+      "CON-0060": "ZONE-84",
+      "CON-0086": "ZONE-71",
+      "CON-0130": "ZONE-75",
+      "CON-0155": "ZONE-82",
+      "CON-0200": "ZONE-80",
+      "CON-0219": "ZONE-73"
+    }
+  },
+  {
+    "model": "gpt-5.6-luna",
+    "effort": "none",
+    "status": "completed",
+    "response_id": "resp_02d5c24efe708775016ab48e2b0f3487d2812b7c9260b20941",
+    "seconds_total": 1.635,
+    "seconds_first_event": 0.834,
+    "seconds_first_text": 1.078,
+    "seconds_visible_generation": 0.557,
+    "input_tokens": 14999,
+    "output_tokens": 65,
+    "reasoning_tokens": 0,
+    "visible_tokens_estimate": 65,
+    "visible_tokens_per_second": 116.74,
+    "output_tokens_per_second_end_to_end": 39.75,
+    "answer": "{\"SHI-0071\":\"ZONE-80\",\"SHI-0214\":\"ZONE-71\",\"SHI-0208\":\"ZONE-82\",\"SHI-0048\":\"ZONE-73\",\"SHI-0204\":\"ZONE-84\",\"SHI-0088\":\"ZONE-75\"}",
+    "quality": {
+      "correct": 6,
+      "total": 6,
+      "details": {
+        "SHI-0048": true,
+        "SHI-0071": true,
+        "SHI-0088": true,
+        "SHI-0204": true,
+        "SHI-0208": true,
+        "SHI-0214": true
+      },
+      "json_valid": true
+    },
+    "case": "shipments",
+    "repeat": 1,
+    "expected": {
+      "SHI-0048": "ZONE-73",
+      "SHI-0071": "ZONE-80",
+      "SHI-0088": "ZONE-75",
+      "SHI-0204": "ZONE-84",
+      "SHI-0208": "ZONE-82",
+      "SHI-0214": "ZONE-71"
+    }
+  },
+  {
+    "model": "gpt-6-luna",
+    "effort": "none",
+    "status": "completed",
+    "response_id": "resp_07445f18b09acbef016ab48e2cb00887d2859324c2e543c611",
+    "seconds_total": 1.14,
+    "seconds_first_event": 0.498,
+    "seconds_first_text": 0.74,
+    "seconds_visible_generation": 0.399,
+    "input_tokens": 14999,
+    "output_tokens": 65,
+    "reasoning_tokens": 0,
+    "visible_tokens_estimate": 65,
+    "visible_tokens_per_second": 162.81,
+    "output_tokens_per_second_end_to_end": 57.03,
+    "answer": "{\"SHI-0071\":\"ZONE-80\",\"SHI-0214\":\"ZONE-71\",\"SHI-0208\":\"ZONE-82\",\"SHI-0048\":\"ZONE-73\",\"SHI-0204\":\"ZONE-84\",\"SHI-0088\":\"ZONE-75\"}",
+    "quality": {
+      "correct": 6,
+      "total": 6,
+      "details": {
+        "SHI-0048": true,
+        "SHI-0071": true,
+        "SHI-0088": true,
+        "SHI-0204": true,
+        "SHI-0208": true,
+        "SHI-0214": true
+      },
+      "json_valid": true
+    },
+    "case": "shipments",
+    "repeat": 1,
+    "expected": {
+      "SHI-0048": "ZONE-73",
+      "SHI-0071": "ZONE-80",
+      "SHI-0088": "ZONE-75",
+      "SHI-0204": "ZONE-84",
+      "SHI-0208": "ZONE-82",
+      "SHI-0214": "ZONE-71"
+    }
+  },
+  {
+    "model": "gpt-5.6-luna",
+    "effort": "none",
+    "status": "completed",
+    "response_id": "resp_01f75c9cffc8d2cf016ab48e2e6ebc87d28d250576fe9141d6",
+    "seconds_total": 2.037,
+    "seconds_first_event": 1.334,
+    "seconds_first_text": 1.514,
+    "seconds_visible_generation": 0.523,
+    "input_tokens": 14993,
+    "output_tokens": 59,
+    "reasoning_tokens": 0,
+    "visible_tokens_estimate": 59,
+    "visible_tokens_per_second": 112.74,
+    "output_tokens_per_second_end_to_end": 28.96,
+    "answer": "{\"CLA-0180\":\"ZONE-80\",\"CLA-0209\":\"ZONE-71\",\"CLA-0063\":\"ZONE-82\",\"CLA-0227\":\"ZONE-73\",\"CLA-0173\":\"ZONE-84\",\"CLA-0143\":\"ZONE-75\"}",
+    "quality": {
+      "correct": 6,
+      "total": 6,
+      "details": {
+        "CLA-0063": true,
+        "CLA-0143": true,
+        "CLA-0173": true,
+        "CLA-0180": true,
+        "CLA-0209": true,
+        "CLA-0227": true
+      },
+      "json_valid": true
+    },
+    "case": "claims",
+    "repeat": 1,
+    "expected": {
+      "CLA-0063": "ZONE-82",
+      "CLA-0143": "ZONE-75",
+      "CLA-0173": "ZONE-84",
+      "CLA-0180": "ZONE-80",
+      "CLA-0209": "ZONE-71",
+      "CLA-0227": "ZONE-73"
+    }
+  },
+  {
+    "model": "gpt-6-luna",
+    "effort": "none",
+    "status": "completed",
+    "response_id": "resp_0648f42fd2ada64b016ab48e30fee887d2b7ec7b2cb960b9f8",
+    "seconds_total": 2.988,
+    "seconds_first_event": 2.225,
+    "seconds_first_text": 2.554,
+    "seconds_visible_generation": 0.435,
+    "input_tokens": 14993,
+    "output_tokens": 59,
+    "reasoning_tokens": 0,
+    "visible_tokens_estimate": 59,
+    "visible_tokens_per_second": 135.74,
+    "output_tokens_per_second_end_to_end": 19.74,
+    "answer": "{\"CLA-0180\":\"ZONE-80\",\"CLA-0209\":\"ZONE-71\",\"CLA-0063\":\"ZONE-82\",\"CLA-0227\":\"ZONE-73\",\"CLA-0173\":\"ZONE-84\",\"CLA-0143\":\"ZONE-75\"}",
+    "quality": {
+      "correct": 6,
+      "total": 6,
+      "details": {
+        "CLA-0063": true,
+        "CLA-0143": true,
+        "CLA-0173": true,
+        "CLA-0180": true,
+        "CLA-0209": true,
+        "CLA-0227": true
+      },
+      "json_valid": true
+    },
+    "case": "claims",
+    "repeat": 1,
+    "expected": {
+      "CLA-0063": "ZONE-82",
+      "CLA-0143": "ZONE-75",
+      "CLA-0173": "ZONE-84",
+      "CLA-0180": "ZONE-80",
+      "CLA-0209": "ZONE-71",
+      "CLA-0227": "ZONE-73"
+    }
+  },
+  {
+    "model": "gpt-5.6-luna",
+    "effort": "none",
+    "status": "completed",
+    "response_id": "resp_041f8748f3dfc111016ab48e32dd8c87d2b8bdec9dc1567c81",
+    "seconds_total": 1.346,
+    "seconds_first_event": 0.543,
+    "seconds_first_text": 0.948,
+    "seconds_visible_generation": 0.398,
+    "input_tokens": 14975,
+    "output_tokens": 59,
+    "reasoning_tokens": 0,
+    "visible_tokens_estimate": 59,
+    "visible_tokens_per_second": 148.08,
+    "output_tokens_per_second_end_to_end": 43.83,
+    "answer": "{\"PER-0241\":\"ZONE-80\",\"PER-0058\":\"ZONE-71\",\"PER-0162\":\"ZONE-82\",\"PER-0133\":\"ZONE-73\",\"PER-0149\":\"ZONE-84\",\"PER-0110\":\"ZONE-75\"}",
+    "quality": {
+      "correct": 6,
+      "total": 6,
+      "details": {
+        "PER-0058": true,
+        "PER-0110": true,
+        "PER-0133": true,
+        "PER-0149": true,
+        "PER-0162": true,
+        "PER-0241": true
+      },
+      "json_valid": true
+    },
+    "case": "permits",
+    "repeat": 1,
+    "expected": {
+      "PER-0058": "ZONE-71",
+      "PER-0110": "ZONE-75",
+      "PER-0133": "ZONE-73",
+      "PER-0149": "ZONE-84",
+      "PER-0162": "ZONE-82",
+      "PER-0241": "ZONE-80"
+    }
+  },
+  {
+    "model": "gpt-6-luna",
+    "effort": "none",
+    "status": "completed",
+    "response_id": "resp_08d5eb130beeaad2016ab48e34548887d2ab455a471345fc3d",
+    "seconds_total": 2.267,
+    "seconds_first_event": 1.018,
+    "seconds_first_text": 1.327,
+    "seconds_visible_generation": 0.941,
+    "input_tokens": 14975,
+    "output_tokens": 59,
+    "reasoning_tokens": 0,
+    "visible_tokens_estimate": 59,
+    "visible_tokens_per_second": 62.72,
+    "output_tokens_per_second_end_to_end": 26.02,
+    "answer": "{\"PER-0241\":\"ZONE-80\",\"PER-0058\":\"ZONE-71\",\"PER-0162\":\"ZONE-82\",\"PER-0133\":\"ZONE-73\",\"PER-0149\":\"ZONE-84\",\"PER-0110\":\"ZONE-75\"}",
+    "quality": {
+      "correct": 6,
+      "total": 6,
+      "details": {
+        "PER-0058": true,
+        "PER-0110": true,
+        "PER-0133": true,
+        "PER-0149": true,
+        "PER-0162": true,
+        "PER-0241": true
+      },
+      "json_valid": true
+    },
+    "case": "permits",
+    "repeat": 1,
+    "expected": {
+      "PER-0058": "ZONE-71",
+      "PER-0110": "ZONE-75",
+      "PER-0133": "ZONE-73",
+      "PER-0149": "ZONE-84",
+      "PER-0162": "ZONE-82",
+      "PER-0241": "ZONE-80"
+    }
+  },
+  {
+    "model": "gpt-5.6-luna",
+    "effort": "none",
+    "status": "completed",
+    "response_id": "resp_0fbb0c3b858c13f0016ab48e370bc087d2b5c4b70daeeec6cb",
+    "seconds_total": 1.711,
+    "seconds_first_event": 1.085,
+    "seconds_first_text": 1.299,
+    "seconds_visible_generation": 0.412,
+    "input_tokens": 14994,
+    "output_tokens": 59,
+    "reasoning_tokens": 0,
+    "visible_tokens_estimate": 59,
+    "visible_tokens_per_second": 143.09,
+    "output_tokens_per_second_end_to_end": 34.48,
+    "answer": "{\"INV-0128\":\"ZONE-80\",\"INV-0011\":\"ZONE-71\",\"INV-0038\":\"ZONE-82\",\"INV-0048\":\"ZONE-73\",\"INV-0085\":\"ZONE-84\",\"INV-0102\":\"ZONE-75\"}",
+    "quality": {
+      "correct": 6,
+      "total": 6,
+      "details": {
+        "INV-0011": true,
+        "INV-0038": true,
+        "INV-0048": true,
+        "INV-0085": true,
+        "INV-0102": true,
+        "INV-0128": true
+      },
+      "json_valid": true
+    },
+    "case": "invoices",
+    "repeat": 1,
+    "expected": {
+      "INV-0011": "ZONE-71",
+      "INV-0038": "ZONE-82",
+      "INV-0048": "ZONE-73",
+      "INV-0085": "ZONE-84",
+      "INV-0102": "ZONE-75",
+      "INV-0128": "ZONE-80"
+    }
+  },
+  {
+    "model": "gpt-6-luna",
+    "effort": "none",
+    "status": "completed",
+    "response_id": "resp_0be492c42a72bd8a016ab48e38288c87d29fd2e404ac1eae0d",
+    "seconds_total": 1.129,
+    "seconds_first_event": 0.448,
+    "seconds_first_text": 0.691,
+    "seconds_visible_generation": 0.438,
+    "input_tokens": 14994,
+    "output_tokens": 59,
+    "reasoning_tokens": 0,
+    "visible_tokens_estimate": 59,
+    "visible_tokens_per_second": 134.6,
+    "output_tokens_per_second_end_to_end": 52.24,
+    "answer": "{\"INV-0128\":\"ZONE-80\",\"INV-0011\":\"ZONE-71\",\"INV-0038\":\"ZONE-82\",\"INV-0048\":\"ZONE-73\",\"INV-0085\":\"ZONE-84\",\"INV-0102\":\"ZONE-75\"}",
+    "quality": {
+      "correct": 6,
+      "total": 6,
+      "details": {
+        "INV-0011": true,
+        "INV-0038": true,
+        "INV-0048": true,
+        "INV-0085": true,
+        "INV-0102": true,
+        "INV-0128": true
+      },
+      "json_valid": true
+    },
+    "case": "invoices",
+    "repeat": 1,
+    "expected": {
+      "INV-0011": "ZONE-71",
+      "INV-0038": "ZONE-82",
+      "INV-0048": "ZONE-73",
+      "INV-0085": "ZONE-84",
+      "INV-0102": "ZONE-75",
+      "INV-0128": "ZONE-80"
+    }
+  },
+  {
+    "model": "gpt-5.6-luna",
+    "effort": "none",
+    "status": "completed",
+    "response_id": "resp_07bc5f5208875aa7016ab48e39675887d28362e6045591d7a6",
+    "seconds_total": 1.174,
+    "seconds_first_event": 0.571,
+    "seconds_first_text": 0.751,
+    "seconds_visible_generation": 0.423,
+    "input_tokens": 14994,
+    "output_tokens": 59,
+    "reasoning_tokens": 0,
+    "visible_tokens_estimate": 59,
+    "visible_tokens_per_second": 139.61,
+    "output_tokens_per_second_end_to_end": 50.27,
+    "answer": "{\"REP-0132\":\"ZONE-80\",\"REP-0142\":\"ZONE-71\",\"REP-0076\":\"ZONE-82\",\"REP-0009\":\"ZONE-73\",\"REP-0215\":\"ZONE-84\",\"REP-0029\":\"ZONE-75\"}",
+    "quality": {
+      "correct": 6,
+      "total": 6,
+      "details": {
+        "REP-0009": true,
+        "REP-0029": true,
+        "REP-0076": true,
+        "REP-0132": true,
+        "REP-0142": true,
+        "REP-0215": true
+      },
+      "json_valid": true
+    },
+    "case": "repairs",
+    "repeat": 1,
+    "expected": {
+      "REP-0009": "ZONE-73",
+      "REP-0029": "ZONE-75",
+      "REP-0076": "ZONE-82",
+      "REP-0132": "ZONE-80",
+      "REP-0142": "ZONE-71",
+      "REP-0215": "ZONE-84"
+    }
+  },
+  {
+    "model": "gpt-6-luna",
+    "effort": "none",
+    "status": "completed",
+    "response_id": "resp_018aa925a9a7a91e016ab48e3a800487d287cc8cff708945c7",
+    "seconds_total": 1.897,
+    "seconds_first_event": 0.734,
+    "seconds_first_text": 1.47,
+    "seconds_visible_generation": 0.428,
+    "input_tokens": 14994,
+    "output_tokens": 59,
+    "reasoning_tokens": 0,
+    "visible_tokens_estimate": 59,
+    "visible_tokens_per_second": 138.01,
+    "output_tokens_per_second_end_to_end": 31.09,
+    "answer": "{\"REP-0132\":\"ZONE-80\",\"REP-0142\":\"ZONE-71\",\"REP-0076\":\"ZONE-82\",\"REP-0009\":\"ZONE-73\",\"REP-0215\":\"ZONE-84\",\"REP-0029\":\"ZONE-75\"}",
+    "quality": {
+      "correct": 6,
+      "total": 6,
+      "details": {
+        "REP-0009": true,
+        "REP-0029": true,
+        "REP-0076": true,
+        "REP-0132": true,
+        "REP-0142": true,
+        "REP-0215": true
+      },
+      "json_valid": true
+    },
+    "case": "repairs",
+    "repeat": 1,
+    "expected": {
+      "REP-0009": "ZONE-73",
+      "REP-0029": "ZONE-75",
+      "REP-0076": "ZONE-82",
+      "REP-0132": "ZONE-80",
+      "REP-0142": "ZONE-71",
+      "REP-0215": "ZONE-84"
+    }
+  },
+  {
+    "model": "gpt-5.6-luna",
+    "effort": "none",
+    "status": "completed",
+    "response_id": "resp_0b7526af1315eb32016ab48e3c608487d2bbabdc2ff9e203ef",
+    "seconds_total": 1.168,
+    "seconds_first_event": 0.49,
+    "seconds_first_text": 0.785,
+    "seconds_visible_generation": 0.383,
+    "input_tokens": 14994,
+    "output_tokens": 59,
+    "reasoning_tokens": 0,
+    "visible_tokens_estimate": 59,
+    "visible_tokens_per_second": 154.02,
+    "output_tokens_per_second_end_to_end": 50.52,
+    "answer": "{\"AUD-0126\":\"ZONE-80\",\"AUD-0226\":\"ZONE-71\",\"AUD-0066\":\"ZONE-82\",\"AUD-0212\":\"ZONE-73\",\"AUD-0028\":\"ZONE-84\",\"AUD-0009\":\"ZONE-75\"}",
+    "quality": {
+      "correct": 6,
+      "total": 6,
+      "details": {
+        "AUD-0009": true,
+        "AUD-0028": true,
+        "AUD-0066": true,
+        "AUD-0126": true,
+        "AUD-0212": true,
+        "AUD-0226": true
+      },
+      "json_valid": true
+    },
+    "case": "audits",
+    "repeat": 1,
+    "expected": {
+      "AUD-0009": "ZONE-75",
+      "AUD-0028": "ZONE-84",
+      "AUD-0066": "ZONE-82",
+      "AUD-0126": "ZONE-80",
+      "AUD-0212": "ZONE-73",
+      "AUD-0226": "ZONE-71"
+    }
+  },
+  {
+    "model": "gpt-6-luna",
+    "effort": "none",
+    "status": "completed",
+    "response_id": "resp_00351c491e981d31016ab48e3d960c87d28580b00e1850bcc6",
+    "seconds_total": 1.624,
+    "seconds_first_event": 0.566,
+    "seconds_first_text": 1.194,
+    "seconds_visible_generation": 0.43,
+    "input_tokens": 14994,
+    "output_tokens": 59,
+    "reasoning_tokens": 0,
+    "visible_tokens_estimate": 59,
+    "visible_tokens_per_second": 137.14,
+    "output_tokens_per_second_end_to_end": 36.33,
+    "answer": "{\"AUD-0126\":\"ZONE-80\",\"AUD-0226\":\"ZONE-71\",\"AUD-0066\":\"ZONE-82\",\"AUD-0212\":\"ZONE-73\",\"AUD-0028\":\"ZONE-84\",\"AUD-0009\":\"ZONE-75\"}",
+    "quality": {
+      "correct": 6,
+      "total": 6,
+      "details": {
+        "AUD-0009": true,
+        "AUD-0028": true,
+        "AUD-0066": true,
+        "AUD-0126": true,
+        "AUD-0212": true,
+        "AUD-0226": true
+      },
+      "json_valid": true
+    },
+    "case": "audits",
+    "repeat": 1,
+    "expected": {
+      "AUD-0009": "ZONE-75",
+      "AUD-0028": "ZONE-84",
+      "AUD-0066": "ZONE-82",
+      "AUD-0126": "ZONE-80",
+      "AUD-0212": "ZONE-73",
+      "AUD-0226": "ZONE-71"
+    }
+  },
+  {
+    "model": "gpt-5.6-luna",
+    "effort": "none",
+    "status": "completed",
+    "response_id": "resp_0b85af0433d682e9016ab48e3f330087d2a52813aeb59cb667",
+    "seconds_total": 1.123,
+    "seconds_first_event": 0.515,
+    "seconds_first_text": 0.689,
+    "seconds_visible_generation": 0.434,
+    "input_tokens": 14983,
+    "output_tokens": 59,
+    "reasoning_tokens": 0,
+    "visible_tokens_estimate": 59,
+    "visible_tokens_per_second": 135.89,
+    "output_tokens_per_second_end_to_end": 52.54,
+    "answer": "{\"RET-0013\":\"ZONE-80\",\"RET-0222\":\"ZONE-71\",\"RET-0241\":\"ZONE-82\",\"RET-0011\":\"ZONE-73\",\"RET-0170\":\"ZONE-84\",\"RET-0210\":\"ZONE-75\"}",
+    "quality": {
+      "correct": 6,
+      "total": 6,
+      "details": {
+        "RET-0011": true,
+        "RET-0013": true,
+        "RET-0170": true,
+        "RET-0210": true,
+        "RET-0222": true,
+        "RET-0241": true
+      },
+      "json_valid": true
+    },
+    "case": "returns",
+    "repeat": 1,
+    "expected": {
+      "RET-0011": "ZONE-73",
+      "RET-0013": "ZONE-80",
+      "RET-0170": "ZONE-84",
+      "RET-0210": "ZONE-75",
+      "RET-0222": "ZONE-71",
+      "RET-0241": "ZONE-82"
+    }
+  },
+  {
+    "model": "gpt-6-luna",
+    "effort": "none",
+    "status": "completed",
+    "response_id": "resp_0f999fbff3456e27016ab48e404acc87d2889c816377934a91",
+    "seconds_total": 1.397,
+    "seconds_first_event": 0.574,
+    "seconds_first_text": 0.937,
+    "seconds_visible_generation": 0.46,
+    "input_tokens": 14983,
+    "output_tokens": 59,
+    "reasoning_tokens": 0,
+    "visible_tokens_estimate": 59,
+    "visible_tokens_per_second": 128.19,
+    "output_tokens_per_second_end_to_end": 42.23,
+    "answer": "{\"RET-0013\":\"ZONE-80\",\"RET-0222\":\"ZONE-71\",\"RET-0241\":\"ZONE-82\",\"RET-0011\":\"ZONE-73\",\"RET-0170\":\"ZONE-84\",\"RET-0210\":\"ZONE-75\"}",
+    "quality": {
+      "correct": 6,
+      "total": 6,
+      "details": {
+        "RET-0011": true,
+        "RET-0013": true,
+        "RET-0170": true,
+        "RET-0210": true,
+        "RET-0222": true,
+        "RET-0241": true
+      },
+      "json_valid": true
+    },
+    "case": "returns",
+    "repeat": 1,
+    "expected": {
+      "RET-0011": "ZONE-73",
+      "RET-0013": "ZONE-80",
+      "RET-0170": "ZONE-84",
+      "RET-0210": "ZONE-75",
+      "RET-0222": "ZONE-71",
+      "RET-0241": "ZONE-82"
+    }
+  },
+  {
+    "model": "gpt-5.6-luna",
+    "effort": "none",
+    "status": "completed",
+    "response_id": "resp_0e144b19823c8a8a016ab48e41b1c887d28c21cb2928f7c93d",
+    "seconds_total": 1.245,
+    "seconds_first_event": 0.511,
+    "seconds_first_text": 0.817,
+    "seconds_visible_generation": 0.429,
+    "input_tokens": 14998,
+    "output_tokens": 65,
+    "reasoning_tokens": 0,
+    "visible_tokens_estimate": 65,
+    "visible_tokens_per_second": 151.68,
+    "output_tokens_per_second_end_to_end": 52.2,
+    "answer": "{\"TIC-0035\":\"ZONE-80\",\"TIC-0048\":\"ZONE-71\",\"TIC-0037\":\"ZONE-82\",\"TIC-0193\":\"ZONE-73\",\"TIC-0060\":\"ZONE-84\",\"TIC-0204\":\"ZONE-75\"}",
+    "quality": {
+      "correct": 6,
+      "total": 6,
+      "details": {
+        "TIC-0035": true,
+        "TIC-0037": true,
+        "TIC-0048": true,
+        "TIC-0060": true,
+        "TIC-0193": true,
+        "TIC-0204": true
+      },
+      "json_valid": true
+    },
+    "case": "tickets",
+    "repeat": 1,
+    "expected": {
+      "TIC-0035": "ZONE-80",
+      "TIC-0037": "ZONE-82",
+      "TIC-0048": "ZONE-71",
+      "TIC-0060": "ZONE-84",
+      "TIC-0193": "ZONE-73",
+      "TIC-0204": "ZONE-75"
+    }
+  },
+  {
+    "model": "gpt-6-luna",
+    "effort": "none",
+    "status": "completed",
+    "response_id": "resp_0a43b79c7886ca95016ab48e42edfc87d2891c43a983621d4a",
+    "seconds_total": 1.883,
+    "seconds_first_event": 0.448,
+    "seconds_first_text": 0.798,
+    "seconds_visible_generation": 1.085,
+    "input_tokens": 14998,
+    "output_tokens": 65,
+    "reasoning_tokens": 0,
+    "visible_tokens_estimate": 65,
+    "visible_tokens_per_second": 59.91,
+    "output_tokens_per_second_end_to_end": 34.53,
+    "answer": "{\"TIC-0035\":\"ZONE-80\",\"TIC-0048\":\"ZONE-71\",\"TIC-0037\":\"ZONE-82\",\"TIC-0193\":\"ZONE-73\",\"TIC-0060\":\"ZONE-84\",\"TIC-0204\":\"ZONE-75\"}",
+    "quality": {
+      "correct": 6,
+      "total": 6,
+      "details": {
+        "TIC-0035": true,
+        "TIC-0037": true,
+        "TIC-0048": true,
+        "TIC-0060": true,
+        "TIC-0193": true,
+        "TIC-0204": true
+      },
+      "json_valid": true
+    },
+    "case": "tickets",
+    "repeat": 1,
+    "expected": {
+      "TIC-0035": "ZONE-80",
+      "TIC-0037": "ZONE-82",
+      "TIC-0048": "ZONE-71",
+      "TIC-0060": "ZONE-84",
+      "TIC-0193": "ZONE-73",
+      "TIC-0204": "ZONE-75"
+    }
+  }
+]
