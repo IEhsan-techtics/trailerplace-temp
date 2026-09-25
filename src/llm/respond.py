@@ -184,7 +184,18 @@ def _state_line(state: dict, turn: Any) -> str:
     ]
     from src.tools import contact_policy
 
-    if contact_policy.active() and contact_policy.missing(state):
+    if contact_policy.active() and int(state.get("turn_index") or 0) <= 1:
+        # The dealership's opening, on the first reply whoever writes it.
+        name = str(contact.get("name") or "").split(" ")[0]
+        opening = (f"Hi {name}, thank you" if name else "Thank you") + " for contacting TrailerPlace."
+        lines.append(
+            f'- This is their FIRST message. The reply\'s VERY FIRST words are "{opening}" - '
+            "before the line that comes before the first card, and before anything else. Then "
+            "the rest of the reply exactly as the rules say."
+        )
+    if contact_policy.active() and contact_policy.missing(state) and not (
+        getattr(getattr(turn, "contact", None), "declined", False)
+    ):
         # The contact policy's "results" moment: they have seen the trailers, now the team
         # needs to know who saw them. Overrides "nothing after the listings".
         lines.append(

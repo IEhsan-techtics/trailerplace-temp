@@ -61,6 +61,8 @@ def _fields(reply, asked=None, questions=None, contact=False, covers=(), offered
 
 def _output(reply, asked=None, questions=None, contact=False, covers=(), offered=(), **pieces):
     fields = {**empty_output().model_dump(), "about_trailers": True}
+    if "contact_info" in pieces:  # the output's own contact field; `contact` here is asked_for_contact
+        fields["contact"] = pieces.pop("contact_info").model_dump()
     fields.update(pieces)
     return ChatbotTurnReplyOutput.model_validate(
         {**fields, **_fields(reply, asked, questions, contact, covers, offered)}
@@ -416,14 +418,28 @@ def _first_turn_with_contact():
 
 def test_a_first_reply_with_the_welcome_and_their_name_goes_out():
     state = _first_turn_with_contact()
-    reply = "Thanks for reaching out, Tony! Which type of trailer fits what you need?"
-    assert _sent_as_written(state, _output(reply, [], questions=1, covers=["welcome"]))
+    reply = "Hi Tony, thank you for contacting TrailerPlace! Which type of trailer fits what you need?"
+    assert _sent_as_written(state, _output(reply, [], questions=1,
+                                           covers=["welcome", "thanked_for_contacting", "greeted_by_name"]))
     assert state["contact"]["greeted"] is True
 
 
-def test_a_first_reply_without_the_welcome_is_turned_down(rewrites):
-    reply = "Which type of trailer fits what you need - Utility, Dump or Enclosed?"
-    assert _turned_down(_first_turn_with_contact(), _output(reply, [], questions=1), rewrites)
+def test_the_first_reply_is_worded_by_the_model_with_no_fixed_line():
+    """The welcome is up to the model: no script is required to open the first reply."""
+    reply = "Hi Tony! Thank you for contacting TrailerPlace - glad you found us. Which type fits you?"
+    assert _sent_as_written(_first_turn_with_contact(), _output(
+        reply, [], questions=1, covers=["thanked_for_contacting", "greeted_by_name"]))
+
+
+def test_the_state_block_no_longer_scripts_the_first_reply():
+    from src import config
+    from src.graph.nodes import greeting
+    from src.llm.prompt import state_block
+
+    assert config.settings.llm_writes_reply
+    block = state_block({"turn_index": 1, "contact": {}, "slots": {}})
+    assert greeting.OPENING not in block
+    assert "own words" in block
 
 
 def test_their_own_first_name_is_not_taken_for_a_guess():
@@ -452,19 +468,20 @@ def test_mid_flow_with_no_moment_contact_is_never_asked(rewrites):
 
 def test_a_first_message_about_trailers_is_not_asked_for_contact(rewrites):
     state = _state(turn_index=1, contact={})
-    reply = "Welcome to TrailerPlace! A dump trailer it is. What material will you be hauling?"
-    output = _output(reply, ["haul_item"], covers=["welcome"], about_trailers=True)
+    reply = "Thank you for contacting TrailerPlace! A dump trailer it is. What material will you be hauling?"
+    output = _output(reply, ["haul_item"], covers=["welcome", "thanked_for_contacting"], about_trailers=True)
     assert _sent_as_written(state, output)
 
 
 def test_a_first_message_with_nothing_about_trailers_is_asked(rewrites):
     state = _state(turn_index=1, category=None, required_slots=[], slots={}, contact={})
-    bare = "Hi there, welcome to TrailerPlace! What kind of trailer can I help you find?"
-    assert _turned_down(state, _output(bare, [], questions=1, covers=["welcome"], about_trailers=False), rewrites)
+    bare = "Hi there, thank you for contacting TrailerPlace! What kind of trailer can I help you find?"
+    opening = ["welcome", "thanked_for_contacting"]
+    assert _turned_down(state, _output(bare, [], questions=1, covers=opening, about_trailers=False), rewrites)
 
     state = _state(turn_index=1, category=None, required_slots=[], slots={}, contact={})
     asked = bare + " And could I get your name and an email or phone?"
-    assert _sent_as_written(state, _output(asked, [], questions=1, contact=True, covers=["welcome"],
+    assert _sent_as_written(state, _output(asked, [], questions=1, contact=True, covers=opening,
                                            about_trailers=False))
 
 
@@ -480,3 +497,42 @@ def test_the_rewrite_is_told_which_details_are_missing(rewrites):
 
     assert "an email or phone number" in rewrites.calls[0]["needs"]
     assert "their name" not in rewrites.calls[0]["needs"]
+
+
+# ---- the opening: "Thank you for contacting TrailerPlace", and "Hi <name>" when given ----
+
+
+def test_a_first_reply_without_thank_you_for_contacting_is_turned_down(rewrites):
+    reply = "Hi Tony, welcome! Which type of trailer fits what you need?"
+    assert _turned_down(_first_turn_with_contact(),
+                        _output(reply, [], questions=1, covers=["welcome", "greeted_by_name"]), rewrites)
+    assert "Thank you for contacting TrailerPlace" in rewrites.calls[0]["problem"]
+
+
+def test_a_first_reply_to_someone_who_gave_their_name_must_open_with_it(rewrites):
+    reply = "Thank you for contacting TrailerPlace! Which type of trailer fits what you need?"
+    assert _turned_down(_first_turn_with_contact(),
+                        _output(reply, [], questions=1, covers=["thanked_for_contacting"]), rewrites)
+    assert 'open with "Hi Tony,"' in rewrites.calls[0]["needs"]
+
+
+def test_no_name_given_no_name_needed():
+    state = _state(turn_index=1, category=None, required_slots=[], slots={}, contact={})
+    reply = "Thank you for contacting TrailerPlace! Which type of trailer fits what you need?"
+    assert _sent_as_written(state, _output(reply, [], questions=1, covers=["thanked_for_contacting"],
+                                           about_trailers=True))
+
+
+def test_later_turns_need_no_opening():
+    assert _sent_as_written(_state(), _output("Got it. What will you be hauling?", ["haul_item"]))
+
+
+def test_the_reply_to_a_refusal_does_not_ask_again(rewrites):
+    """Asked again at the next moment, never in the answer to "I'd rather not"."""
+    from src.llm.schemas import ContactInfo
+
+    state = _state(turn_index=1, category=None, required_slots=[], slots={}, contact={"declined": True})
+    refusal = ContactInfo(name=None, email=None, phone=None, declined=True)
+    reply = "Thank you for contacting TrailerPlace. No problem at all. Which type of trailer do you need?"
+    assert _sent_as_written(state, _output(reply, [], questions=1, covers=["thanked_for_contacting"],
+                                           about_trailers=False, contact_info=refusal))

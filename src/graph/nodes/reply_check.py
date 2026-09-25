@@ -158,8 +158,9 @@ def _problem(state: dict, reply: _Reply, situation: str, due: bool) -> str | Non
     _pythons_turn(state, situation)
     if not reply.text:
         return "no reply was written"
-    if greeting.is_first_turn(state) and "welcome" not in reply.covers:
-        return "it is their first message and the reply does not welcome them"
+    problem = _opening_problem(state, reply)
+    if problem:
+        return problem
     if situation == "unavailable":
         return _unavailable_problem(state, reply)
     if situation == "off_topic":
@@ -167,6 +168,18 @@ def _problem(state: dict, reply: _Reply, situation: str, due: bool) -> str | Non
         if problem:
             return problem
     return _flow_problem(state, reply, due) or _contact_problem(reply, due) or _handoff_problem(state, reply)
+
+
+def _opening_problem(state: dict, reply: _Reply) -> str | None:
+    """The first reply thanks them for contacting TrailerPlace, and opens "Hi <name>" when
+    they gave their name - the dealership's opening. The rest of it is the model's own."""
+    if not greeting.is_first_turn(state):
+        return None
+    if "thanked_for_contacting" not in reply.covers:
+        return 'it is their first message and it does not say "Thank you for contacting TrailerPlace"'
+    if greeting.has_name(state.get("contact") or {}) and "greeted_by_name" not in reply.covers:
+        return 'they gave their name and the reply does not open with "Hi <their name>"'
+    return None
 
 
 def _pythons_turn(state: dict, situation: str) -> None:
@@ -307,7 +320,12 @@ def _needs(state: dict, situation: str, due: bool) -> str:
     outcome = state.get("turn_outcome") or {}
     needs: list[str] = []
     if greeting.is_first_turn(state):
-        needs.append("It is their first message: welcome them.")
+        name = str((state.get("contact") or {}).get("name") or "").split(" ")[0]
+        needs.append(
+            (f'It is their first message: open with "Hi {name}," and ' if name else
+             "It is their first message: ")
+            + 'say "Thank you for contacting TrailerPlace"; the rest in your own words.'
+        )
 
     if situation == "unavailable":
         status = (outcome.get("unavailable_type") or {}).get("status")

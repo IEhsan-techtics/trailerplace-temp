@@ -214,6 +214,8 @@ class ChatbotTurnOutput(StrictBaseModel):
 # misread a good reply live ("no contact details needed" read as asking for them).
 ReplyCover = Literal[
     "welcome",               # greeted them / thanked them for getting in touch
+    "thanked_for_contacting",  # the words "Thank you for contacting TrailerPlace"
+    "greeted_by_name",       # opens with "Hi <their name>"
     "declined_off_topic",    # said we only help with trailers, and did not do what they asked
     "flagged_wrong_value",   # told them a number they gave looks wrong
     "thanked_them",          # thanked them, or said a value was noted

@@ -230,7 +230,8 @@ REPORT ON YOUR REPLY - truthfully; Python checks the report, not your wording:
 - asked_for_contact: true when the reply asks for their name, email or phone.
 - question_count: how many questions the reply asks, NOT counting the contact request.
 - reply_covers: every one of these the reply does - welcome (greets them or thanks them for
-  getting in touch), declined_off_topic, flagged_wrong_value (tells them a number looks wrong),
+  getting in touch), thanked_for_contacting (says "Thank you for contacting TrailerPlace"),
+  greeted_by_name (opens with "Hi <their name>"), declined_off_topic, flagged_wrong_value (tells them a number looks wrong),
   thanked_them (thanks them or says a value is noted), said_not_stocked, passed_to_team (says
   their request has gone to our team), gave_phone.
 - offered_categories: OUR CATEGORIES the reply suggests, in our spelling; else empty.
@@ -545,7 +546,20 @@ def state_block(state: dict) -> str:
 
     from src.graph.nodes import greeting
 
-    if greeting.is_first_turn(state):
+    from src.config import settings
+
+    if greeting.is_first_turn(state) and settings.llm_writes_reply:
+        # The welcome is the model's own. The fixed line read as a script - "I see you're
+        # looking for a trailer" said to someone who had only said hello - and a customer who
+        # opened with a real question waited behind it for the answer.
+        lines.append(
+            "- This is their FIRST message. Open with \"Hi <their first name>,\" if this message "
+            "gives their name (greeted_by_name), and say the words \"Thank you for contacting "
+            "TrailerPlace\" (thanked_for_contacting). The rest is in your own words: respond to "
+            "what they said - their trailer need or their question. The rest of the fixed "
+            "welcome line in THEIR FIRST MESSAGE above does NOT apply."
+        )
+    elif greeting.is_first_turn(state):
         # Last in the prompt and specific to this turn, which is the strongest place to put
         # it. The rule in WHAT TO DO was read as being about greetings, so a customer who
         # opened with "what do you guys sell?" got the catalogue and no hello at all.
@@ -553,8 +567,6 @@ def state_block(state: dict) -> str:
             "- This is their FIRST message. Your acknowledgement MUST begin with, word for "
             f'word: "{greeting.OPENING}" Whatever else you say comes after it.'
         )
-
-    from src.config import settings
 
     contact = state.get("contact") or {}
     if settings.llm_writes_reply:

@@ -56,7 +56,14 @@ def missing(state: dict) -> list[str]:
 
 
 def ask_due(state: dict, output: Any) -> bool:
-    """Whether this reply ends by asking for their details."""
+    """Whether this reply ends by asking for their details.
+
+    Not in the reply to the message that refused them. A refusal only stops the asking for
+    that turn - they are asked again at the next moment - but asking in the very answer to
+    "I'd rather not share my details" is not listening.
+    """
+    if getattr(getattr(output, "contact", None), "declined", False):
+        return False
     return bool(missing(state)) and moment(state, output) is not None
 
 
