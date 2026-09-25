@@ -46,7 +46,7 @@ def test_a_padded_flag_still_parses(env):
 def test_an_unset_variable_still_takes_the_default(env):
     """The helper has to keep os.getenv's contract: unset is not the same as empty."""
     env.delenv("CHAT_MODEL", raising=False)
-    assert Settings.from_env().chat_model == "gpt-5.6-luna"
+    assert Settings.from_env().chat_model == "gpt-6-luna"
 
 
 def test_a_variable_set_to_only_whitespace_reads_as_unset(env):

@@ -11,11 +11,13 @@ import logging
 import re
 from typing import Any
 
+from src.config import settings
 from src.domain import cards
 from src.domain import company
 from src.domain import axles
 from src.domain import gooseneck as gooseneck_domain
 from src.graph.nodes import greeting
+from src.graph.nodes import reply_check
 from src.tools.questions import carry_on_question, mark_asked, next_unanswered_slot, question_text
 
 logger = logging.getLogger(__name__)
@@ -100,6 +102,11 @@ def compose_node(state: dict, output: Any) -> dict:
         outcome["assistant_text"] = _no_invented_name(state, _gate_text(state, output))
         outcome["asked_slot"] = None
         greeting.note_asked(state)
+        return state
+
+    # The model wrote the whole reply itself (LLM_WRITES_REPLY). Sent as written when it
+    # passes the checks; otherwise it is assembled below from the model's pieces, as always.
+    if settings.llm_writes_reply and reply_check.use_model_reply(state, output):
         return state
 
     parts: list[str] = []

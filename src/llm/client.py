@@ -21,6 +21,7 @@ from src.llm import usage
 from src.llm.prompt import build_messages
 from src.llm.schemas import (
     ChatbotTurnOutput,
+    ChatbotTurnReplyOutput,
     ContactInfo,
     ExtractedFields,
     HaulClassification,
@@ -97,7 +98,7 @@ def analyze_turn(state: dict, user_message: str) -> ChatbotTurnOutput:
             model=settings.chat_model,
             input=messages,
             reasoning={"effort": settings.chat_reasoning_effort},
-            text_format=ChatbotTurnOutput,
+            text_format=ChatbotTurnReplyOutput if settings.llm_writes_reply else ChatbotTurnOutput,
             # Every session shares one static prefix; the key routes them all to the same
             # cache instead of leaving it to the provider's hashing.
             prompt_cache_key=ANALYSIS_CACHE_KEY,

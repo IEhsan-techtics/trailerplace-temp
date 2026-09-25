@@ -202,6 +202,30 @@ WRITING THE REPLY
   Only if they said they do not understand it: explain in one short sentence BEFORE it.
 """
 
+# Only with LLM_WRITES_REPLY on. The pieces above are still filled - they are what the reply
+# falls back to when Python's check turns this one down.
+_REPLY = """
+THE REPLY -> reply and asked_slots
+Also write the WHOLE message they will read in reply, as one natural message: your
+acknowledgement or answer first, then at most ONE question, then (only if the state block says
+to ask for contact details) that request as the very last line.
+- ONE question. One sentence, one question mark. Never two questions, never "X? Or Y?".
+  The category question too: "Which type fits what you need - Utility, Dump, Enclosed,
+  Equipment or something else?" is one question.
+- With a category set and anything under "Still to ask": ask one of those, in the exact words
+  given, and put its slot name in asked_slots. Pick the one that fits the conversation best; if
+  this message answers one, ask a different one.
+- They choose a category in THIS message: ask one of its questions from QUESTIONS BY CATEGORY,
+  and name that slot.
+- Nothing left to ask, or still no category: asked_slots is empty.
+- Never ask about anything they have already told you, in this message or before.
+- Contact details: ask only when the state block says to. Never when it says not to.
+- asked_slots must match the reply exactly: the question in the reply IS that slot's question.
+  The contact request is never in asked_slots.
+- Every rule above applies to reply too: no name they did not give, no invented facts, no
+  whole lists.
+"""
+
 
 def system_prompt() -> str:
     """The static half. Identical every turn, so it caches.
@@ -211,21 +235,30 @@ def system_prompt() -> str:
     trip in the latency path of every reply. A newly activated rules version changes the
     CARGO TRAITS section, so it rebuilds the prompt once - and only then.
     """
-    return _system_prompt_for(rules_version())
+    from src.config import settings
+
+    return _system_prompt_for(rules_version(), settings.llm_writes_reply)
 
 
-@lru_cache(maxsize=2)
-def _system_prompt_for(version: int) -> str:
+@lru_cache(maxsize=4)
+def _system_prompt_for(version: int, writes_reply: bool = False) -> str:
     # Instructions first, reference data after: the data is what the rules point at.
+    intro = (
+        "message, fill in the output fields and write the reply; Python checks it before "
+        "it is sent."
+        if writes_reply
+        else "message and fill in the output fields; Python decides what happens next and "
+        "builds the reply from your pieces."
+    )
     return "\n\n".join(
         [
             f"You are the sales assistant for {company.NAME}, a trailer dealership in "
             f"{company.LOCATION}, chatting with customers online. Each turn you read their "
-            "message and fill in the output fields; Python decides what happens next and "
-            "builds the reply from your pieces.",
+            + intro,
             _RULES.strip(),
             _SITUATIONS.strip(),
             _FIELDS.strip(),
+            *([_REPLY.strip(), questions_by_category_block()] if writes_reply else []),
             cargo_traits_block(),
             company.company_facts_block(),
             company.standard_answers_block(with_keys=True),
@@ -240,6 +273,27 @@ def _system_prompt_for(version: int) -> str:
 
 
 system_prompt.cache_clear = _system_prompt_for.cache_clear  # type: ignore[attr-defined]
+
+
+def questions_by_category_block() -> str:
+    """Each category's questions in the rules' own words, for the turn a category is chosen.
+
+    The state block lists what is still to ask only once a category is set - and it describes
+    the state BEFORE this message is applied. So on the turn they name one ("I need a utility
+    trailer"), the model had no list to pick from, asked nothing it could name, and its reply
+    was turned down for it. Static per rules version, so it caches with the rest.
+    """
+    rules = current_rules()
+    lines = [
+        "QUESTIONS BY CATEGORY - when they choose a category THIS message, ask one of its "
+        "questions (not one they just answered). A rule may add or skip one for a particular "
+        "cargo; from the next turn the state block has the exact list."
+    ]
+    for category, spec in rules.categories.items():
+        asks = [f'{slot}: "{spec.questions[slot]}"' for slot in spec.required if spec.questions.get(slot)]
+        if asks:
+            lines.append(f"- {category}: " + "; ".join(asks))
+    return "\n".join(lines)
 
 
 def cargo_traits_block() -> str:

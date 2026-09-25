@@ -145,7 +145,7 @@ class ReplyOutput(StrictBaseModel):
     cited_listing_urls: list[str] = Field(description="Exact URLs for every listing mentioned in the reply.")
 
 # ---------------------------------------------------------------------------------------
-# The single-call turn output (one gpt-5.6-luna invocation per user message).
+# The single-call turn output (one gpt-6-luna invocation per user message).
 #
 # Deliberately NOT a superset of TurnAnalysis: email_triggers is absent because email is out
 # of scope for this build, and four reply-authoring fields are present because there is no
@@ -207,3 +207,16 @@ class ChatbotTurnOutput(StrictBaseModel):
     )
     next_question_slot: str | None = Field(description="A slot from 'still to ask'; Python has the final say.")
     next_question_text: str | None = Field(description="That question in one sentence.")
+
+
+class ChatbotTurnReplyOutput(ChatbotTurnOutput):
+    """The same output plus the whole reply, used when LLM_WRITES_REPLY is on.
+
+    A subclass rather than two more fields on the base, so with the flag off the model is
+    asked for exactly what it was asked for before - no extra output tokens, no new schema.
+    """
+
+    reply: str = Field(description="The whole message to send them, one question at most (see THE REPLY).")
+    asked_slots: list[str] = Field(
+        description="The 'still to ask' slot your reply asks, or empty. Never more than one."
+    )

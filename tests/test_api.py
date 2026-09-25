@@ -32,7 +32,7 @@ def test_health_is_ok_in_the_shape_app_py_waits_for(client, monkeypatch):
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "ok"
-    assert body["model"] == "gpt-5.6-luna"
+    assert body["model"] == "gpt-6-luna"
 
 
 def test_health_is_not_ok_without_an_api_key(client, monkeypatch):

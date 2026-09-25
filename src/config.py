@@ -54,10 +54,14 @@ class Settings:
     analyze_reasoning_effort: str = "minimal"
     # The ONE conversational call per turn (see src/graph/nodes/analyze.py). Separate from
     # analyze_model, which belongs to the older two-call stack this repo was extracted from.
-    chat_model: str = "gpt-5.6-luna"
-    # "none", not "minimal": gpt-5.6-luna rejects minimal with a 400, and its lowest
-    # setting is none. Checked against the live API.
-    chat_reasoning_effort: str = "none"
+    chat_model: str = "gpt-6-luna"
+    # "low": a little reasoning buys a reply that follows the state block. gpt-6-luna takes
+    # low (checked against the live API); gpt-5.6-luna's lowest was "none", not "minimal".
+    chat_reasoning_effort: str = "low"
+    # The model writes the whole reply and names the question it asked; Python checks it and
+    # falls back to assembling the reply itself (src/graph/nodes/reply_check.py). Off, the
+    # reply is assembled from the model's pieces exactly as before.
+    llm_writes_reply: bool = False
     search_max_recommendations: int = 5
     feature_llm_rerank_enabled: bool = True
     feature_rerank_model: str = "gpt-5-nano-2025-08-07"
@@ -183,8 +187,9 @@ class Settings:
             openai_model=_env("OPENAI_MODEL", "gpt-4o-mini"),
             analyze_model=_env("ANALYZE_MODEL", "gpt-5-mini"),
             analyze_reasoning_effort=_env("ANALYZE_REASONING_EFFORT", "minimal"),
-            chat_model=_env("CHAT_MODEL", "gpt-5.6-luna"),
-            chat_reasoning_effort=_env("CHAT_REASONING_EFFORT", "none"),
+            chat_model=_env("CHAT_MODEL", "gpt-6-luna"),
+            chat_reasoning_effort=_env("CHAT_REASONING_EFFORT", "low"),
+            llm_writes_reply=_bool(_env("LLM_WRITES_REPLY")),
             search_max_recommendations=_int(_env("SEARCH_MAX_RECOMMENDATIONS"), 5),
             feature_llm_rerank_enabled=_bool(_env("FEATURE_LLM_RERANK_ENABLED"), True),
             feature_rerank_model=_env("FEATURE_RERANK_MODEL", "gpt-5-nano-2025-08-07"),
