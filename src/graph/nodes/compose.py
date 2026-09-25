@@ -290,10 +290,13 @@ def _no_invented_name(state: dict, text: str) -> str:
     becomes "Thanks - I've got your email", which is the line the model meant to write.
     """
     known = str((state.get("contact") or {}).get("name") or "").strip().casefold()
+    # Any part of the name they gave. Live, "Tony Stephens" was greeted "Thanks, Tony" and the
+    # first name - his own - was taken out as a guess, because it is not the whole name.
+    known_parts = set(known.split())
 
     def _drop(match: re.Match) -> str:
         guessed = match.group(2)
-        if guessed.casefold() in _NOT_A_NAME or (known and guessed.casefold() == known):
+        if guessed.casefold() in _NOT_A_NAME or guessed.casefold() in known_parts:
             return match.group(0)
         logger.info(
             "COMPOSE dropped an invented name: session=%s name=%r known=%r",

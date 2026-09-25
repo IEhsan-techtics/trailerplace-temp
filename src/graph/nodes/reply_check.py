@@ -127,10 +127,9 @@ def _with_handoff_before_the_question(outcome: dict, reply: str) -> str:
 
 def _problem(state: dict, reply: str, asked: list[str], situation: str = "flow") -> str | None:
     """Why this reply cannot go out as written, or None when it can."""
-    from src.graph.nodes.compose import _contact_ask_is_due, _names_too_many_categories
+    from src.graph.nodes.compose import _OPENING_RE, _contact_ask_is_due, _names_too_many_categories
 
     outcome = state.get("turn_outcome") or {}
-    contact = state.get("contact") or {}
 
     if not reply:
         return "no reply written"
@@ -154,8 +153,12 @@ def _problem(state: dict, reply: str, asked: list[str], situation: str = "flow")
         return "a search ran"
     if outcome.get("wants_results") and not state.get("category"):
         return "results asked for with no category"
-    if greeting.contact_is_complete(contact) and not contact.get("greeted") and greeting.is_first_turn(state):
-        return "first-turn welcome"
+    if greeting.is_first_turn(state) and not _OPENING_RE.search(reply):
+        # The one sentence every conversation is guaranteed to carry. Checked, not supplied:
+        # the model was told to open with it word for word, and a reply that did can stand.
+        # Live, a customer who opened with "Hi, I'm Tony Stephens, 806-555-0199" got compose's
+        # welcome instead of the model's "Thanks, Tony" - with his name taken out of it.
+        return "first reply has no welcome"
     if not state.get("category") and state.get("listing_interest_logged"):
         return "they already picked a trailer"
 

@@ -431,3 +431,46 @@ def test_the_passed_on_line_goes_before_the_question():
 
     assert text.startswith("Thanks, Sam. I've passed your request on to our team")
     assert text.endswith("Utility, Dump or Enclosed?")
+
+
+# ---- the first message ----
+
+
+def _first_turn_with_contact():
+    return _state(turn_index=1, category=None, required_slots=[], slots={},
+                  contact={"name": "Tony Stephens", "phone": "806-555-0199"})
+
+
+def test_a_first_reply_with_the_welcome_and_their_name_goes_out():
+    """Live: "Hi, I'm Tony Stephens, 806-555-0199" was answered with "...here to help! Thanks.":
+    compose's welcome, with his name taken out."""
+    from src.graph.nodes import greeting
+
+    state = _first_turn_with_contact()
+    reply = (
+        f"{greeting.OPENING} Thanks, Tony. Which type of trailer fits what you need - Utility, "
+        "Dump, Enclosed or something else?"
+    )
+    outcome = _send(state, _output(reply, []))
+
+    assert outcome["assistant_text"] == reply
+    assert state["contact"]["greeted"] is True
+
+
+def test_a_first_reply_without_the_welcome_falls_back():
+    reply = "Thanks, Tony. Which type of trailer fits what you need - Utility, Dump or Enclosed?"
+    assert _falls_back(_first_turn_with_contact(), _output(reply, []))
+
+
+def test_their_own_first_name_is_not_taken_for_a_guess():
+    state = {"contact": {"name": "Tony Stephens"}, "session_id": "s1"}
+    assert compose._no_invented_name(state, "Thanks, Tony - great to hear from you.") == (
+        "Thanks, Tony - great to hear from you."
+    )
+
+
+def test_a_name_they_never_gave_is_still_taken_out():
+    state = {"contact": {"name": "Tony Stephens"}, "session_id": "s1"}
+    assert compose._no_invented_name(state, "Thanks, Ibrahim - great to hear from you.") == (
+        "Thanks - great to hear from you."
+    )
