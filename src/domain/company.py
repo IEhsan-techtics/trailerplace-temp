@@ -13,6 +13,9 @@ from __future__ import annotations
 from src.config import settings
 
 NAME = "TrailerPlace"
+# The only location - confirmed with the dealership, and said to customers as such. Live, a
+# customer asked "Do you have a location in San Antonio?" and was given the Wharton address
+# and hours without ever hearing the answer, because the bot was never told there is no other.
 LOCATION = "Wharton, TX"
 PHONE = "979-532-1486"
 # Stated to customers, so it is a fact and not a guess. Days are deliberately not asserted:
@@ -44,6 +47,9 @@ def company_facts_block() -> str:
         [
             "DEALERSHIP FACTS (the only business facts you may state)",
             f"- {NAME}, {LOCATION}. Phone {PHONE}. Website {website()}.",
+            f"- {LOCATION} is our ONLY location. Asked about another city -> say so first: \"We "
+            f"don't have a location in San Antonio - we're only in {LOCATION}.\" Then the details, "
+            "and that we deliver.",
             f"- Open {HOURS}. State the times only - we were not told which days, so never "
             "name days of the week.",
             f"- Services: {', '.join(SERVICES)}. Financing, trade-ins, service and parts are "

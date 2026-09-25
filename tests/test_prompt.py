@@ -54,7 +54,11 @@ def qualified_state(**kwargs):
 # customer who says "an aluminum utility trailer" has made one choice, not two, and
 # Python reads the pairing too - but only from words it recognizes, and people misspell
 # both halves.
-MAX_SYSTEM_PROMPT_CHARS = 15_600
+#
+# Raised from 15,600 for the ONLY LOCATION fact (~160 chars; 15,714 on 2026-09-25). Live, a
+# customer asked "Do you have a location in San Antonio?" and got the Wharton address and
+# hours without the answer: nothing said Wharton is the only one, so the bot never said no.
+MAX_SYSTEM_PROMPT_CHARS = 15_800
 
 
 def test_the_system_prompt_stays_short():
