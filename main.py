@@ -34,7 +34,7 @@ from fastapi import FastAPI, HTTPException, Response  # noqa: E402
 from fastapi.responses import StreamingResponse  # noqa: E402
 from pydantic import BaseModel, ConfigDict, Field  # noqa: E402
 
-from src import conversation_store, warmup, db, turn_saver, turn_status  # noqa: E402
+from src import conversation_store, warmup, db, idle_clock, turn_saver, turn_status  # noqa: E402
 from src.config import settings  # noqa: E402
 from src.domain.reply_chunks import split_reply_into_chunks  # noqa: E402
 from src.graph.build import run_turn  # noqa: E402
@@ -69,8 +69,12 @@ async def lifespan(_app: FastAPI):
     # first-turn latency that belongs to startup, not to whoever happens to send the first
     # message. On a serverless deployment that is every scale-from-zero.
     warmup.warm_everything()
+    # The 5-minute rule's clock (src/idle_clock.py). Off unless LLM_WRITES_REPLY is on and
+    # IDLE_RESULTS_MINUTES is above zero.
+    idle_clock.start()
     yield
 
+    idle_clock.stop()
     # On the way down. A finished turn whose commit is still queued was answered but not
     # saved, so the container waits for the queue before it goes - and says so, loudly, if
     # the clock runs out first.

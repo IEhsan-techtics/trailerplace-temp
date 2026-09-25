@@ -65,8 +65,10 @@ class Settings:
     # The 5-minute rule (src/idle_timer.py): minutes of silence, with a question of ours
     # waiting, before that category's trailers are shown anyway. 0 switches it off.
     idle_results_minutes: float = 5.0
-    # Shared secret for POST /internal/idle-sweep, which the minute job calls. Empty means the
-    # route is not mounted at all.
+    # How often the in-process clock (src/idle_clock.py) looks for due timers.
+    idle_sweep_interval_seconds: float = 60.0
+    # Shared secret for POST /internal/idle-sweep, a manual trigger for the same sweep - the
+    # clock needs no route. Empty means the route is not mounted at all.
     idle_sweep_token: str = ""
     search_max_recommendations: int = 5
     feature_llm_rerank_enabled: bool = True
@@ -197,6 +199,7 @@ class Settings:
             chat_reasoning_effort=_env("CHAT_REASONING_EFFORT", "low"),
             llm_writes_reply=_bool(_env("LLM_WRITES_REPLY")),
             idle_results_minutes=_float(_env("IDLE_RESULTS_MINUTES"), 5.0),
+            idle_sweep_interval_seconds=_float(_env("IDLE_SWEEP_INTERVAL_SECONDS"), 60.0),
             idle_sweep_token=_env("IDLE_SWEEP_TOKEN", ""),
             search_max_recommendations=_int(_env("SEARCH_MAX_RECOMMENDATIONS"), 5),
             feature_llm_rerank_enabled=_bool(_env("FEATURE_LLM_RERANK_ENABLED"), True),

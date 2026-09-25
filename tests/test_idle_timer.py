@@ -260,3 +260,38 @@ def test_the_page_can_fetch_what_it_has_not_drawn_with_the_cards(new_path):
     assert after["count"] == before + 1
     [idle] = after["messages"]
     assert idle["role"] == "assistant" and idle["listings"]
+
+
+# ---- the clock: in the API, every minute ----
+
+
+def test_the_clock_fires_due_timers_by_itself(new_path, monkeypatch):
+    """No job and no request: the background thread runs the sweep on its own."""
+    import time as _time
+
+    from src import conversation_store, idle_clock, idle_sweep
+
+    monkeypatch.setattr(config, "settings", replace(config.settings, idle_sweep_interval_seconds=10))
+    monkeypatch.setattr(idle_clock, "FIRST_TICK_SECONDS", 0.05)
+    real_sweep = idle_sweep.sweep
+    monkeypatch.setattr(idle_sweep, "sweep", lambda: real_sweep(now=_later()))
+
+    _quiet_dump_customer(new_path, session="s-clock")
+    assert idle_clock.start()
+    try:
+        deadline = _time.time() + 5
+        while conversation_store.armed_timer("s-clock") is not None and _time.time() < deadline:
+            _time.sleep(0.05)
+    finally:
+        idle_clock.stop()
+
+    assert conversation_store.armed_timer("s-clock") is None
+    _, conversation, _ = conversation_store.load_session("s-clock")
+    assert conversation[-1]["role"] == "assistant" and conversation[-1].get("idle")
+
+
+def test_the_clock_stays_off_without_the_rule(monkeypatch):
+    from src import idle_clock
+
+    monkeypatch.setattr(config, "settings", replace(config.settings, llm_writes_reply=False))
+    assert idle_clock.start() is False
