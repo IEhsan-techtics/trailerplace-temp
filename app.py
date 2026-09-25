@@ -184,6 +184,49 @@ def _render_message_bubbles(msg: dict):
     return bubble
 
 
+def _listings_from_api(items: list | None) -> list:
+    """The API's listing dicts as the cards render them. Shared by a live reply and a reply
+    the page picks up later from GET /session/{id}/messages."""
+    listings = []
+    for d in items or []:
+        if not isinstance(d, dict):
+            continue
+        try:
+            listings.append(
+                TrailerListing(
+                    listing_id=str(d.get("url") or d.get("title") or ""),
+                    title=str(d.get("title") or ""),
+                    condition=str(d.get("condition") or "New"),
+                    price=float(
+                        d["price"].replace("$", "").replace(",", "")
+                    )
+                    if isinstance(d.get("price"), str)
+                    and d.get("price")
+                    not in ("Call for price", None, "")
+                    else d.get("price"),
+                    price_display=str(d.get("price") or "") or None,
+                    payments_from=None,
+                    category_subcategory=str(d.get("category") or ""),
+                    make=str(d.get("make") or ""),
+                    color=str(d.get("color") or ""),
+                    hitch_type=d.get("hitch_type"),
+                    year=d.get("year"),
+                    length=d.get("length"),
+                    width=d.get("width"),
+                    axles=d.get("axles"),
+                    gvwr=d.get("gvwr"),
+                    payload_capacity=d.get("payload_capacity"),
+                    trailer_material=d.get("material"),
+                    floor=d.get("floor"),
+                    url=str(d.get("url") or ""),
+                    score=d.get("relevance_score"),
+                )
+            )
+        except Exception:
+            pass
+    return listings
+
+
 def _reset_api_session(session_id: str) -> None:
     try:
         requests.post(
@@ -1750,43 +1793,7 @@ def _process_assistant_reply(prompt: str) -> bool:
     thinking_context = data.get("thinking_context")
     st.session_state.pending_turn_id = None
 
-    listings = []
-    for d in (data.get("listings") or []):
-        if not isinstance(d, dict):
-            continue
-        try:
-            listings.append(
-                TrailerListing(
-                    listing_id=str(d.get("url") or d.get("title") or ""),
-                    title=str(d.get("title") or ""),
-                    condition=str(d.get("condition") or "New"),
-                    price=float(
-                        d["price"].replace("$", "").replace(",", "")
-                    )
-                    if isinstance(d.get("price"), str)
-                    and d.get("price")
-                    not in ("Call for price", None, "")
-                    else d.get("price"),
-                    price_display=str(d.get("price") or "") or None,
-                    payments_from=None,
-                    category_subcategory=str(d.get("category") or ""),
-                    make=str(d.get("make") or ""),
-                    color=str(d.get("color") or ""),
-                    hitch_type=d.get("hitch_type"),
-                    year=d.get("year"),
-                    length=d.get("length"),
-                    width=d.get("width"),
-                    axles=d.get("axles"),
-                    gvwr=d.get("gvwr"),
-                    payload_capacity=d.get("payload_capacity"),
-                    trailer_material=d.get("material"),
-                    floor=d.get("floor"),
-                    url=str(d.get("url") or ""),
-                    score=d.get("relevance_score"),
-                )
-            )
-        except Exception:
-            pass
+    listings = _listings_from_api(data.get("listings"))
 
     message = {
         "role": "assistant",
@@ -1882,6 +1889,43 @@ elif prompt := st.chat_input(placeholder, disabled=chat_input_disabled):
     st.session_state.pending_turn_id = str(uuid.uuid4())
     st.session_state.chat_awaiting_response = True
     st.rerun()
+
+# Replies nobody asked for in the moment - the 5-minute rule's trailers (src/idle_sweep.py) -
+# arrive with no request held open for them, so the page asks for anything new while it is
+# open. A customer who has left sees them when they come back: the history holds them.
+_UNPROMPTED_POLL_SECONDS = max(5, int(os.getenv("CHAT_UNPROMPTED_POLL_SECONDS", "20")))
+
+
+@st.fragment(run_every=_UNPROMPTED_POLL_SECONDS)
+def _poll_for_unprompted_replies() -> None:
+    session_id = st.session_state.get("chat_session_id")
+    if not session_id or st.session_state.get("chat_awaiting_response"):
+        return
+    known = len(st.session_state.messages)
+    try:
+        response = requests.get(
+            f"{CHATBOT_API_URL}/session/{session_id}/messages", params={"after": known}, timeout=5
+        )
+        response.raise_for_status()
+        data = response.json()
+    except (requests.RequestException, ValueError):
+        return
+    new = data.get("messages") or []
+    if int(data.get("count") or 0) <= known or not new:
+        return
+    for entry in new:
+        st.session_state.messages.append({
+            "role": entry.get("role") or "assistant",
+            "content": entry.get("content") or "",
+            "listings": _listings_from_api(entry.get("listings")) or None,
+            "user_feedback": None,
+            "thinking_result": None,
+        })
+    st.rerun(scope="app")
+
+
+if backend_ready and st.session_state.messages and not awaiting_response:
+    _poll_for_unprompted_replies()
 
 if backend_status == "initializing":
     time.sleep(1)

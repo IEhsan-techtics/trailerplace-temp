@@ -308,6 +308,25 @@ def get_session(session_id: str) -> dict[str, Any]:
     }
 
 
+@app.get("/session/{session_id}/messages")
+def get_session_messages(session_id: str, after: int = 0) -> dict[str, Any]:
+    """The messages after the first ``after`` - what the chat page has not drawn yet.
+
+    Polled by app.py while a conversation is open, for the replies nobody asked for in the
+    moment: the 5-minute rule's trailers (src/idle_sweep.py) arrive with no request held open
+    for them. Those carry their listings, so the page can draw the cards.
+    """
+    session_id = _require_uuid(session_id, "session_id")
+    _snapshot, conversation, _lead_id = conversation_store.load_session(session_id)
+    messages = [
+        {"role": entry.get("role"), "content": entry.get("content"),
+         "listings": entry.get("listings") or None}
+        for entry in (conversation or [])
+        if isinstance(entry, dict) and entry.get("role") in {"user", "assistant"}
+    ]
+    return {"session_id": session_id, "count": len(messages), "messages": messages[max(0, after):]}
+
+
 class FeedbackRequest(BaseModel):
     """A tester's verdict on one of Luna's replies."""
 

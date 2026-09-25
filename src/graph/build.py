@@ -389,6 +389,13 @@ def build_graph():
     return graph.compile()
 
 
+def _json_safe(value: Any) -> Any:
+    """Listings as plain JSON, for a JSONB column: prices can come back as Decimals."""
+    import json
+
+    return json.loads(json.dumps(value, default=str))
+
+
 # The customer's side of an idle turn, as the reply pass reads it. Not something they said -
 # the reply pass is told so in its own instructions (respond._state_line).
 IDLE_MESSAGE = "(The customer has not replied for a few minutes.)"
@@ -447,7 +454,13 @@ def run_idle_turn(session_id: str, category: str, *, turn_id: Any, channel_id: s
         compose_node(state, output)
 
         assistant_text = state["turn_outcome"].get("assistant_text", "")
-        state["messages"] = list(conversation) + [{"role": "assistant", "content": assistant_text}]
+        listings = _json_safe(state["turn_outcome"].get("listings") or [])
+        # The listings ride on the message itself: nobody is holding a request open for this
+        # reply, so web chat picks it up from GET /session/{id}/messages and draws the cards
+        # from here.
+        state["messages"] = list(conversation) + [
+            {"role": "assistant", "content": assistant_text, "listings": listings, "idle": True}
+        ]
         response = {
             "assistant_text": assistant_text,
             "listings": state["turn_outcome"].get("listings", []),

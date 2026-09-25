@@ -240,3 +240,23 @@ def test_the_route_wants_its_token(monkeypatch):
     assert client.post("/internal/idle-sweep").status_code == 401
     assert client.post("/internal/idle-sweep", headers={"X-Idle-Sweep-Token": "wrong"}).status_code == 401
     assert client.post("/internal/idle-sweep", headers={"X-Idle-Sweep-Token": "s3cret"}).json() == {"swept": 0, "results": []}
+
+
+def test_the_page_can_fetch_what_it_has_not_drawn_with_the_cards(new_path):
+    """Web chat: the idle reply comes back from GET /session/{id}/messages with its listings."""
+    from fastapi.testclient import TestClient
+
+    import main
+    from src import idle_sweep
+
+    session = str(uuid.uuid4())
+    _quiet_dump_customer(new_path, session=session)
+    client = TestClient(main.app)
+    before = client.get(f"/session/{session}/messages").json()["count"]
+
+    idle_sweep.sweep(now=_later())
+    after = client.get(f"/session/{session}/messages", params={"after": before}).json()
+
+    assert after["count"] == before + 1
+    [idle] = after["messages"]
+    assert idle["role"] == "assistant" and idle["listings"]
