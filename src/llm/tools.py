@@ -283,7 +283,9 @@ class ToolRunner:
                     f"NO SEARCH RAN: we are waiting on their answer about {what}. "
                     "Ask that question and show no listings."
                 )
-        if greeting.contact_gate_applies(self.state):
+        from src.tools import contact_policy
+
+        if greeting.contact_gate_applies(self.state) and not contact_policy.active():
             return (
                 "NO SEARCH RAN: we have not asked who we are speaking with yet. "
                 "Ask for their name and a way to reach them, and show no listings."

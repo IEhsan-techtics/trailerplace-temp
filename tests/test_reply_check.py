@@ -21,7 +21,11 @@ from src.llm.schemas import ChatbotTurnReplyOutput, ReplyRewrite
 
 @pytest.fixture(autouse=True)
 def writes_reply(monkeypatch):
-    monkeypatch.setattr(compose, "settings", replace(compose.settings, llm_writes_reply=True))
+    from src import config
+
+    on = replace(config.settings, llm_writes_reply=True)
+    monkeypatch.setattr(config, "settings", on)
+    monkeypatch.setattr(compose, "settings", on)
 
 
 class Rewrites:
@@ -56,7 +60,7 @@ def _fields(reply, asked=None, questions=None, contact=False, covers=(), offered
 
 
 def _output(reply, asked=None, questions=None, contact=False, covers=(), offered=(), **pieces):
-    fields = empty_output().model_dump()
+    fields = {**empty_output().model_dump(), "about_trailers": True}
     fields.update(pieces)
     return ChatbotTurnReplyOutput.model_validate(
         {**fields, **_fields(reply, asked, questions, contact, covers, offered)}
@@ -248,9 +252,10 @@ def test_asking_for_contact_when_it_is_not_due_is_turned_down(rewrites):
 
 
 def test_a_due_contact_ask_rides_along():
+    """An answered standard question is one of the moments to ask."""
     state = _state(contact={})
-    reply = "What will you be hauling? Could I get your name and the best email or phone?"
-    assert _sent_as_written(state, _output(reply, ["haul_item"], contact=True))
+    reply = "We offer financing - call 979-532-1486. What will you be hauling? And your name and number?"
+    assert _sent_as_written(state, _output(reply, ["haul_item"], contact=True, faq_key="financing"))
     assert state["contact"]["asks_without_progress"] == 1
 
 
@@ -258,7 +263,8 @@ def test_a_due_contact_ask_it_left_out_is_written_again_not_bolted_on(rewrites):
     rewrites.queue.append(_rewrite("What will you be hauling? And may I have your name and number?",
                                    ["haul_item"], contact=True))
     state = _state(contact={})
-    outcome = _send(state, _output("Got it. What will you be hauling?", ["haul_item"]))
+    outcome = _send(state, _output("We offer financing. What will you be hauling?", ["haul_item"],
+                                   faq_key="financing"))
 
     assert outcome["assistant_text"] == "What will you be hauling? And may I have your name and number?"
     assert "contact details are due" in rewrites.calls[0]["problem"]
@@ -266,8 +272,8 @@ def test_a_due_contact_ask_it_left_out_is_written_again_not_bolted_on(rewrites):
 
 def test_a_due_contact_ask_may_be_the_one_question():
     state = _state(contact={})
-    reply = "You're welcome! Could you share your name and an email or phone so our team can follow up?"
-    outcome = _send(state, _output(reply, [], contact=True, covers=["thanked_them"]))
+    reply = "We're open 8 to 6. Could you share your name and an email or phone so our team can follow up?"
+    outcome = _send(state, _output(reply, [], contact=True, faq_key="store_info"))
 
     assert outcome["assistant_text"] == reply
     assert outcome["asked_slot"] is None
@@ -432,3 +438,45 @@ def test_a_name_they_never_gave_is_still_taken_out():
     assert compose._no_invented_name(state, "Thanks, Ibrahim - great to hear from you.") == (
         "Thanks - great to hear from you."
     )
+
+
+# ---- the contact policy: four moments, no others ----
+
+
+def test_mid_flow_with_no_moment_contact_is_never_asked(rewrites):
+    """No moment, no ask - even with nothing on file and nothing asked before."""
+    output = _output("What will you be hauling? And your name and number?", ["haul_item"], contact=True)
+    assert _turned_down(_state(contact={}), output, rewrites)
+    assert _sent_as_written(_state(contact={}), _output("What will you be hauling?", ["haul_item"]))
+
+
+def test_a_first_message_about_trailers_is_not_asked_for_contact(rewrites):
+    state = _state(turn_index=1, contact={})
+    reply = "Welcome to TrailerPlace! A dump trailer it is. What material will you be hauling?"
+    output = _output(reply, ["haul_item"], covers=["welcome"], about_trailers=True)
+    assert _sent_as_written(state, output)
+
+
+def test_a_first_message_with_nothing_about_trailers_is_asked(rewrites):
+    state = _state(turn_index=1, category=None, required_slots=[], slots={}, contact={})
+    bare = "Hi there, welcome to TrailerPlace! What kind of trailer can I help you find?"
+    assert _turned_down(state, _output(bare, [], questions=1, covers=["welcome"], about_trailers=False), rewrites)
+
+    state = _state(turn_index=1, category=None, required_slots=[], slots={}, contact={})
+    asked = bare + " And could I get your name and an email or phone?"
+    assert _sent_as_written(state, _output(asked, [], questions=1, contact=True, covers=["welcome"],
+                                           about_trailers=False))
+
+
+def test_a_customer_who_declined_is_still_asked_at_a_moment(rewrites):
+    state = _state(contact={"declined": True})
+    reply = "We offer financing - call 979-532-1486. What will you be hauling? Your name and number?"
+    assert _sent_as_written(state, _output(reply, ["haul_item"], contact=True, faq_key="financing"))
+
+
+def test_the_rewrite_is_told_which_details_are_missing(rewrites):
+    state = _state(contact={"name": "Dave"})
+    _send(state, _output("We offer financing. What will you be hauling?", ["haul_item"], faq_key="financing"))
+
+    assert "an email or phone number" in rewrites.calls[0]["needs"]
+    assert "their name" not in rewrites.calls[0]["needs"]

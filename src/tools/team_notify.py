@@ -71,6 +71,12 @@ def is_dropped(state: dict) -> bool:
     with an email already on file the second is the one that happened. Dropping a lead we
     can act on is a worse mistake than telling the team about one they can.
     """
+    from src import config
+
+    if config.settings.llm_writes_reply:
+        # A refusal no longer ends the asking (src/tools/contact_policy.py): they are asked
+        # again at the next moment that warrants it, so the request waits for the answer.
+        return False
     return declined(state) and not has_reachable(state)
 
 

@@ -236,11 +236,23 @@ class ReplyFields(StrictBaseModel):
     offered_categories: list[str] = Field(description="OUR CATEGORIES the reply suggests, else empty.")
 
 
-class ChatbotTurnReplyOutput(ReplyFields, ChatbotTurnOutput):
+class _MessageReading(StrictBaseModel):
+    """Read from the message before the reply is written, so the reply can follow it."""
+
+    about_trailers: bool = Field(
+        description=(
+            "True when this message says something about a trailer, a trailer need, cargo or our "
+            "dealership. A bare greeting or small talk ('hi', 'hello', 'how are you') is false."
+        )
+    )
+
+
+class ChatbotTurnReplyOutput(ReplyFields, _MessageReading, ChatbotTurnOutput):
     """The same output plus the whole reply, used when LLM_WRITES_REPLY is on.
 
     A subclass rather than more fields on the base, so with the flag off the model is asked
-    for exactly what it was asked for before - no extra output tokens, no new schema.
+    for exactly what it was asked for before - no extra output tokens, no new schema. The
+    bases are in this order so the fields come out analysis first, reply last.
     """
 
 

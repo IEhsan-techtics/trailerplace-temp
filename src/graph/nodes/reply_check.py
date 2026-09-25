@@ -81,8 +81,9 @@ def use_model_reply(state: dict, output: Any, situation: str = "flow") -> bool:
     turns that used to be wholly ours - "off_topic", "unavailable" - with rules of their own.
     """
     reply = _Reply.of(output)
+    due = _contact_due(state, output)
     try:
-        problem = _problem(state, reply, situation)
+        problem = _problem(state, reply, situation, due)
     except _PythonsTurn as turn:
         _log_fallback(state, situation, str(turn), reply)
         return False
@@ -92,11 +93,11 @@ def use_model_reply(state: dict, output: Any, situation: str = "flow") -> bool:
             "COMPOSE asked for a rewrite: session=%s situation=%s reason=%s reply=%r",
             state.get("session_id"), situation, problem, reply.text,
         )
-        rewrite = _rewrite(state, reply, problem, situation)
+        rewrite = _rewrite(state, reply, problem, situation, due)
         if rewrite is None:
             _log_fallback(state, situation, f"{problem}; the rewrite call failed", reply)
             return False
-        second = _problem(state, rewrite, situation)
+        second = _problem(state, rewrite, situation, due)
         if second:
             _log_fallback(state, situation, f"{problem}; after the rewrite: {second}", rewrite)
             return False
@@ -135,7 +136,7 @@ def _log_fallback(state: dict, situation: str, reason: str, reply: _Reply) -> No
     )
 
 
-def _rewrite(state: dict, first: _Reply, problem: str, situation: str) -> _Reply | None:
+def _rewrite(state: dict, first: _Reply, problem: str, situation: str, due: bool) -> _Reply | None:
     from src.llm import client
 
     output = client.rewrite_reply(
@@ -143,7 +144,7 @@ def _rewrite(state: dict, first: _Reply, problem: str, situation: str) -> _Reply
         str((state.get("turn_outcome") or {}).get("user_message") or ""),
         first.text,
         problem,
-        _needs(state, situation),
+        _needs(state, situation, due),
     )
     return _Reply.of(output) if output is not None else None
 
@@ -151,7 +152,7 @@ def _rewrite(state: dict, first: _Reply, problem: str, situation: str) -> _Reply
 # ------------------------------------------------------------------------------ the checks
 
 
-def _problem(state: dict, reply: _Reply, situation: str) -> str | None:
+def _problem(state: dict, reply: _Reply, situation: str, due: bool) -> str | None:
     """Why this reply cannot go out, or None when it can. Raises _PythonsTurn when no reply
     from the model could have this turn."""
     _pythons_turn(state, situation)
@@ -165,7 +166,7 @@ def _problem(state: dict, reply: _Reply, situation: str) -> str | None:
         problem = _off_topic_problem(reply)
         if problem:
             return problem
-    return _flow_problem(state, reply) or _contact_problem(state, reply) or _handoff_problem(state, reply)
+    return _flow_problem(state, reply, due) or _contact_problem(reply, due) or _handoff_problem(state, reply)
 
 
 def _pythons_turn(state: dict, situation: str) -> None:
@@ -185,7 +186,7 @@ def _pythons_turn(state: dict, situation: str) -> None:
         raise _PythonsTurn("they already picked a trailer")
 
 
-def _flow_problem(state: dict, reply: _Reply) -> str | None:
+def _flow_problem(state: dict, reply: _Reply, due: bool) -> str | None:
     if reply.question_count > 1:
         return f"it asks {reply.question_count} questions; one at most"
     if len(reply.asked) > 1:
@@ -213,13 +214,12 @@ def _flow_problem(state: dict, reply: _Reply) -> str | None:
             return f"it names {slot} but asks no question"
     elif reply.question_count and remaining:
         return "it asks a question but names no slot, with questions still to ask"
-    elif remaining and not (reply.asked_for_contact and _contact_due(state)):
+    elif remaining and not (reply.asked_for_contact and due):
         return "it asks nothing, with questions still to ask"
     return None
 
 
-def _contact_problem(state: dict, reply: _Reply) -> str | None:
-    due = _contact_due(state)
+def _contact_problem(reply: _Reply, due: bool) -> str | None:
     if reply.asked_for_contact and not due:
         return "it asks for their contact details, which is not due this turn"
     if due and not reply.asked_for_contact:
@@ -287,10 +287,10 @@ def _open_retry(state: dict) -> str | None:
     return retry
 
 
-def _contact_due(state: dict) -> bool:
-    from src.graph.nodes.compose import _contact_ask_is_due
+def _contact_due(state: dict, output: Any) -> bool:
+    from src.graph.nodes.compose import _contact_ask_due_now
 
-    return _contact_ask_is_due(state)
+    return _contact_ask_due_now(state, output)
 
 
 # -------------------------------------------------------------------- what to tell a rewrite
@@ -298,7 +298,7 @@ def _contact_due(state: dict) -> bool:
 _PIECES = {"name": "their name", "contact": "an email or phone number"}
 
 
-def _needs(state: dict, situation: str) -> str:
+def _needs(state: dict, situation: str, due: bool) -> str:
     """What a reply to this turn has to do, as the rewrite is told it."""
     from src.domain.canned_responses import PHONE
     from src.tools import team_notify
@@ -336,8 +336,11 @@ def _needs(state: dict, situation: str) -> str:
     else:
         needs.append("There is no qualification question to ask.")
 
-    if _contact_due(state):
-        needs.append("End by asking for their name and an email or phone number.")
+    if due:
+        from src.tools import contact_policy
+
+        needs.append(f"End by asking for {contact_policy.describe_missing(state)}, so our team can "
+                     "log this.")
     else:
         needs.append("Do not ask for their contact details.")
     if int(outcome.get("emails_flushed") or 0):

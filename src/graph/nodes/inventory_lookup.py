@@ -103,7 +103,10 @@ def inventory_lookup_node(state: dict) -> dict:
     # Durable signal the respond node/prompt key off — preserved from the M4 stub
     # contract exactly (respond.py:14 checks inventory_lookup_ran, not this stub).
     outcome["inventory_lookup_ran"] = True
-    outcome["contact_invite_suppressed"] = True
+    from src.tools import contact_policy
+
+    # Under the contact policy a trailer shown is a moment to ask who they are, lookup or not.
+    outcome["contact_invite_suppressed"] = not contact_policy.active()
 
     if matches:
         description = f"Inventory lookup — {len(matches)} results — {result['requested_label']}"

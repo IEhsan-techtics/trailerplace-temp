@@ -182,6 +182,17 @@ def _state_line(state: dict, turn: Any) -> str:
         f"- What they told us: {slots or 'nothing yet'}",
         f"- Their name: {contact.get('name') or 'unknown'}",
     ]
+    from src.tools import contact_policy
+
+    if contact_policy.active() and contact_policy.missing(state):
+        # The contact policy's "results" moment: they have seen the trailers, now the team
+        # needs to know who saw them. Overrides "nothing after the listings".
+        lines.append(
+            f"- We do not have {contact_policy.describe_missing(state)}. If you show trailers, "
+            "answer a standard question or pass something to our team, end with ONE short line "
+            "asking for it, in your own words, so our team can log this - after the closing "
+            "question. This overrides \"nothing else after the listings\"."
+        )
     assumed = {slot: entry.get("value") for slot, entry in (state.get("rule_defaults") or {}).items()}
     if assumed:
         lines.append(f"- Assumed, NOT told to us (never say they asked for it): {assumed}")

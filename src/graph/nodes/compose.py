@@ -104,7 +104,13 @@ def compose_node(state: dict, output: Any) -> dict:
     # ONLY the welcome turn. A later ask rides on the end of the ordinary reply instead -
     # see _contact_ask_is_due - so answering a question and asking for a number are no
     # longer alternatives.
-    if greeting.contact_gate_applies(state) and greeting.owns_the_turn(state):
+    # Not under the contact policy: there the first reply is the model's, like any other,
+    # and asks for contact only when the message had nothing about trailers in it.
+    if (
+        not settings.llm_writes_reply
+        and greeting.contact_gate_applies(state)
+        and greeting.owns_the_turn(state)
+    ):
         outcome["assistant_text"] = _no_invented_name(state, _gate_text(state, output))
         outcome["asked_slot"] = None
         greeting.note_asked(state)
@@ -247,7 +253,7 @@ def compose_node(state: dict, output: Any) -> dict:
     if asked_slot:
         mark_asked(state, asked_slot)
 
-    if _contact_ask_is_due(state):
+    if _contact_ask_due_now(state, output):
         # The model usually asks for itself - the state block tells it to, as the last line -
         # and its wording fits the conversation better than a fixed one. Ours goes out only
         # when it did not, so the customer is never asked the same thing twice in one breath,
@@ -942,6 +948,16 @@ def _gate_text(state: dict, output: Any) -> str:
         state.get("session_id"), bool(written),
     )
     return greeting.gate_reply(state, answer)
+
+
+def _contact_ask_due_now(state: dict, output: Any) -> bool:
+    """Whether this reply ends by asking for their details - by the contact policy's four
+    moments when LLM_WRITES_REPLY is on, by the gate's budget when it is off."""
+    from src.tools import contact_policy
+
+    if settings.llm_writes_reply:
+        return contact_policy.ask_due(state, output)
+    return _contact_ask_is_due(state)
 
 
 def _contact_ask_is_due(state: dict) -> bool:

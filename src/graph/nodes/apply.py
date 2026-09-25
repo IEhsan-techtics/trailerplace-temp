@@ -49,7 +49,7 @@ from src.tools.category import (
 from src.rules.engine import apply_rules, mark_user_value
 from src.rules.store import current_rules
 from src.tools.filters import apply_extracted_fields
-from src.tools import scope, team_notify, unavailable
+from src.tools import contact_policy, scope, team_notify, unavailable
 from src.tools.lookup_gate import brand_is_lookup_make, referenced_listing
 from src.tools.questions import (
     all_required_resolved,
@@ -995,7 +995,9 @@ def _apply_results_gate(state: dict, output: Any) -> None:
         or state.get("pending_gooseneck_clarification")
         or state.get("pending_axle_basis")
         or state.get("pending_axle_count")
-        or greeting.contact_gate_applies(state)
+        # Trailers are never held back for contact under the contact policy: they are asked
+        # who they are AFTER they have seen them.
+        or (greeting.contact_gate_applies(state) and not contact_policy.active())
     )
 
     if state.get("results_shown"):

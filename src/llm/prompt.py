@@ -554,8 +554,12 @@ def state_block(state: dict) -> str:
             f'word: "{greeting.OPENING}" Whatever else you say comes after it.'
         )
 
+    from src.config import settings
+
     contact = state.get("contact") or {}
-    if contact.get("declined"):
+    if settings.llm_writes_reply:
+        lines.append(_contact_line(state))
+    elif contact.get("declined"):
         lines.append("- They declined contact details. Never ask again.")
     elif contact.get("name") or contact.get("email") or contact.get("phone"):
         have = [k for k in ("name", "email", "phone") if contact.get(k)]
@@ -575,8 +579,6 @@ def state_block(state: dict) -> str:
     else:
         lines.append("- Contact details already asked for. Never ask again.")
 
-    from src.config import settings
-
     waiting = len(state.get("pending_email_actions") or [])
     if settings.llm_writes_reply and waiting:
         # Their details arriving sends it, and only the reply can say so - the model has to
@@ -588,6 +590,29 @@ def state_block(state: dict) -> str:
         )
 
     return "\n".join(lines)
+
+
+def _contact_line(state: dict) -> str:
+    """The contact rule, stated for this turn (src/tools/contact_policy.py).
+
+    The model decides which moment this is - it reads the message - and Python checks its
+    asked_for_contact against the same four moments afterwards.
+    """
+    from src.tools import contact_policy
+
+    if not contact_policy.missing(state):
+        return "- Contact details on file. Never ask for them."
+    declined = " They declined earlier; still ask at these moments, lightly." if (
+        (state.get("contact") or {}).get("declined")
+    ) else ""
+    return (
+        f"- Missing: {contact_policy.describe_missing(state)}.{declined} Ask for it as the LAST "
+        "line, in your own words, so our team can log this - ONLY when (a) this is their FIRST "
+        "message and it says nothing about trailers, (b) you answer one of the standard "
+        "questions (faq_key set), or (c) they need our team (an escalation, a type we do not "
+        "stock, a trailer they want). Every other turn: do NOT ask. Trailers are never held "
+        "back for it. This overrides anything about contact details above."
+    )
 
 
 def build_messages(state: dict, user_message: str) -> list[dict[str, str]]:
