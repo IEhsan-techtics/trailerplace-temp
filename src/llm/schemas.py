@@ -222,6 +222,7 @@ ReplyCover = Literal[
     "said_not_stocked",      # said plainly we do not carry the type they asked for
     "passed_to_team",        # said their request has been passed to our team
     "gave_phone",            # gave our phone number
+    "invited_questions",     # invited them to ask anything else they want to know
 ]
 
 
@@ -245,6 +246,12 @@ class _MessageReading(StrictBaseModel):
         description=(
             "True when this message says something about a trailer, a trailer need, cargo or our "
             "dealership. A bare greeting or small talk ('hi', 'hello', 'how are you') is false."
+        )
+    )
+    only_acknowledges: bool = Field(
+        description=(
+            "True when the message ONLY acknowledges - 'ok', 'thanks', 'cool', 'got it', in any "
+            "words - with no answer, no question, no request and no skip in it."
         )
     )
 

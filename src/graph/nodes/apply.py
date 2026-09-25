@@ -878,10 +878,29 @@ def _apply_attempts(state: dict, output: Any, result: Any) -> None:
     # the state is the evidence, not the classification.
     if pending and (pending in result.stored or pending in result.no_preference):
         answered = True
+    if _holding(state, output, pending, answered):
+        # "ok thanks", or a question of their own, while ours is waiting. Under
+        # LLM_WRITES_REPLY the question stays open - not re-asked, not counted again, not
+        # given up on - until they answer it or skip it, and nothing else is asked meanwhile.
+        # Live, "Ok thanks" was met with the same question again, which spent its second
+        # and last ask on a customer who was simply being polite.
+        state.setdefault("turn_outcome", {})["holding"] = pending
+        return
     resolve_pending_slot(state, answered=answered)
     # Catches the slot whose two asks were spent on invalid values: those report as
     # "answered", so resolve_pending_slot clears them without ever declining them.
     sweep_exhausted_slots(state)
+
+
+def _holding(state: dict, output: Any, pending: str | None, answered: bool) -> bool:
+    """A question of ours is waiting and this message neither answered nor skipped it."""
+    if not contact_policy.active() or not pending or answered:
+        return False
+    if getattr(output, "intent", "") in _SHOW_RESULTS_INTENTS:
+        return False  # "just show me" ends the questions; the results gate takes it from here
+    # Still the question on the table: a category change clears it, and so does anything
+    # else that resolved it this turn.
+    return state.get("pending_slot") == pending and pending in (state.get("required_slots") or [])
 
 
 def _report_questions_we_gave_up_on(state: dict) -> None:

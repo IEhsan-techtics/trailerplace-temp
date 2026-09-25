@@ -987,6 +987,10 @@ def _closing_part(state: dict, output: Any) -> tuple[str, str | None]:
     """The last thing the reply says: listings, a confirmation, or the next question."""
     outcome = state.get("turn_outcome") or {}
 
+    # Our question is still waiting on them (apply._holding): nothing more is asked.
+    if outcome.get("holding") and not outcome.get("search_ran"):
+        return "", None
+
     # 1. A search ran. The listings ARE the answer; no question is appended to them.
     if outcome.get("search_ran"):
         return _render_listings(state, outcome), None

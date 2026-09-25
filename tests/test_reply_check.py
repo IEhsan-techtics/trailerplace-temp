@@ -60,7 +60,7 @@ def _fields(reply, asked=None, questions=None, contact=False, covers=(), offered
 
 
 def _output(reply, asked=None, questions=None, contact=False, covers=(), offered=(), **pieces):
-    fields = {**empty_output().model_dump(), "about_trailers": True}
+    fields = {**empty_output().model_dump(), "about_trailers": True, "only_acknowledges": False}
     if "contact_info" in pieces:  # the output's own contact field; `contact` here is asked_for_contact
         fields["contact"] = pieces.pop("contact_info").model_dump()
     fields.update(pieces)
@@ -536,3 +536,57 @@ def test_the_reply_to_a_refusal_does_not_ask_again(rewrites):
     reply = "Thank you for contacting TrailerPlace. No problem at all. Which type of trailer do you need?"
     assert _sent_as_written(state, _output(reply, [], questions=1, covers=["thanked_for_contacting"],
                                            about_trailers=False, contact_info=refusal))
+
+
+# ---- a question waiting on them: nothing more is asked until they answer or skip ----
+
+
+def _holding(**overrides):
+    state = _state(pending_slot="haul_item", asked_counts={"haul_item": 1}, **overrides)
+    state["turn_outcome"]["holding"] = "haul_item"
+    return state
+
+
+def test_ok_thanks_gets_a_short_reply_and_no_question():
+    reply = "You're welcome! Let me know if you have any other questions."
+    output = _output(reply, [], covers=["invited_questions"], only_acknowledges=True)
+    state = _holding()
+    assert _sent_as_written(state, output)
+    assert state["asked_counts"] == {"haul_item": 1}  # not asked again, not counted again
+
+
+def test_asking_anything_while_a_question_waits_is_turned_down(rewrites):
+    output = _output("You're welcome! What will you be hauling?", ["haul_item"],
+                     covers=["invited_questions"], only_acknowledges=True)
+    assert _turned_down(_holding(), output, rewrites)
+    assert "still waiting" in rewrites.calls[0]["problem"]
+
+
+def test_ok_thanks_without_inviting_questions_is_turned_down(rewrites):
+    assert _turned_down(_holding(), _output("You're welcome.", [], only_acknowledges=True), rewrites)
+
+
+def test_a_question_of_theirs_is_answered_with_nothing_asked_after_it():
+    reply = "Yes, we offer financing - call 979-532-1486 to talk to our finance team."
+    assert _sent_as_written(_holding(), _output(reply, [], faq_key="financing"))
+
+
+def test_holding_and_a_moment_still_asks_for_contact():
+    reply = "We offer financing - call 979-532-1486. Could I get your name and a phone or email?"
+    assert _sent_as_written(_holding(contact={}), _output(reply, [], contact=True, faq_key="financing"))
+
+
+def test_apply_keeps_the_question_open_on_ok_thanks(monkeypatch):
+    """The ask is not spent and the slot is not given up on, even at its second ask."""
+    from src import config
+    from src.graph.nodes import apply as apply_module
+    from dataclasses import replace as _replace
+
+    monkeypatch.setattr(config, "settings", _replace(config.settings, llm_writes_reply=True))
+    state = _state(pending_slot="haul_item", asked_counts={"haul_item": 2})
+    output = _output("You're welcome!", [], only_acknowledges=True, intent="smalltalk_other")
+    apply_module._apply_attempts(state, output, type("R", (), {"stored": {}, "no_preference": []})())
+
+    assert state["pending_slot"] == "haul_item"
+    assert "haul_item" not in state["declined_slots"]
+    assert state["turn_outcome"]["holding"] == "haul_item"

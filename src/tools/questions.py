@@ -205,6 +205,8 @@ def carry_on_question(state: dict) -> tuple[str, str] | None:
     """
     if not state.get("category") or state.get("qualification_complete"):
         return None
+    if (state.get("turn_outcome") or {}).get("holding"):
+        return None  # our question is still waiting on them; nothing more is asked meanwhile
     if any(state.get(key) for key in _OPEN_CONFIRMATIONS):
         return None
     slot = next_unanswered_slot(state)

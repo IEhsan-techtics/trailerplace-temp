@@ -231,7 +231,8 @@ REPORT ON YOUR REPLY - truthfully; Python checks the report, not your wording:
 - question_count: how many questions the reply asks, NOT counting the contact request.
 - reply_covers: every one of these the reply does - welcome (greets them or thanks them for
   getting in touch), thanked_for_contacting (says "Thank you for contacting TrailerPlace"),
-  greeted_by_name (opens with "Hi <their name>"), declined_off_topic, flagged_wrong_value (tells them a number looks wrong),
+  greeted_by_name (opens with "Hi <their name>"), invited_questions (invites them to ask
+  anything else), declined_off_topic, flagged_wrong_value (tells them a number looks wrong),
   thanked_them (thanks them or says a value is noted), said_not_stocked, passed_to_team (says
   their request has gone to our team), gave_phone.
 - offered_categories: OUR CATEGORIES the reply suggests, in our spelling; else empty.
@@ -495,6 +496,16 @@ def state_block(state: dict) -> str:
     pending = state.get("pending_slot")
     if pending:
         lines.append(f"- The question you asked last turn was about: {pending}")
+        from src.config import settings
+
+        if settings.llm_writes_reply:
+            lines.append(
+                f"- That question is WAITING on them. If this message neither answers it nor "
+                "skips it, ask NO question at all this turn - not that one, not another: respond "
+                "to what they said (answer their question, handle what they asked). If they only "
+                "acknowledged ('ok', 'thanks'), reply briefly and invite them to ask anything else "
+                "(invited_questions). If it answers it, carry on as usual."
+            )
 
     retry = state.get("invalid_retry_slot")
     if retry:

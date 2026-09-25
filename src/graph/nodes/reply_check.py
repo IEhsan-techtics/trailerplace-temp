@@ -82,6 +82,8 @@ def use_model_reply(state: dict, output: Any, situation: str = "flow") -> bool:
     """
     reply = _Reply.of(output)
     due = _contact_due(state, output)
+    # The model's reading of the message, for the checks and a rewrite to use.
+    state.setdefault("turn_outcome", {})["only_acknowledges"] = bool(getattr(output, "only_acknowledges", False))
     try:
         problem = _problem(state, reply, situation, due)
     except _PythonsTurn as turn:
@@ -200,6 +202,16 @@ def _pythons_turn(state: dict, situation: str) -> None:
 
 
 def _flow_problem(state: dict, reply: _Reply, due: bool) -> str | None:
+    outcome = state.get("turn_outcome") or {}
+    if outcome.get("holding"):
+        # Our question is still waiting on them: nothing else is asked until they answer it
+        # or skip it. What they said instead is answered; a plain "ok, thanks" gets a short
+        # reply that leaves the door open.
+        if reply.question_count or reply.asked:
+            return f"our question about {outcome['holding']} is still waiting on them, so it must ask nothing"
+        if outcome.get("only_acknowledges") and "invited_questions" not in reply.covers:
+            return "they only acknowledged, so it should reply briefly and invite any other questions"
+        return None
     if reply.question_count > 1:
         return f"it asks {reply.question_count} questions; one at most"
     if len(reply.asked) > 1:
@@ -341,6 +353,20 @@ def _needs(state: dict, situation: str, due: bool) -> str:
 
     if situation == "off_topic":
         needs.append("One short line saying you only help with trailers - never do what they asked.")
+
+    if outcome.get("holding"):
+        needs.append(
+            f"Our question about {outcome['holding']} is still waiting on them: ask NO question at "
+            "all. Respond to what they said."
+            + (" They only acknowledged: reply briefly and invite them to ask anything else."
+               if outcome.get("only_acknowledges") else "")
+        )
+        if due:
+            from src.tools import contact_policy
+
+            needs.append(f"End by asking for {contact_policy.describe_missing(state)}, so our team "
+                         "can log this.")
+        return " ".join(needs)
 
     needs.append("At most one question.")
     retry = _open_retry(state)
