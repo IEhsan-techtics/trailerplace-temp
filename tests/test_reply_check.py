@@ -330,3 +330,104 @@ def test_a_due_contact_ask_may_be_the_one_question():
     assert outcome["assistant_text"] == reply
     assert outcome["asked_slot"] is None
     assert state["contact"]["asks_without_progress"] == 1
+
+
+# ---- a type we do not stock: the words are the model's, the team email stays Python's ----
+
+
+@pytest.fixture
+def stocked(monkeypatch):
+    from src.tools import unavailable
+
+    monkeypatch.setattr(unavailable, "_stocked", lambda: ("Utility", "Enclosed", "Car Hauler", "Dump"))
+
+
+def _unavailable(status, **overrides):
+    state = _state(**overrides)
+    state["turn_outcome"]["unavailable_type"] = {"type": "boat trailer", "status": status}
+    return state
+
+
+def test_a_boat_trailer_reply_with_the_team_told_goes_out(stocked):
+    reply = (
+        "I'm sorry - we don't carry boat trailers. A Utility or Enclosed trailer may do the job, "
+        "and I've passed this on to our team, who'll be in touch. Would either of those work?"
+    )
+    outcome = _send(_unavailable("sent"), _output(reply, []))
+
+    assert outcome["assistant_text"] == reply
+    assert outcome["asked_slot"] is None
+
+
+def test_a_reply_that_says_we_have_it_falls_back(stocked):
+    reply = "Great news - we can order a boat trailer for you! Our team will be in touch."
+    assert _falls_back(_unavailable("sent"), _output(reply, []))
+
+
+def test_a_reply_that_offers_nothing_we_carry_falls_back(stocked):
+    reply = "Sorry, we don't carry boat trailers. Our team will be in touch."
+    assert _falls_back(_unavailable("sent"), _output(reply, []))
+
+
+def test_needing_their_details_the_reply_must_ask_for_them(stocked):
+    state = _unavailable("stashed", contact={})
+    reply = "Sorry, we don't carry boat trailers, but a Utility or Car Hauler trailer might work."
+    assert _falls_back(state, _output(reply, []))
+
+    state = _unavailable("stashed", contact={})
+    reply += " Could I take your name and an email or phone number so our team can follow up?"
+    assert _send(state, _output(reply, []))["assistant_text"] == reply
+
+
+def test_needing_their_details_that_is_the_only_question(stocked):
+    state = _unavailable("stashed", contact={})
+    reply = (
+        "Sorry, we don't carry boat trailers. Would a Utility or Car Hauler work? Could I take "
+        "your name and an email or phone number so our team can follow up?"
+    )
+    assert _falls_back(state, _output(reply, []))
+
+
+def test_declined_contact_gets_the_phone_number(stocked):
+    from src.domain.canned_responses import PHONE
+
+    state = _unavailable("dropped", contact={"declined": True})
+    without = "Sorry, we don't carry boat trailers. Utility and Enclosed trailers are close options."
+    assert _falls_back(state, _output(without, []))
+
+    state = _unavailable("dropped", contact={"declined": True})
+    with_phone = f"{without} You can reach our team on {PHONE}."
+    assert _send(state, _output(with_phone, []))["assistant_text"] == with_phone
+
+
+def test_no_qualification_question_on_an_unavailable_turn(stocked):
+    reply = (
+        "Sorry, we don't carry boat trailers. Utility and Enclosed trailers are close, and our "
+        "team has your request. What will you be hauling?"
+    )
+    assert _falls_back(_unavailable("sent"), _output(reply, ["haul_item"]))
+
+
+def test_a_curly_apostrophe_still_says_we_do_not_have_it(stocked):
+    """Live: "We don’t carry campers" was read as never saying so."""
+    reply = "We don\u2019t carry campers, but Enclosed and Utility trailers may work. I\u2019ve passed this on to our team."
+    assert _send(_unavailable("sent"), _output(reply, []))["assistant_text"] == reply
+
+
+def test_one_right_alternative_is_enough(monkeypatch):
+    from src.tools import unavailable
+
+    monkeypatch.setattr(unavailable, "_stocked", lambda: ("Livestock", "Utility"))
+    reply = "We don't carry horse trailers, but a Livestock trailer may work. Our team has your request."
+    assert _send(_unavailable("sent"), _output(reply, []))["assistant_text"] == reply
+
+
+def test_the_passed_on_line_goes_before_the_question():
+    """Live it landed after "which one fits what you need?"."""
+    state = _state(category=None, required_slots=[], slots={})
+    state["turn_outcome"]["emails_flushed"] = 1
+    reply = "Thanks, Sam. Which type of trailer fits what you need - Utility, Dump or Enclosed?"
+    text = _send(state, _output(reply, []))["assistant_text"]
+
+    assert text.startswith("Thanks, Sam. I've passed your request on to our team")
+    assert text.endswith("Utility, Dump or Enclosed?")

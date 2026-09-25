@@ -62,7 +62,12 @@ def use_model_reply(state: dict, output: Any, situation: str = "flow") -> bool:
     reply = str(getattr(output, "reply", "") or "").strip()
     asked = [str(slot).strip() for slot in (getattr(output, "asked_slots", None) or []) if str(slot).strip()]
 
-    problem = _problem(state, reply, asked, situation)
+    from src.graph.nodes.compose import _TYPOGRAPHY
+
+    # Checked in plain ASCII, sent as written. The model writes "don’t" with a curly
+    # apostrophe, and live that alone turned down "We don’t carry campers" as a reply that
+    # never said we do not have them.
+    problem = _problem(state, reply.translate(_TYPOGRAPHY), asked, situation)
     if problem:
         logger.info(
             "COMPOSE fell back: session=%s situation=%s reason=%s asked_slots=%s reply=%r",
@@ -70,7 +75,7 @@ def use_model_reply(state: dict, output: Any, situation: str = "flow") -> bool:
         )
         return False
 
-    from src.graph.nodes.compose import _contact_ask_is_due, _with_handoff
+    from src.graph.nodes.compose import _contact_ask_is_due
 
     outcome = state.setdefault("turn_outcome", {})
     contact = state.setdefault("contact", {})
@@ -89,7 +94,7 @@ def use_model_reply(state: dict, output: Any, situation: str = "flow") -> bool:
         contact["asked"] = True
 
     slot = asked[0] if asked else None
-    outcome["assistant_text"] = _with_handoff(outcome, reply)
+    outcome["assistant_text"] = _with_handoff_before_the_question(outcome, reply)
     outcome["asked_slot"] = slot
     if slot:
         mark_asked(state, slot)
@@ -98,6 +103,26 @@ def use_model_reply(state: dict, output: Any, situation: str = "flow") -> bool:
         state.get("session_id"), situation, slot,
     )
     return True
+
+
+def _with_handoff_before_the_question(outcome: dict, reply: str) -> str:
+    """The "passed on to our team" line, when a stashed request went out this turn.
+
+    The model cannot know that will happen - it is their details arriving that sends it - so
+    the line is ours. It goes in front of the question, not behind it: live it landed after
+    "which one fits what you need?", and the reply ended on a statement instead of the
+    question the customer is meant to answer.
+    """
+    from src.graph.nodes.compose import _MENTIONS_HANDOFF, _handoff_line
+
+    line = _handoff_line(int(outcome.get("emails_flushed") or 0))
+    if not line or _MENTIONS_HANDOFF.search(reply):
+        return reply
+    sentences = [s for s in _SENTENCE_END.split(reply) if s.strip()]
+    first_question = next((i for i, s in enumerate(sentences) if s.rstrip().endswith("?")), None)
+    if first_question is None:
+        return f"{reply} {line}"
+    return " ".join(sentences[:first_question] + [line] + sentences[first_question:])
 
 
 def _problem(state: dict, reply: str, asked: list[str], situation: str = "flow") -> str | None:
@@ -109,6 +134,10 @@ def _problem(state: dict, reply: str, asked: list[str], situation: str = "flow")
 
     if not reply:
         return "no reply written"
+    if situation == "unavailable":
+        # Its own kind of turn, as it is in compose: no qualification question, whatever the
+        # flow still owes - the reply is about the trailer they cannot have.
+        return _unavailable_problem(state, reply, asked)
     if situation == "off_topic":
         problem = _off_topic_problem(state, reply)
         if problem:
@@ -205,6 +234,59 @@ def _retry_problem(state: dict, reply: str, asked: list[str]) -> str | None:
     before_question = " ".join(s for s in _SENTENCE_END.split(reply) if not s.strip().endswith("?"))
     if _THANKS_RE.search(before_question):
         return "thanks them for a value that was turned down"
+    return None
+
+
+# Saying we do not have it. A reply about a type we do not stock that says none of these has
+# not said the one thing it is for.
+_SAYS_WE_DO_NOT_HAVE_IT = re.compile(
+    r"\b(don'?t|do not|doesn'?t|does not|aren'?t|are not|isn'?t|is not|not currently|"
+    r"no longer|unfortunately|sorry|can'?t|cannot|won'?t)\b",
+    re.IGNORECASE,
+)
+
+_MENTIONS_TEAM = re.compile(r"\bteam\b", re.IGNORECASE)
+
+
+def _unavailable_problem(state: dict, reply: str, asked: list[str]) -> str | None:
+    """A type we do not carry: say so, offer what we do carry, and say what happens next.
+
+    What happens next is the team notification apply already raised, and its status is
+    what the reply must match - it is the one thing the model could get wrong about the
+    world: "sent" (they have been passed on), "stashed" (we need their details first) or
+    "dropped" (they declined, so the phone number is how they reach us).
+    """
+    from src.domain.canned_responses import PHONE
+    from src.graph.nodes.compose import _OPENING_RE, _category_names_in
+    from src.tools.unavailable import _stocked
+
+    status = ((state.get("turn_outcome") or {}).get("unavailable_type") or {}).get("status")
+
+    if greeting.is_first_turn(state) and not _OPENING_RE.search(reply):
+        return "unavailable first reply has no welcome"
+    if not _SAYS_WE_DO_NOT_HAVE_IT.search(reply):
+        return "does not say we do not have it"
+    if not _category_names_in(reply) & set(_stocked()):
+        # One is enough when it is the right one: a horse trailer's alternative is Livestock.
+        return "offers nothing we do carry"
+    if asked:
+        return "asks a qualification question on an unavailable turn"
+
+    questions = [q for q in _questions(reply) if not _asks_for_contact(q)]
+    if status == "stashed":
+        if not _asks_for_contact(reply):
+            return "needs their details and does not ask for them"
+        if questions:
+            return "asks something besides their details"
+    elif len(questions) > 1:
+        return f"{len(questions)} questions"
+
+    if status == "sent" and not _MENTIONS_TEAM.search(reply):
+        return "does not say the team has it"
+    if status == "dropped" and re.sub(r"\D", "", PHONE) not in re.sub(r"\D", "", reply):
+        return "declined contact and no phone number given"
+    if status != "stashed" and _asks_for_contact(reply):
+        return "asks for details it does not need"
     return None
 
 

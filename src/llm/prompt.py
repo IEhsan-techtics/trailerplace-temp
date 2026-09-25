@@ -270,7 +270,11 @@ def _system_prompt_for(version: int, writes_reply: bool = False) -> str:
             _RULES.strip(),
             _SITUATIONS.strip(),
             _FIELDS.strip(),
-            *([_REPLY.strip(), wrong_values_block(), questions_by_category_block()] if writes_reply else []),
+            *(
+                [_REPLY.strip(), wrong_values_block(), unavailable_reply_block(),
+                 questions_by_category_block()]
+                if writes_reply else []
+            ),
             cargo_traits_block(),
             company.company_facts_block(),
             company.standard_answers_block(with_keys=True),
@@ -319,6 +323,29 @@ def wrong_values_block() -> str:
         "  RIGHT: \"That came through as a negative number. What's the approximate weight of the "
         "vehicle?\"\n"
         "  WRONG: \"Thanks, I've noted that. What's the approximate weight of the vehicle?\""
+    )
+
+
+def unavailable_reply_block() -> str:
+    """How to write the reply for a type we do not stock. The team email is Python's; the
+    words are the model's, and they must match what Python did with the email - which
+    follows from the contact details the state block lists."""
+    from src.domain.canned_responses import PHONE
+
+    return (
+        "A TYPE WE DO NOT STOCK in reply (unavailable_type_requested set):\n"
+        "- Say plainly we do not have it. Never say we can get, order or build it, or that it "
+        "may come in.\n"
+        "- Name one to five of OUR CATEGORIES that could do the job they want it for.\n"
+        "- Then what happens next, by the contact details in the state block:\n"
+        "    their name AND an email or phone on file -> say you have passed it on to our team "
+        "and they will be in touch; you may ask whether any of those would work.\n"
+        f"    they declined contact details -> give our number, {PHONE}, so they can reach the "
+        "team; you may ask whether any of those would work.\n"
+        "    anything else -> say our team can follow up, and ask for whatever is missing (name, "
+        "email or phone). That request is the ONLY question in the reply.\n"
+        "- No qualification question on this turn: asked_slots is empty.\n"
+        "- Their FIRST message: the welcome line still opens the reply."
     )
 
 

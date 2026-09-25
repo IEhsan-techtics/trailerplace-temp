@@ -42,6 +42,9 @@ def compose_node(state: dict, output: Any) -> dict:
     if unavailable_type:
         from src.tools import unavailable
 
+        if settings.llm_writes_reply and reply_check.use_model_reply(state, output, "unavailable"):
+            return state
+
         text = unavailable.reply(
             state, unavailable_type["type"], unavailable_type["status"],
             first_turn=_is_first_turn(state),
