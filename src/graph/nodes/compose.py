@@ -716,6 +716,9 @@ def _record_shown(state: dict, urls: list[str], listings: list[Any] | None = Non
     if not urls:
         return
     state["results_shown"] = True
+    from src import idle_timer
+
+    idle_timer.note_results_shown(state)
     shown = state.setdefault("shown_urls", [])
     for url in urls:
         cleaned = str(url or "").strip()

@@ -62,6 +62,9 @@ class Settings:
     # falls back to assembling the reply itself (src/graph/nodes/reply_check.py). Off, the
     # reply is assembled from the model's pieces exactly as before.
     llm_writes_reply: bool = False
+    # The 5-minute rule (src/idle_timer.py): minutes of silence, with a question of ours
+    # waiting, before that category's trailers are shown anyway. 0 switches it off.
+    idle_results_minutes: float = 5.0
     search_max_recommendations: int = 5
     feature_llm_rerank_enabled: bool = True
     feature_rerank_model: str = "gpt-5-nano-2025-08-07"
@@ -190,6 +193,7 @@ class Settings:
             chat_model=_env("CHAT_MODEL", "gpt-6-luna"),
             chat_reasoning_effort=_env("CHAT_REASONING_EFFORT", "low"),
             llm_writes_reply=_bool(_env("LLM_WRITES_REPLY")),
+            idle_results_minutes=_float(_env("IDLE_RESULTS_MINUTES"), 5.0),
             search_max_recommendations=_int(_env("SEARCH_MAX_RECOMMENDATIONS"), 5),
             feature_llm_rerank_enabled=_bool(_env("FEATURE_LLM_RERANK_ENABLED"), True),
             feature_rerank_model=_env("FEATURE_RERANK_MODEL", "gpt-5-nano-2025-08-07"),

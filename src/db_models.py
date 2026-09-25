@@ -228,6 +228,36 @@ class ChatbotInboundMessage(Base):
     answered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class ChatbotIdleTimer(Base):
+    """The 5-minute rule: when a quiet customer is shown trailers anyway (src/idle_timer.py).
+
+    One row per conversation, rewritten by every turn in the same transaction as the turn
+    itself: armed when a category is chosen and a question of ours is waiting, cancelled when
+    it is not. The sweep (POST /internal/idle-sweep, called every minute) claims armed rows
+    whose due_at has passed, shows the trailers and marks them fired.
+    """
+
+    __tablename__ = "chatbot_idle_timers"
+    __table_args__ = (
+        # The sweep's only query: armed rows that are due, oldest first.
+        Index("ix_chatbot_idle_timers_due", "status", "due_at"),
+    )
+
+    session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    # "web" or "messenger" - where the trailers are sent when it fires.
+    channel: Mapped[str] = mapped_column(String(32), nullable=False)
+    # The Messenger PSID to send to; null for web chat, which fetches its own history.
+    channel_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    category: Mapped[str] = mapped_column(String(64), nullable=False)
+    due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # armed -> fired, or armed -> cancelled.
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="armed", server_default="armed")
+    fired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
 class ChatbotOutbox(Base):
     __tablename__ = "chatbot_outbox"
     __table_args__ = (UniqueConstraint("session_id", "turn_id", "event_key", name="uq_chatbot_outbox_event"),)

@@ -20,8 +20,10 @@ from alembic.script import ScriptDirectory
 ROOT = Path(__file__).resolve().parents[1]
 VERSIONS = ROOT / "alembic" / "versions"
 
-# Luna's own first revision, and the head a new one must be parented on.
-CURRENT_HEAD = "20260920_0009"
+# The head a new revision must be parented on.
+CURRENT_HEAD = "20260925_0010"
+# Luna's own first revision.
+LUNA_FIRST = "20260920_0009"
 # What the live database was stamped at when Luna picked the history up.
 SHARED_HEAD = "20260905_0008"
 
@@ -78,7 +80,13 @@ def test_the_inbound_queue_is_in_the_history():
 
 def test_lunas_own_revisions_continue_the_shared_sequence(script):
     """Not a fork: Luna's first revision is parented on the head the database already had."""
-    assert script.get_revision(CURRENT_HEAD).down_revision == SHARED_HEAD
+    assert script.get_revision(LUNA_FIRST).down_revision == SHARED_HEAD
+
+
+def test_the_idle_timers_are_in_the_history():
+    source = (VERSIONS / "20260925_0010_idle_timers.py").read_text(encoding="utf-8")
+    assert "chatbot_idle_timers" in source
+    assert "ix_chatbot_idle_timers_due" in source, "the sweep's only query"
 
 
 def test_the_listing_photo_a_messenger_card_needs_is_in_the_history():

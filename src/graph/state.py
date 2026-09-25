@@ -111,6 +111,9 @@ class SessionState(TypedDict, total=False):
     # Whether listings have been put in front of them at least once. It changes what a
     # later requirement change means: the first search is a search, the second is a redo.
     results_shown: bool
+    # The categories trailers have been shown for. The 5-minute rule (src/idle_timer.py) runs
+    # once per category, so a category in here never arms it again.
+    results_categories: list[str]
 
 
 # Scratch that must never be written to state_snapshot: it is rebuilt every turn and
@@ -174,6 +177,7 @@ def new_state(session_id: str) -> SessionState:
         interest_listing=None,
         turn_index=0,
         results_shown=False,
+        results_categories=[],
     )
 
 

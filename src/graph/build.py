@@ -24,7 +24,7 @@ import time
 import uuid
 from typing import Any, Callable
 
-from src import conversation_log, conversation_store, turn_log, turn_saver
+from src import conversation_log, conversation_store, idle_timer, turn_log, turn_saver
 from src.graph.nodes.apply import apply_node
 from src.graph.nodes.compose import compose_node
 from src.graph.nodes.inventory_lookup import inventory_lookup_node
@@ -282,6 +282,9 @@ def run_turn(
             outbox_events=outbox_events,
             turn_id=turn_id,
             channel_id=channel_id,
+            # Planned now, when the reply goes out, so the five minutes run from what the
+            # customer sees rather than from when the background save lands.
+            idle_timer=idle_timer.plan(state, channel_id),
         )
 
         # The commit happens AFTER the reply is written, so the customer is waiting on a

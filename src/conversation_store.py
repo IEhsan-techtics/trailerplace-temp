@@ -20,7 +20,7 @@ from typing import Any
 
 from src import db
 from src.config import settings
-from src.db_models import ChatbotConversation, ChatbotLead, ChatbotOutbox, ChatbotTurn
+from src.db_models import ChatbotConversation, ChatbotIdleTimer, ChatbotLead, ChatbotOutbox, ChatbotTurn
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +39,7 @@ def persistence_enabled() -> bool:
 def reset_memory() -> None:
     """Drop the in-memory store. Tests use this between cases."""
     _MEMORY.clear()
+    _MEMORY_TIMERS.clear()
 
 
 def _as_uuid(value: str) -> uuid.UUID:
@@ -205,6 +206,7 @@ def save_turn(
     outbox_events: list[dict[str, Any]] | None = None,
     turn_id: Any = None,
     channel_id: str | None = None,
+    idle_timer: Any = None,
 ) -> None:
     """Persist one completed turn.
 
@@ -236,6 +238,7 @@ def save_turn(
             record["item_of_interest"] = item_of_interest
         if channel_id and not record.get("psid"):
             record["psid"] = str(channel_id)
+        _MEMORY_TIMERS[session_id] = _timer_row(session_id, idle_timer)
         return
 
     session_uuid = _as_uuid(session_id)
@@ -281,7 +284,57 @@ def save_turn(
         if contact or item_of_interest or channel_id:
             _update_lead(sql, row.lead_id, contact or {}, item_of_interest, channel_id)
 
+        # With the turn, so the timer can never disagree with the conversation it belongs to.
+        _write_timer(sql, session_uuid, idle_timer)
+
         sql.commit()
+
+
+# ------------------------------------------------------------------ the 5-minute rule's timer
+#
+# One row per conversation (src/idle_timer.py). ``idle_timer`` is the plan the turn left: a
+# dict arms it (or re-arms it, which is how every message restarts the five minutes), None
+# cancels whatever was armed.
+_MEMORY_TIMERS: dict[str, dict[str, Any] | None] = {}
+
+
+def _timer_row(session_id: str, plan: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not plan:
+        return None
+    return {"session_id": session_id, "status": "armed", **plan}
+
+
+def _write_timer(sql: Any, session_uuid: uuid.UUID, plan: dict[str, Any] | None) -> None:
+    row = sql.get(ChatbotIdleTimer, session_uuid)
+    if not plan:
+        if row is not None and row.status == "armed":
+            row.status = "cancelled"
+            row.updated_at = datetime.now(timezone.utc)
+        return
+    if row is None:
+        row = ChatbotIdleTimer(session_id=session_uuid)
+        sql.add(row)
+    row.channel = plan["channel"]
+    row.channel_id = plan.get("channel_id")
+    row.category = plan["category"]
+    row.due_at = plan["due_at"]
+    row.status = "armed"
+    row.fired_at = None
+    row.last_error = None
+    row.updated_at = datetime.now(timezone.utc)
+
+
+def armed_timer(session_id: str) -> dict[str, Any] | None:
+    """The armed timer for one conversation, or None. For tests and inspection."""
+    if not persistence_enabled():
+        row = _MEMORY_TIMERS.get(session_id)
+        return dict(row) if row and row.get("status") == "armed" else None
+    with db.get_session_factory()() as sql:
+        row = sql.get(ChatbotIdleTimer, _as_uuid(session_id))
+        if row is None or row.status != "armed":
+            return None
+        return {"session_id": session_id, "channel": row.channel, "channel_id": row.channel_id,
+                "category": row.category, "due_at": row.due_at, "status": row.status}
 
 
 # ----------------------------------------------------------------------- turn idempotency
