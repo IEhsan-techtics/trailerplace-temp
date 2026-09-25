@@ -184,7 +184,20 @@ def _state_line(state: dict, turn: Any) -> str:
     ]
     from src.tools import contact_policy
 
-    if contact_policy.active() and int(state.get("turn_index") or 0) <= 1:
+    if (state.get("turn_outcome") or {}).get("idle_results"):
+        # The 5-minute rule (src/idle_timer.py): no message from them, and the trailers are
+        # the whole point of this reply.
+        lines.append(
+            "- They have NOT replied for a few minutes - the last message in the conversation is "
+            "not something they said. Show them the trailers we have in stock for their "
+            "category, based on the information they have shared so far: say exactly that in "
+            "the line before the first card, in your own words. Do not ask the question they "
+            "left unanswered, and do not mention that they went quiet."
+        )
+    idle = bool((state.get("turn_outcome") or {}).get("idle_results"))
+    # Not on the idle turn: it follows their first message without one of its own, and live it
+    # opened with the thanks a second time.
+    if contact_policy.active() and int(state.get("turn_index") or 0) <= 1 and not idle:
         # The dealership's opening, on the first reply whoever writes it.
         name = str(contact.get("name") or "").split(" ")[0]
         opening = (f"Hi {name}, thank you" if name else "Thank you") + " for contacting TrailerPlace."

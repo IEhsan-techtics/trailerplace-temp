@@ -324,6 +324,66 @@ def _write_timer(sql: Any, session_uuid: uuid.UUID, plan: dict[str, Any] | None)
     row.updated_at = datetime.now(timezone.utc)
 
 
+def claim_due_timers(now: datetime, limit: int = 10) -> list[dict[str, Any]]:
+    """Take the armed timers whose time has come, so no other sweep can take them too.
+
+    Marked "firing" and committed before any work is done: two sweeps overlapping - two
+    replicas, or a slow one still running when the next minute's starts - skip rows another
+    has locked, and a row that is firing is never claimed again. A sweep that dies mid-turn
+    leaves its row firing rather than risking the customer being shown trailers twice.
+    """
+    if not persistence_enabled():
+        claimed = []
+        for session_id, row in _MEMORY_TIMERS.items():
+            if row and row.get("status") == "armed" and row["due_at"] <= now and len(claimed) < limit:
+                row["status"] = "firing"
+                claimed.append(dict(row))
+        return claimed
+
+    from sqlalchemy import select
+
+    with db.get_session_factory()() as sql:
+        rows = sql.execute(
+            select(ChatbotIdleTimer)
+            .where(ChatbotIdleTimer.status == "armed", ChatbotIdleTimer.due_at <= now)
+            .order_by(ChatbotIdleTimer.due_at)
+            .limit(limit)
+            .with_for_update(skip_locked=True)
+        ).scalars().all()
+        claimed = []
+        for row in rows:
+            row.status = "firing"
+            row.updated_at = datetime.now(timezone.utc)
+            claimed.append({
+                "session_id": str(row.session_id), "channel": row.channel,
+                "channel_id": row.channel_id, "category": row.category, "due_at": row.due_at,
+            })
+        sql.commit()
+        return claimed
+
+
+def finish_timer(session_id: str, status: str, error: str | None = None) -> None:
+    """Close a claimed timer: "fired", or "cancelled" when the turn found nothing to do.
+
+    A row a newer turn has re-armed meanwhile is left armed - that turn's plan is the truth.
+    """
+    if not persistence_enabled():
+        row = _MEMORY_TIMERS.get(session_id)
+        if row and row.get("status") == "firing":
+            row["status"] = status
+        return
+    with db.get_session_factory()() as sql:
+        row = sql.get(ChatbotIdleTimer, _as_uuid(session_id))
+        if row is None or row.status != "firing":
+            return
+        row.status = status
+        row.last_error = error
+        row.updated_at = datetime.now(timezone.utc)
+        if status == "fired":
+            row.fired_at = row.updated_at
+        sql.commit()
+
+
 def armed_timer(session_id: str) -> dict[str, Any] | None:
     """The armed timer for one conversation, or None. For tests and inspection."""
     if not persistence_enabled():

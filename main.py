@@ -86,6 +86,13 @@ if settings.admin_api_token:
 
     app.include_router(admin_rules_router)
 
+# The 5-minute rule's minute tick (src/api/idle.py). Mounted only with a token, like the admin
+# API: it messages customers, so a deploy without one exposes no such route at all.
+if settings.idle_sweep_token:
+    from src.api.idle import router as idle_router  # noqa: E402
+
+    app.include_router(idle_router)
+
 # The Facebook Messenger webhook (src/api/messenger.py). Always mounted; both routes 404
 # unless MESSENGER_ENABLED is on and the app secret and page token are configured, so a
 # deployment that is not the Messenger one has no webhook surface at all.

@@ -387,3 +387,91 @@ def build_graph():
     graph.add_edge("respond", "compose")
     graph.add_edge("compose", END)
     return graph.compile()
+
+
+# The customer's side of an idle turn, as the reply pass reads it. Not something they said -
+# the reply pass is told so in its own instructions (respond._state_line).
+IDLE_MESSAGE = "(The customer has not replied for a few minutes.)"
+
+
+def run_idle_turn(session_id: str, category: str, *, turn_id: Any, channel_id: str | None = None) -> dict[str, Any] | None:
+    """The 5-minute rule's turn: show a quiet customer the trailers, then ask who they are.
+
+    No customer message and no analysis call - they have not said anything. The question we
+    were waiting on is closed, the search runs on whatever we know (even nothing), and the
+    reply pass writes the whole message: that these are the trailers we have in stock on what
+    they have told us so far, the cards, and the request for their details. compose then
+    records what was shown, which is what tells the team.
+
+    Returns the response, or None when the conversation no longer calls for it - they came
+    back, or the timer's category is not the one they are on any more.
+    """
+    from src.graph.nodes.apply import _apply_keep_filters_answer
+    from src.llm.client import empty_output
+
+    with usage.usage_scope() as turn_usage:
+        turn_saver.wait_for(session_id)
+        if conversation_store.turn_already_handled(session_id, turn_id):
+            logger.info("IDLE turn already sent: session=%s", session_id)
+            return None
+        snapshot, conversation, lead_id = conversation_store.load_session(session_id)
+        state = from_snapshot(session_id, snapshot)
+        state["lead_id"] = lead_id
+        state["messages"] = list(conversation)
+        state["turn_outcome"] = {"idle_results": True}
+
+        plan = idle_timer.plan(state, channel_id)
+        if plan is None or plan["category"] != category:
+            logger.info("IDLE turn not needed any more: session=%s category=%s", session_id, category)
+            return None
+
+        output = empty_output("The customer went quiet; showing them trailers.")
+        # They chose the new category and did not say whether to keep their earlier answers:
+        # what they told us is what we know, so it is kept.
+        if state.get("pending_keep_filters"):
+            output.keep_fields_answer = "all"
+            _apply_keep_filters_answer(state, output)
+            output.keep_fields_answer = None
+        # Every question of ours is closed: the trailers are the answer now, and a later reply
+        # to one of them is a refinement of what they have seen.
+        for key in ("pending_slot", "pending_category_switch", "pending_gooseneck_clarification",
+                    "pending_axle_basis", "pending_axle_count", "invalid_retry_slot"):
+            state[key] = None
+
+        reply = respond_with_tools(state, output, IDLE_MESSAGE, prefetch_search=True)
+        if reply is not None:
+            state["turn_outcome"]["reply_text"] = reply.assistant_text
+            state["turn_outcome"]["cited_listing_urls"] = list(reply.cited_listing_urls or [])
+        else:
+            search_node(state)
+        compose_node(state, output)
+
+        assistant_text = state["turn_outcome"].get("assistant_text", "")
+        state["messages"] = list(conversation) + [{"role": "assistant", "content": assistant_text}]
+        response = {
+            "assistant_text": assistant_text,
+            "listings": state["turn_outcome"].get("listings", []),
+            "category": state.get("category"),
+            "qualification_complete": bool(state.get("qualification_complete")),
+            "idle": True,
+        }
+        conversation_store.save_turn(
+            session_id,
+            conversation=state["messages"],
+            state_snapshot=to_snapshot(state),
+            request_message=IDLE_MESSAGE,
+            response=response,
+            contact=state.get("contact"),
+            item_of_interest=conversation_store.describe_interest(state),
+            outbox_events=state["turn_outcome"].get("outbox_events"),
+            turn_id=turn_id,
+            channel_id=channel_id,
+            idle_timer=idle_timer.plan(state, channel_id),
+        )
+        if state["turn_outcome"].get("outbox_events"):
+            conversation_store.deliver_pending_outbox_async()
+        logger.info(
+            "IDLE turn done: session=%s category=%s listings=%d tokens=%d",
+            session_id, state.get("category"), len(response["listings"] or []), turn_usage.total_tokens,
+        )
+        return {**response, "session_id": session_id, "turn_id": str(turn_id), "usage": turn_usage.as_dict()}
