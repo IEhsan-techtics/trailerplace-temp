@@ -22,6 +22,7 @@ from src.llm.prompt import build_messages
 from src.llm.schemas import (
     ChatbotTurnOutput,
     ChatbotTurnReplyOutput,
+    ReplyRewrite,
     ContactInfo,
     ExtractedFields,
     HaulClassification,
@@ -38,7 +39,10 @@ def get_client():
     """The OpenAI client. Cached - building one per turn leaks connection pools."""
     from openai import OpenAI
 
-    return OpenAI(api_key=settings.openai_api_key, timeout=settings.chat_timeout_seconds)
+    # Four retries rather than the SDK's two. gpt-6-luna's limit on this account is 200k
+    # tokens a minute and a turn sends ~16k, so a handful of customers at once reaches it; the
+    # 429 says to wait about a second, and two quick retries were live not always enough.
+    return OpenAI(api_key=settings.openai_api_key, timeout=settings.chat_timeout_seconds, max_retries=4)
 
 
 def empty_output(reason: str = "") -> ChatbotTurnOutput:
@@ -132,7 +136,45 @@ def analyze_turn(state: dict, user_message: str) -> ChatbotTurnOutput:
     return output
 
 
-def _record_usage(response: Any) -> None:
+def rewrite_reply(state: dict, user_message: str, first_reply: str, problem: str, needs: str) -> ReplyRewrite | None:
+    """One more go at the reply, after Python turned the first one down. None on any failure.
+
+    The first reply was written BEFORE Python applied the message, so it could not know what
+    Python then decided. This call is made after: the state block it reads is the state as it
+    is now, and it is told what was wrong with the first reply and what this turn needs. The
+    customer never sees the first one.
+    """
+    messages = build_messages(state, user_message)
+    messages.append({"role": "assistant", "content": first_reply})
+    messages.append({
+        "role": "system",
+        "content": (
+            "That reply cannot be sent. What was wrong with it: " + problem + ".\n"
+            "What this reply needs: " + needs + "\n"
+            "The state block above is up to date with their latest message. Write the reply "
+            "again, fixing that and keeping everything else it did well, and report on it "
+            "truthfully in the other fields."
+        ),
+    })
+    started = time.perf_counter()
+    try:
+        response = get_client().responses.parse(
+            model=settings.chat_model,
+            input=messages,
+            reasoning={"effort": settings.chat_reasoning_effort},
+            text_format=ReplyRewrite,
+            prompt_cache_key=ANALYSIS_CACHE_KEY,
+        )
+    except Exception:  # noqa: BLE001 - the caller falls back
+        logger.exception("LLM rewrite failed: session=%s", state.get("session_id"))
+        return None
+    finally:
+        usage.record_seconds("reply", time.perf_counter() - started)
+    _record_usage(response, purpose="rewrite")
+    return getattr(response, "output_parsed", None)
+
+
+def _record_usage(response: Any, purpose: str = "chat_turn") -> None:
     """Count the call so test_single_call can assert exactly one happened."""
     tokens = getattr(response, "usage", None)
     details = getattr(tokens, "input_tokens_details", None)
@@ -140,6 +182,6 @@ def _record_usage(response: Any) -> None:
         settings.chat_model,
         prompt_tokens=getattr(tokens, "input_tokens", 0) or 0,
         completion_tokens=getattr(tokens, "output_tokens", 0) or 0,
-        purpose="chat_turn",
+        purpose=purpose,
         cached_tokens=getattr(details, "cached_tokens", 0) or 0,
     )

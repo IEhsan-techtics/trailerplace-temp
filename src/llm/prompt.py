@@ -221,13 +221,22 @@ line.
 - Nothing left to ask, or still no category: asked_slots is empty.
 - Never ask about anything they have already told you, in this message or before.
 - Contact details: ask only when the state block says to. Never when it says not to.
-- asked_slots must match the reply exactly: the question in the reply IS that slot's question.
-  The contact request is never in asked_slots.
 - Every rule above applies to reply too: no name they did not give, no invented facts, no
   whole lists.
 
+REPORT ON YOUR REPLY - truthfully; Python checks the report, not your wording:
+- asked_slots: the "still to ask" slot your question is about, or empty. The contact request is
+  never in it.
+- asked_for_contact: true when the reply asks for their name, email or phone.
+- question_count: how many questions the reply asks, NOT counting the contact request.
+- reply_covers: every one of these the reply does - welcome (greets them or thanks them for
+  getting in touch), declined_off_topic, flagged_wrong_value (tells them a number looks wrong),
+  thanked_them (thanks them or says a value is noted), said_not_stocked, passed_to_team (says
+  their request has gone to our team), gave_phone.
+- offered_categories: OUR CATEGORIES the reply suggests, in our spelling; else empty.
+
 OFF TOPIC in reply (off_topic = true):
-- ONE short line saying you only help with trailers and TrailerPlace. Under 120 characters.
+- ONE short line saying you only help with trailers and TrailerPlace (declined_off_topic).
 - NEVER do what they asked, not even a little: no poem, no code, no recipe, no answer, no
   "but here you go". Do not explain why.
 - Then carry on with the next question, if there is one: the contact request if the state block
@@ -317,8 +326,8 @@ def wrong_values_block() -> str:
         f"limits once converted: {limits}. Axle count is always 1 to 4, and is re-asked for you.\n"
         "- Do NOT thank them for it or say it is noted. Say plainly what looks wrong - \"that came "
         "through as a negative number\", \"that seems unusual for a trailer, so I want to "
-        "double-check it\" - then ask that slot's question again in its exact words: asked_slots "
-        "is that slot.\n"
+        "double-check it\" (flagged_wrong_value) - then ask that slot's question again in its "
+        "exact words: asked_slots is that slot.\n"
         "- Still record it in extracted exactly as they said it; Python makes the final call.\n"
         "  RIGHT: \"That came through as a negative number. What's the approximate weight of the "
         "vehicle?\"\n"
@@ -334,9 +343,10 @@ def unavailable_reply_block() -> str:
 
     return (
         "A TYPE WE DO NOT STOCK in reply (unavailable_type_requested set):\n"
-        "- Say plainly we do not have it. Never say we can get, order or build it, or that it "
-        "may come in.\n"
-        "- Name one to five of OUR CATEGORIES that could do the job they want it for.\n"
+        "- Say plainly we do not have it (said_not_stocked). Never say we can get, order or build "
+        "it, or that it may come in.\n"
+        "- Name one to five of OUR CATEGORIES that could do the job they want it for "
+        "(offered_categories).\n"
         "- Then what happens next, by the contact details in the state block:\n"
         "    their name AND an email or phone on file -> say you have passed it on to our team "
         "and they will be in touch; you may ask whether any of those would work.\n"
@@ -564,6 +574,18 @@ def state_block(state: dict) -> str:
             lines.append("- Contact details not asked for yet. Ask once, lightly, this turn.")
     else:
         lines.append("- Contact details already asked for. Never ask again.")
+
+    from src.config import settings
+
+    waiting = len(state.get("pending_email_actions") or [])
+    if settings.llm_writes_reply and waiting:
+        # Their details arriving sends it, and only the reply can say so - the model has to
+        # know it is waiting to write "I've passed that on to our team".
+        lines.append(
+            f"- {waiting} request(s) for our team are waiting on their details. If this message "
+            "gives their name and an email or phone, say you have passed it on to our team "
+            "(passed_to_team)."
+        )
 
     return "\n".join(lines)
 

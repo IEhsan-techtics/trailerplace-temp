@@ -69,6 +69,8 @@ _SHOW_RESULTS_INTENTS = {"skip_all_show_results", "show_more_results", "recommen
 def apply_node(state: dict, output: Any, user_message: str = "") -> dict:
     """Fold one turn's structured output into the session state."""
     outcome = state.setdefault("turn_outcome", {})
+    # For a rewrite of the reply (reply_check), which has to show the model the message again.
+    outcome["user_message"] = user_message
     state["invalid_retry_slot"] = None
     state["invalid_retry_reason"] = None
 

@@ -1,27 +1,32 @@
-"""Send the model's own reply, when it passes Python's checks. LLM_WRITES_REPLY only.
+"""Send the model's own reply, when it keeps the rules. LLM_WRITES_REPLY only.
 
-With the flag on, the one call writes the whole message (``reply``) and names the question in
-it (``asked_slots``). The model wrote that BEFORE ``apply_node`` ran, so it could not know what
-Python then decided: a value rejected, a question skipped by a rule, a confirmation to ask. So
-the reply is checked here against the state as it is now, and either sent as written or turned
-down - and a turned-down reply costs nothing, because ``compose_node`` assembles the reply from
-the model's pieces exactly as it does with the flag off.
+With the flag on, the one call writes the whole message (``reply``) and reports what it did:
+which question it asked (``asked_slots``), how many questions there are, whether it asked for
+their details, and a list of what else it covers (``reply_covers``). Python checks that report
+against the rules - it never reads the text itself. Every pattern tried for that misread a good
+reply live: "no contact details needed" read as asking for them, "We don’t carry campers" as
+never saying so. Reading people is the model's job.
 
-Checked, never edited. Nothing in here rewrites the model's text: the regex surgery in compose
-is what turned "You're welcome! What material will you be hauling?" into "You're welcome
-material will you be hauling?" live, and a reply that needs cutting is a reply to turn down.
+The model wrote its reply BEFORE ``apply_node`` ran, so it could not know what Python then
+decided: a value rejected, a question skipped, a notification sent. A reply that breaks a rule
+therefore gets one rewrite - a second call that sees the state as it is now and is told what
+was wrong. Only when that also fails, or a model call does, does compose build the reply from
+the pieces as it does with the flag off.
 
-The rules held here are the same ones compose holds:
+Never edited. The regex surgery in compose is what sent "You're welcome material will you be
+hauling?" live; a reply that needs changing is written again, by the model.
 
-* one question per reply (the contact request rides along, as it does in compose);
+The rules:
+
+* one question per reply (the contact request is separate);
 * never a question that is answered, declined or already asked twice (brief S29, S23);
-* the contact request only when the gate says it is due;
-* Python's own questions - confirmations, a rejected value - are asked by Python.
+* the contact request exactly when it is due;
+* Python's own questions - confirmations, the axle count - are asked by Python.
 """
 from __future__ import annotations
 
 import logging
-import re
+from dataclasses import dataclass, field
 from typing import Any
 
 from src.graph.nodes import greeting
@@ -30,62 +35,81 @@ from src.tools.questions import is_answered, is_resolved, mark_asked, required_r
 logger = logging.getLogger(__name__)
 
 # Questions Python asks in its own words. While one is open the reply is compose's: the
-# model wrote before it knew one would be opened, and the customer must see the question the
-# next turn is going to read their answer against.
+# customer must see the question the next turn is going to read their answer against.
 _PYTHON_QUESTIONS = (
     "pending_gooseneck_clarification", "pending_category_switch", "pending_keep_filters",
     "pending_axle_basis", "pending_axle_count",
 )
 
-# A re-ask has to say what was wrong - otherwise it is the same question again, and the
-# customer is left to guess why. Any of these will do; the prompt asks for plain words.
-_SAYS_WHAT_WAS_WRONG = re.compile(
-    r"\b(negative|minus|below zero|double[- ]check|confirm|unusual|seems? (high|low|off|like)|"
-    r"looks? (high|low|off|like)|did you mean|typo|mistake|doesn'?t look right|not sure (that|i)|"
-    r"didn'?t (catch|get)|unit|realistic|possible)",
-    re.IGNORECASE,
-)
+# An off-topic reply is a one-line decline and, at most, one question. Anything this long has
+# done what they asked behind an apology - live, "I mainly help with trailers, but here you
+# go:" and a recipe.
+MAX_OFF_TOPIC_REPLY_CHARS = 400
 
-# Thanking them for the value we are about to reject. Live, compose sent "Thanks, I've noted
-# that. That came through as a negative number..." - thanks for a number it then turned down.
-_THANKS_RE = re.compile(r"\b(thanks|thank you|appreciate|got it|noted|perfect|great)\b", re.IGNORECASE)
 
-_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+@dataclass
+class _Reply:
+    """The model's reply and its own account of it."""
+
+    text: str
+    asked: list[str]
+    asked_for_contact: bool
+    question_count: int
+    covers: set[str] = field(default_factory=set)
+    offered: list[str] = field(default_factory=list)
+
+    @classmethod
+    def of(cls, output: Any) -> "_Reply":
+        return cls(
+            text=str(getattr(output, "reply", "") or "").strip(),
+            asked=[str(s).strip() for s in (getattr(output, "asked_slots", None) or []) if str(s).strip()],
+            asked_for_contact=bool(getattr(output, "asked_for_contact", False)),
+            question_count=int(getattr(output, "question_count", 0) or 0),
+            covers=set(getattr(output, "reply_covers", None) or []),
+            offered=[str(c) for c in (getattr(output, "offered_categories", None) or [])],
+        )
+
+
+class _PythonsTurn(Exception):
+    """The turn belongs to compose whatever the model wrote - no rewrite can change that."""
 
 
 def use_model_reply(state: dict, output: Any, situation: str = "flow") -> bool:
-    """Send ``output.reply`` as this turn's reply if it passes. True when it was used.
+    """Send the model's reply, or its one rewrite. True when one went out.
 
-    ``situation`` is the kind of turn compose is on: "flow" for an ordinary one, or one of
-    the turns that used to be wholly ours - "off_topic" - which add checks of their own.
+    ``situation`` is the kind of turn compose is on: "flow" for an ordinary one, or one of the
+    turns that used to be wholly ours - "off_topic", "unavailable" - with rules of their own.
     """
-    reply = str(getattr(output, "reply", "") or "").strip()
-    asked = [str(slot).strip() for slot in (getattr(output, "asked_slots", None) or []) if str(slot).strip()]
-
-    from src.graph.nodes.compose import _TYPOGRAPHY
-
-    # Checked in plain ASCII, sent as written. The model writes "don’t" with a curly
-    # apostrophe, and live that alone turned down "We don’t carry campers" as a reply that
-    # never said we do not have them.
-    problem = _problem(state, reply.translate(_TYPOGRAPHY), asked, situation)
-    if problem:
-        logger.info(
-            "COMPOSE fell back: session=%s situation=%s reason=%s asked_slots=%s reply=%r",
-            state.get("session_id"), situation, problem, asked, reply,
-        )
+    reply = _Reply.of(output)
+    try:
+        problem = _problem(state, reply, situation)
+    except _PythonsTurn as turn:
+        _log_fallback(state, situation, str(turn), reply)
         return False
 
-    from src.graph.nodes.compose import _contact_ask_is_due
+    if problem:
+        logger.info(
+            "COMPOSE asked for a rewrite: session=%s situation=%s reason=%s reply=%r",
+            state.get("session_id"), situation, problem, reply.text,
+        )
+        rewrite = _rewrite(state, reply, problem, situation)
+        if rewrite is None:
+            _log_fallback(state, situation, f"{problem}; the rewrite call failed", reply)
+            return False
+        second = _problem(state, rewrite, situation)
+        if second:
+            _log_fallback(state, situation, f"{problem}; after the rewrite: {second}", rewrite)
+            return False
+        reply = rewrite
 
+    _send(state, reply, situation, rewritten=bool(problem))
+    return True
+
+
+def _send(state: dict, reply: _Reply, situation: str, *, rewritten: bool) -> None:
     outcome = state.setdefault("turn_outcome", {})
     contact = state.setdefault("contact", {})
-    if _asks_for_contact(reply):
-        greeting.note_asked(state)
-    elif _contact_ask_is_due(state):
-        # The one thing added rather than checked, and only on the end: the request is a
-        # courtesy the gate has decided is due, and leaving the lead unasked is the costlier
-        # mistake. Same as compose does when the model did not ask in its own words.
-        reply = f"{reply} {greeting.gate_ask(state)}"
+    if reply.asked_for_contact:
         greeting.note_asked(state)
     if greeting.contact_is_complete(contact) and not contact.get("greeted"):
         # The turn their details came in. compose would say its welcome here; the model's
@@ -93,280 +117,229 @@ def use_model_reply(state: dict, output: Any, situation: str = "flow") -> bool:
         contact["greeted"] = True
         contact["asked"] = True
 
-    slot = asked[0] if asked else None
-    outcome["assistant_text"] = _with_handoff_before_the_question(outcome, reply)
+    slot = reply.asked[0] if reply.asked else None
+    outcome["assistant_text"] = reply.text
     outcome["asked_slot"] = slot
     if slot:
         mark_asked(state, slot)
     logger.info(
-        "COMPOSE used the model's reply: session=%s situation=%s asked_slot=%s",
-        state.get("session_id"), situation, slot,
+        "COMPOSE used the model's reply: session=%s situation=%s asked_slot=%s rewritten=%s",
+        state.get("session_id"), situation, slot, rewritten,
     )
-    return True
 
 
-def _with_handoff_before_the_question(outcome: dict, reply: str) -> str:
-    """The "passed on to our team" line, when a stashed request went out this turn.
-
-    The model cannot know that will happen - it is their details arriving that sends it - so
-    the line is ours. It goes in front of the question, not behind it: live it landed after
-    "which one fits what you need?", and the reply ended on a statement instead of the
-    question the customer is meant to answer.
-    """
-    from src.graph.nodes.compose import _MENTIONS_HANDOFF, _handoff_line
-
-    line = _handoff_line(int(outcome.get("emails_flushed") or 0))
-    if not line or _MENTIONS_HANDOFF.search(reply):
-        return reply
-    sentences = [s for s in _SENTENCE_END.split(reply) if s.strip()]
-    first_question = next((i for i, s in enumerate(sentences) if s.rstrip().endswith("?")), None)
-    if first_question is None:
-        return f"{reply} {line}"
-    return " ".join(sentences[:first_question] + [line] + sentences[first_question:])
+def _log_fallback(state: dict, situation: str, reason: str, reply: _Reply) -> None:
+    logger.info(
+        "COMPOSE fell back: session=%s situation=%s reason=%s asked_slots=%s reply=%r",
+        state.get("session_id"), situation, reason, reply.asked, reply.text,
+    )
 
 
-def _problem(state: dict, reply: str, asked: list[str], situation: str = "flow") -> str | None:
-    """Why this reply cannot go out as written, or None when it can."""
-    from src.graph.nodes.compose import _OPENING_RE, _contact_ask_is_due, _names_too_many_categories
+def _rewrite(state: dict, first: _Reply, problem: str, situation: str) -> _Reply | None:
+    from src.llm import client
 
-    outcome = state.get("turn_outcome") or {}
+    output = client.rewrite_reply(
+        state,
+        str((state.get("turn_outcome") or {}).get("user_message") or ""),
+        first.text,
+        problem,
+        _needs(state, situation),
+    )
+    return _Reply.of(output) if output is not None else None
 
-    if not reply:
-        return "no reply written"
+
+# ------------------------------------------------------------------------------ the checks
+
+
+def _problem(state: dict, reply: _Reply, situation: str) -> str | None:
+    """Why this reply cannot go out, or None when it can. Raises _PythonsTurn when no reply
+    from the model could have this turn."""
+    _pythons_turn(state, situation)
+    if not reply.text:
+        return "no reply was written"
+    if greeting.is_first_turn(state) and "welcome" not in reply.covers:
+        return "it is their first message and the reply does not welcome them"
     if situation == "unavailable":
-        # Its own kind of turn, as it is in compose: no qualification question, whatever the
-        # flow still owes - the reply is about the trailer they cannot have.
-        return _unavailable_problem(state, reply, asked)
+        return _unavailable_problem(state, reply)
     if situation == "off_topic":
-        problem = _off_topic_problem(state, reply)
+        problem = _off_topic_problem(reply)
         if problem:
             return problem
+    return _flow_problem(state, reply) or _contact_problem(state, reply) or _handoff_problem(state, reply)
 
-    # ---- turns that belong to Python whatever the model wrote ----
+
+def _pythons_turn(state: dict, situation: str) -> None:
+    outcome = state.get("turn_outcome") or {}
+    if situation == "unavailable":
+        return
     for key in _PYTHON_QUESTIONS:
         if state.get(key):
-            return f"python asks this turn ({key})"
-    problem = _retry_problem(state, reply, asked)
-    if problem:
-        return problem
+            raise _PythonsTurn(f"python asks this turn ({key})")
+    if state.get("invalid_retry_slot") == "axle_count":
+        raise _PythonsTurn("python asks this turn (axle count)")
     if outcome.get("search_ran"):
-        return "a search ran"
+        raise _PythonsTurn("a search ran")
     if outcome.get("wants_results") and not state.get("category"):
-        return "results asked for with no category"
-    if greeting.is_first_turn(state) and not _OPENING_RE.search(reply):
-        # The one sentence every conversation is guaranteed to carry. Checked, not supplied:
-        # the model was told to open with it word for word, and a reply that did can stand.
-        # Live, a customer who opened with "Hi, I'm Tony Stephens, 806-555-0199" got compose's
-        # welcome instead of the model's "Thanks, Tony" - with his name taken out of it.
-        return "first reply has no welcome"
+        raise _PythonsTurn("results asked for with no category")
     if not state.get("category") and state.get("listing_interest_logged"):
-        return "they already picked a trailer"
+        raise _PythonsTurn("they already picked a trailer")
 
-    # ---- one question ----
-    questions = [q for q in _questions(reply) if not _asks_for_contact(q)]
-    if not state.get("category") and _one_category_question(questions):
-        questions = [" ".join(questions)]
-    if len(questions) > 1:
-        return f"{len(questions)} questions"
-    if len(asked) > 1:
-        return f"{len(asked)} slots claimed"
 
-    # ---- the question it asks is one it may ask ----
+def _flow_problem(state: dict, reply: _Reply) -> str | None:
+    if reply.question_count > 1:
+        return f"it asks {reply.question_count} questions; one at most"
+    if len(reply.asked) > 1:
+        return f"it claims {len(reply.asked)} slots; one at most"
+
+    retry = _open_retry(state)
+    if retry:
+        if reply.asked != [retry]:
+            return f"the {retry} they gave was turned down, so {retry} must be asked again"
+        if "flagged_wrong_value" not in reply.covers:
+            return f"it re-asks {retry} without saying what looked wrong"
+        if "thanked_them" in reply.covers:
+            return "it thanks them for, or notes, a value that was turned down"
+
     remaining = required_remaining(state) if state.get("category") else []
-    if asked:
-        slot = asked[0]
+    if reply.asked:
+        slot = reply.asked[0]
         if slot not in remaining:
             if is_answered(state, slot):
-                return f"{slot} is already answered"
+                return f"it asks {slot}, which they already answered"
             if is_resolved(state, slot):
-                return f"{slot} is declined or asked twice"
-            return f"{slot} is not a question to ask"
-        if not questions:
-            return f"claims {slot} but asks nothing"
-        if not _is_about(questions[0], slot):
-            return f"question is not about {slot}"
-    elif questions:
-        # A question with no slot claimed: fine when there is no slot to ask (the category
-        # question, "anything else I can help with?"), not when it is really a slot question
-        # the model forgot to name - that ask would never be counted.
-        if remaining:
-            return "asks a question but names no slot"
-    elif remaining and not (_asks_for_contact(reply) and _contact_ask_is_due(state)):
-        # Nothing asked with questions still open stalls the flow: compose would have asked.
-        # Unless the one question it asks is for their details, when those are due - one
-        # question per reply, and that one counts.
-        return "asks nothing with questions left"
-
-    # A question about something they already told us. Only when it is not also about the
-    # slot it claims: the axle slots share one topic, and a question about the one being
-    # asked is not a re-ask of its neighbour.
-    if questions and not (asked and _is_about(questions[0], asked[0])):
-        for known in _answered_slots(state):
-            if _is_about(questions[0], known):
-                return f"re-asks {known}"
-
-    if not state.get("category") and questions and _names_too_many_categories(questions[0]):
-        return "names too many categories"
-
-    # ---- the contact request ----
-    if _asks_for_contact(reply) and not _contact_ask_is_due(state):
-        return "asks for contact details when it is not due"
-
+                return f"it asks {slot}, which is declined or already asked twice"
+            return f"it asks {slot}, which is not a question to ask now"
+        if reply.question_count == 0:
+            return f"it names {slot} but asks no question"
+    elif reply.question_count and remaining:
+        return "it asks a question but names no slot, with questions still to ask"
+    elif remaining and not (reply.asked_for_contact and _contact_due(state)):
+        return "it asks nothing, with questions still to ask"
     return None
 
 
-def _retry_problem(state: dict, reply: str, asked: list[str]) -> str | None:
-    """A value Python turned down this turn is asked again, saying what was wrong.
-
-    The model read the same number and was given the same limits, so it usually saw the
-    problem itself. When it did not - it thanked them and moved on - the reply goes to
-    compose, which re-asks in its own words.
-
-    The axle count keeps its own path (apply._apply_axles), and a value whose two asks are
-    spent is not asked again by anyone: the flow simply moves on.
-    """
-    retry = state.get("invalid_retry_slot")
-    if not retry or is_resolved(state, retry):
-        return None
-    if retry == "axle_count":
-        return "python asks this turn (axle count)"
-    if asked != [retry]:
-        return f"must ask {retry} again"
-    if not _SAYS_WHAT_WAS_WRONG.search(reply):
-        return "re-asks without saying what was wrong"
-    before_question = " ".join(s for s in _SENTENCE_END.split(reply) if not s.strip().endswith("?"))
-    if _THANKS_RE.search(before_question):
-        return "thanks them for a value that was turned down"
+def _contact_problem(state: dict, reply: _Reply) -> str | None:
+    due = _contact_due(state)
+    if reply.asked_for_contact and not due:
+        return "it asks for their contact details, which is not due this turn"
+    if due and not reply.asked_for_contact:
+        return "their contact details are due this turn and it does not ask for them"
     return None
 
 
-# Saying we do not have it. A reply about a type we do not stock that says none of these has
-# not said the one thing it is for.
-_SAYS_WE_DO_NOT_HAVE_IT = re.compile(
-    r"\b(don'?t|do not|doesn'?t|does not|aren'?t|are not|isn'?t|is not|not currently|"
-    r"no longer|unfortunately|sorry|can'?t|cannot|won'?t)\b",
-    re.IGNORECASE,
-)
-
-_MENTIONS_TEAM = re.compile(r"\bteam\b", re.IGNORECASE)
+def _handoff_problem(state: dict, reply: _Reply) -> str | None:
+    """Their details arrived and a request that was waiting on them went to the team."""
+    if int((state.get("turn_outcome") or {}).get("emails_flushed") or 0) and "passed_to_team" not in reply.covers:
+        return "their request was just passed to our team and the reply does not say so"
+    return None
 
 
-def _unavailable_problem(state: dict, reply: str, asked: list[str]) -> str | None:
+def _unavailable_problem(state: dict, reply: _Reply) -> str | None:
     """A type we do not carry: say so, offer what we do carry, and say what happens next.
 
-    What happens next is the team notification apply already raised, and its status is
-    what the reply must match - it is the one thing the model could get wrong about the
-    world: "sent" (they have been passed on), "stashed" (we need their details first) or
-    "dropped" (they declined, so the phone number is how they reach us).
+    What happens next is the team notification apply already raised, and its status is what
+    the reply must match: "sent" (passed on), "stashed" (we need their details first) or
+    "dropped" (they declined, so the phone number is how they reach the team).
     """
-    from src.domain.canned_responses import PHONE
-    from src.graph.nodes.compose import _OPENING_RE, _category_names_in
     from src.tools.unavailable import _stocked
 
     status = ((state.get("turn_outcome") or {}).get("unavailable_type") or {}).get("status")
+    stocked = set(_stocked())
 
-    if greeting.is_first_turn(state) and not _OPENING_RE.search(reply):
-        return "unavailable first reply has no welcome"
-    if not _SAYS_WE_DO_NOT_HAVE_IT.search(reply):
-        return "does not say we do not have it"
-    if not _category_names_in(reply) & set(_stocked()):
-        # One is enough when it is the right one: a horse trailer's alternative is Livestock.
-        return "offers nothing we do carry"
-    if asked:
-        return "asks a qualification question on an unavailable turn"
-
-    questions = [q for q in _questions(reply) if not _asks_for_contact(q)]
+    if "said_not_stocked" not in reply.covers:
+        return "it does not say plainly that we do not carry it"
+    offered = set(reply.offered)
+    if not offered & stocked:
+        return "it offers nothing we do carry"
+    if offered - stocked:
+        return f"it offers {', '.join(sorted(offered - stocked))}, which we do not stock"
+    if reply.asked:
+        return "it asks a qualification question on this turn"
     if status == "stashed":
-        if not _asks_for_contact(reply):
-            return "needs their details and does not ask for them"
-        if questions:
-            return "asks something besides their details"
-    elif len(questions) > 1:
-        return f"{len(questions)} questions"
-
-    if status == "sent" and not _MENTIONS_TEAM.search(reply):
-        return "does not say the team has it"
-    if status == "dropped" and re.sub(r"\D", "", PHONE) not in re.sub(r"\D", "", reply):
-        return "declined contact and no phone number given"
-    if status != "stashed" and _asks_for_contact(reply):
-        return "asks for details it does not need"
+        if not reply.asked_for_contact:
+            return "the team needs their details and it does not ask for them"
+        if reply.question_count:
+            return "it asks something besides their details"
+    elif reply.question_count > 1:
+        return f"it asks {reply.question_count} questions; one at most"
+    if status == "sent" and "passed_to_team" not in reply.covers:
+        return "the team has their request and it does not say so"
+    if status == "dropped" and "gave_phone" not in reply.covers:
+        return "they declined contact details and it does not give our phone number"
+    if status != "stashed" and reply.asked_for_contact:
+        return "it asks for contact details the team does not need"
     return None
 
 
-def _off_topic_problem(state: dict, reply: str) -> str | None:
-    """An off-topic reply declines in one short line and does not do what they asked.
-
-    Measured on what is left once the questions and the opening are taken out - that is the
-    decline. The cap is scope's own, and it is there because live the model opened "I mainly
-    help with trailers, but here you go:" and gave the recipe; a real decline never runs long.
-    """
-    from src.graph.nodes.compose import _OPENING_RE
-    from src.tools.scope import MAX_DECLINE_CHARS
-
-    if "```" in reply:
-        return "off-topic reply carries code"
-    if greeting.is_first_turn(state) and not _OPENING_RE.search(reply):
-        return "off-topic first reply has no welcome"
-    decline = " ".join(
-        s for s in _SENTENCE_END.split(reply.replace(greeting.OPENING, ""))
-        if s.strip() and not s.strip().endswith("?") and not _asks_for_contact(s)
-    ).strip()
-    if not decline:
-        return "off-topic reply does not decline"
-    if len(decline) > MAX_DECLINE_CHARS:
-        return f"off-topic decline runs {len(decline)} chars"
+def _off_topic_problem(reply: _Reply) -> str | None:
+    if "declined_off_topic" not in reply.covers:
+        return "it does not decline the off-topic request"
+    if len(reply.text) > MAX_OFF_TOPIC_REPLY_CHARS:
+        return "it runs long enough to have done what they asked"
     return None
 
 
-def _questions(text: str) -> list[str]:
-    return [s.strip() for s in _SENTENCE_END.split(text) if s.strip().endswith("?")]
+def _open_retry(state: dict) -> str | None:
+    """A value Python turned down this turn, still worth asking again."""
+    retry = state.get("invalid_retry_slot")
+    if not retry or retry == "axle_count" or is_resolved(state, retry):
+        return None
+    return retry
 
 
-# How a request starts when it is not phrased as a question: "Please share your name...".
-_REQUEST_OPENING = re.compile(r"^(please|kindly|feel free|when you (get|have) a (moment|chance)|share|send|drop|let me)\b", re.IGNORECASE)
+def _contact_due(state: dict) -> bool:
+    from src.graph.nodes.compose import _contact_ask_is_due
+
+    return _contact_ask_is_due(state)
 
 
-def _asks_for_contact(text: str) -> bool:
-    """Whether the text REQUESTS their details, sentence by sentence.
+# -------------------------------------------------------------------- what to tell a rewrite
 
-    compose's pattern matches the words, and "Understood - no contact details needed." has
-    the words: live, that acknowledgement of a refusal read as asking again and the reply
-    was turned down. A request is a question, or a sentence that opens like one.
-    """
-    from src.graph.nodes.compose import _already_asks_for_contact
-
-    for sentence in _SENTENCE_END.split(text or ""):
-        sentence = sentence.strip()
-        if not _already_asks_for_contact(sentence):
-            continue
-        if sentence.endswith("?") or _REQUEST_OPENING.search(sentence):
-            return True
-    return False
+_PIECES = {"name": "their name", "contact": "an email or phone number"}
 
 
-def _one_category_question(questions: list[str]) -> bool:
-    """The type question in the shape our own menu uses: "What type of trailer are you
-    looking for? We have Utility, Dump, ... - which one fits what you need?" Two question
-    marks, one question - it is word for word what greeting.orientation_question sends."""
-    from src.graph.nodes.compose import _category_names_in
+def _needs(state: dict, situation: str) -> str:
+    """What a reply to this turn has to do, as the rewrite is told it."""
+    from src.domain.canned_responses import PHONE
+    from src.tools import team_notify
+    from src.tools.questions import question_text
 
-    return len(questions) == 2 and _is_about(questions[0], "base_category") and len(
-        _category_names_in(questions[1])
-    ) >= 2
+    outcome = state.get("turn_outcome") or {}
+    needs: list[str] = []
+    if greeting.is_first_turn(state):
+        needs.append("It is their first message: welcome them.")
 
+    if situation == "unavailable":
+        status = (outcome.get("unavailable_type") or {}).get("status")
+        needs.append("Say plainly we do not carry what they asked for, and suggest one to five of "
+                     "OUR CATEGORIES that could do the job. No qualification question.")
+        needs.append({
+            "sent": "Say their request has been passed to our team, who will be in touch.",
+            "dropped": f"They declined contact details: give our phone number, {PHONE}.",
+        }.get(status, "Say our team can follow up, and ask for "
+                      + " and ".join(_PIECES[p] for p in team_notify.missing_pieces(state) or ["contact"])
+                      + " - the only question in the reply."))
+        return " ".join(needs)
 
-def _is_about(question: str, slot: str) -> bool:
-    """Whether a question is recognisably about this slot. A slot with no topic list (one
-    added in the rules panel) cannot be told apart, so it is taken on trust."""
-    from src.graph.nodes.compose import _SLOT_TOPICS, _collapse
-    from src.graph.nodes.compose import _is_about as about
+    if situation == "off_topic":
+        needs.append("One short line saying you only help with trailers - never do what they asked.")
 
-    if slot not in _SLOT_TOPICS:
-        return True
-    return about(_collapse(question), slot)
+    needs.append("At most one question.")
+    retry = _open_retry(state)
+    remaining = required_remaining(state) if state.get("category") else []
+    if retry:
+        needs.append(f"The {retry} they gave looks wrong: say so plainly, do not thank them for it, "
+                     f"and ask again: \"{question_text(state, retry)}\" (asked_slots [{retry}]).")
+    elif remaining:
+        asks = "; ".join(f'{slot}: "{question_text(state, slot)}"' for slot in remaining)
+        needs.append(f"Ask ONE of these, word for word, and name it in asked_slots - {asks}.")
+    else:
+        needs.append("There is no qualification question to ask.")
 
-
-def _answered_slots(state: dict) -> list[str]:
-    from src.graph.nodes.compose import _SLOT_TOPICS
-
-    return [slot for slot in _SLOT_TOPICS if is_answered(state, slot)]
+    if _contact_due(state):
+        needs.append("End by asking for their name and an email or phone number.")
+    else:
+        needs.append("Do not ask for their contact details.")
+    if int(outcome.get("emails_flushed") or 0):
+        needs.append("Their request has just been passed to our team: say so.")
+    return " ".join(needs)

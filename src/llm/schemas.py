@@ -209,14 +209,40 @@ class ChatbotTurnOutput(StrictBaseModel):
     next_question_text: str | None = Field(description="That question in one sentence.")
 
 
-class ChatbotTurnReplyOutput(ChatbotTurnOutput):
-    """The same output plus the whole reply, used when LLM_WRITES_REPLY is on.
+# What a reply did, reported by the model that wrote it. Python checks the report against the
+# rules instead of reading the text: a pattern cannot read people, and every one tried here
+# misread a good reply live ("no contact details needed" read as asking for them).
+ReplyCover = Literal[
+    "welcome",               # greeted them / thanked them for getting in touch
+    "declined_off_topic",    # said we only help with trailers, and did not do what they asked
+    "flagged_wrong_value",   # told them a number they gave looks wrong
+    "thanked_them",          # thanked them, or said a value was noted
+    "said_not_stocked",      # said plainly we do not carry the type they asked for
+    "passed_to_team",        # said their request has been passed to our team
+    "gave_phone",            # gave our phone number
+]
 
-    A subclass rather than two more fields on the base, so with the flag off the model is
-    asked for exactly what it was asked for before - no extra output tokens, no new schema.
-    """
 
-    reply: str = Field(description="The whole message to send them, one question at most (see THE REPLY).")
+class ReplyFields(StrictBaseModel):
+    """The reply and the model's own account of it."""
+
+    reply: str = Field(description="The whole message to send them (see THE REPLY).")
     asked_slots: list[str] = Field(
         description="The 'still to ask' slot your reply asks, or empty. Never more than one."
     )
+    asked_for_contact: bool = Field(description="True when the reply asks for their name, email or phone.")
+    question_count: int = Field(description="Questions in the reply, NOT counting the contact request.")
+    reply_covers: list[ReplyCover] = Field(description="Every item on the list that the reply does.")
+    offered_categories: list[str] = Field(description="OUR CATEGORIES the reply suggests, else empty.")
+
+
+class ChatbotTurnReplyOutput(ReplyFields, ChatbotTurnOutput):
+    """The same output plus the whole reply, used when LLM_WRITES_REPLY is on.
+
+    A subclass rather than more fields on the base, so with the flag off the model is asked
+    for exactly what it was asked for before - no extra output tokens, no new schema.
+    """
+
+
+class ReplyRewrite(ReplyFields):
+    """A second go at the reply, once Python has turned the first one down and said why."""
