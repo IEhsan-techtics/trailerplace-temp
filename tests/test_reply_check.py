@@ -118,9 +118,58 @@ def test_a_confirmation_python_asks_owns_the_turn():
     assert _falls_back(state, _output("What will you be hauling?", ["haul_item"]))
 
 
-def test_a_rejected_value_is_re_asked_by_python():
-    state = _state(invalid_retry_slot="payload_capacity", invalid_retry_reason="negative")
-    assert _falls_back(state, _output("Thanks! What will you be hauling?", ["haul_item"]))
+def _retry(**overrides):
+    return _state(**{"invalid_retry_slot": "payload_capacity", "invalid_retry_reason": "negative", **overrides})
+
+
+def test_a_rejected_value_moving_on_to_another_question_falls_back():
+    assert _falls_back(_retry(), _output("Thanks! What will you be hauling?", ["haul_item"]))
+
+
+def test_a_rejected_value_re_asked_with_the_reason_goes_out():
+    state = _retry()
+    reply = "That came through as a negative number. What's the rough haul weight per load?"
+    outcome = _send(state, _output(reply, ["payload_capacity"]))
+
+    assert outcome["assistant_text"] == reply
+    assert state["asked_counts"] == {"payload_capacity": 1}
+
+
+def test_thanks_for_a_rejected_value_falls_back():
+    """Live: "Thanks, I've noted that. That came through as a negative number..." """
+    reply = "Thanks, I've noted that. That came through as a negative number. What's the rough haul weight per load?"
+    assert _falls_back(_retry(), _output(reply, ["payload_capacity"]))
+
+
+def test_a_re_ask_that_does_not_say_what_was_wrong_falls_back():
+    reply = "What's the rough haul weight per load?"
+    assert _falls_back(_retry(), _output(reply, ["payload_capacity"]))
+
+
+def test_an_implausible_value_re_asked_in_its_own_words_goes_out():
+    state = _retry(invalid_retry_reason="implausible")
+    reply = "That seems unusual for a trailer load - could you double-check the weight and unit?"
+    assert _send(state, _output(reply, ["payload_capacity"]))["assistant_text"] == reply
+
+
+def test_a_re_ask_that_does_not_name_what_it_asks_falls_back():
+    """"the amount" of what? A question the check cannot place is not counted as that slot."""
+    state = _retry(invalid_retry_reason="implausible")
+    reply = "That seems unusual for a trailer - could you double-check the amount and unit?"
+    assert _falls_back(state, _output(reply, ["payload_capacity"]))
+
+
+def test_the_axle_count_is_still_re_asked_by_python():
+    state = _state(invalid_retry_slot="axle_count", invalid_retry_reason="axle_range",
+                   required_slots=["haul_item", "axle_count"])
+    reply = "We carry one to four axles, so that number seems off. How many axles would you like?"
+    assert _falls_back(state, _output(reply, ["axle_count"]))
+
+
+def test_a_rejected_value_already_asked_twice_is_not_asked_again():
+    state = _retry(asked_counts={"payload_capacity": 2})
+    reply = "That came through as a negative number. What's the rough haul weight per load?"
+    assert _falls_back(state, _output(reply, ["payload_capacity"]))
 
 
 def test_asking_for_contact_when_it_is_not_due_falls_back():

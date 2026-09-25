@@ -270,7 +270,7 @@ def _system_prompt_for(version: int, writes_reply: bool = False) -> str:
             _RULES.strip(),
             _SITUATIONS.strip(),
             _FIELDS.strip(),
-            *([_REPLY.strip(), questions_by_category_block()] if writes_reply else []),
+            *([_REPLY.strip(), wrong_values_block(), questions_by_category_block()] if writes_reply else []),
             cargo_traits_block(),
             company.company_facts_block(),
             company.standard_answers_block(with_keys=True),
@@ -285,6 +285,41 @@ def _system_prompt_for(version: int, writes_reply: bool = False) -> str:
 
 
 system_prompt.cache_clear = _system_prompt_for.cache_clear  # type: ignore[attr-defined]
+
+
+def wrong_values_block() -> str:
+    """The limits Python checks a number against, in the model's words, from Python's table.
+
+    The model writes the reply before Python checks the number, so it can only get a wrong
+    value right by applying the same limits itself. Built from quantities.PLAUSIBLE so the two
+    can never disagree.
+    """
+    from src.domain.quantities import PLAUSIBLE
+
+    names = {
+        "length_ft": "length {} to {} ft", "width_ft": "width {} to {} ft",
+        "height_ft": "height {} to {} ft", "payload_lbs": "load weight {} to {} lbs",
+        "axle_capacity_lbs": "one axle's rating {} to {} lbs",
+        "total_axle_capacity_lbs": "all axles together {} to {} lbs",
+        "bin_size": "bin size {} to {} yd", "tank_capacity": "tank {} to {} gallons",
+    }
+    limits = "; ".join(
+        text.format(f"{low:,.0f}", f"{high:,.0f}")
+        for kind, text in names.items()
+        if (bounds := PLAUSIBLE.get(kind)) for low, high in [bounds]
+    )
+    return (
+        "A WRONG VALUE in reply - a size, weight or rating that is negative, or outside these "
+        f"limits once converted: {limits}. Axle count is always 1 to 4, and is re-asked for you.\n"
+        "- Do NOT thank them for it or say it is noted. Say plainly what looks wrong - \"that came "
+        "through as a negative number\", \"that seems unusual for a trailer, so I want to "
+        "double-check it\" - then ask that slot's question again in its exact words: asked_slots "
+        "is that slot.\n"
+        "- Still record it in extracted exactly as they said it; Python makes the final call.\n"
+        "  RIGHT: \"That came through as a negative number. What's the approximate weight of the "
+        "vehicle?\"\n"
+        "  WRONG: \"Thanks, I've noted that. What's the approximate weight of the vehicle?\""
+    )
 
 
 def questions_by_category_block() -> str:

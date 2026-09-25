@@ -34,8 +34,21 @@ logger = logging.getLogger(__name__)
 # next turn is going to read their answer against.
 _PYTHON_QUESTIONS = (
     "pending_gooseneck_clarification", "pending_category_switch", "pending_keep_filters",
-    "pending_axle_basis", "pending_axle_count", "invalid_retry_slot",
+    "pending_axle_basis", "pending_axle_count",
 )
+
+# A re-ask has to say what was wrong - otherwise it is the same question again, and the
+# customer is left to guess why. Any of these will do; the prompt asks for plain words.
+_SAYS_WHAT_WAS_WRONG = re.compile(
+    r"\b(negative|minus|below zero|double[- ]check|confirm|unusual|seems? (high|low|off|like)|"
+    r"looks? (high|low|off|like)|did you mean|typo|mistake|doesn'?t look right|not sure (that|i)|"
+    r"didn'?t (catch|get)|unit|realistic|possible)",
+    re.IGNORECASE,
+)
+
+# Thanking them for the value we are about to reject. Live, compose sent "Thanks, I've noted
+# that. That came through as a negative number..." - thanks for a number it then turned down.
+_THANKS_RE = re.compile(r"\b(thanks|thank you|appreciate|got it|noted|perfect|great)\b", re.IGNORECASE)
 
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 
@@ -105,6 +118,9 @@ def _problem(state: dict, reply: str, asked: list[str], situation: str = "flow")
     for key in _PYTHON_QUESTIONS:
         if state.get(key):
             return f"python asks this turn ({key})"
+    problem = _retry_problem(state, reply, asked)
+    if problem:
+        return problem
     if outcome.get("search_ran"):
         return "a search ran"
     if outcome.get("wants_results") and not state.get("category"):
@@ -164,6 +180,31 @@ def _problem(state: dict, reply: str, asked: list[str], situation: str = "flow")
     if _asks_for_contact(reply) and not _contact_ask_is_due(state):
         return "asks for contact details when it is not due"
 
+    return None
+
+
+def _retry_problem(state: dict, reply: str, asked: list[str]) -> str | None:
+    """A value Python turned down this turn is asked again, saying what was wrong.
+
+    The model read the same number and was given the same limits, so it usually saw the
+    problem itself. When it did not - it thanked them and moved on - the reply goes to
+    compose, which re-asks in its own words.
+
+    The axle count keeps its own path (apply._apply_axles), and a value whose two asks are
+    spent is not asked again by anyone: the flow simply moves on.
+    """
+    retry = state.get("invalid_retry_slot")
+    if not retry or is_resolved(state, retry):
+        return None
+    if retry == "axle_count":
+        return "python asks this turn (axle count)"
+    if asked != [retry]:
+        return f"must ask {retry} again"
+    if not _SAYS_WHAT_WAS_WRONG.search(reply):
+        return "re-asks without saying what was wrong"
+    before_question = " ".join(s for s in _SENTENCE_END.split(reply) if not s.strip().endswith("?"))
+    if _THANKS_RE.search(before_question):
+        return "thanks them for a value that was turned down"
     return None
 
 
