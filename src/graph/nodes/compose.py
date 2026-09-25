@@ -57,6 +57,9 @@ def compose_node(state: dict, output: Any) -> dict:
     if outcome.get("off_topic"):
         from src.tools import scope
 
+        if settings.llm_writes_reply and reply_check.use_model_reply(state, output, "off_topic"):
+            return state
+
         text, slot = scope.reply(state, output, first_turn=_is_first_turn(state))
         outcome["assistant_text"] = text
         outcome["asked_slot"] = slot

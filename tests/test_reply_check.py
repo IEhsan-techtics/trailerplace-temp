@@ -187,3 +187,97 @@ def test_the_prompt_only_asks_for_a_reply_with_the_flag_on():
 
     assert "THE REPLY -> reply" in _system_prompt_for(0, True)
     assert "THE REPLY -> reply" not in _system_prompt_for(0, False)
+
+
+# ---- off topic: the whole turn, written by the model ----
+
+
+def _off_topic(state=None, **kwargs):
+    state = state or _state()
+    state["turn_outcome"]["off_topic"] = True
+    return state
+
+
+def test_an_off_topic_decline_goes_out_as_written():
+    reply = "Sorry, I can only help with trailers here. What will you be hauling?"
+    outcome = _send(_off_topic(), _output(reply, ["haul_item"]))
+
+    assert outcome["assistant_text"] == reply
+    assert outcome["asked_slot"] == "haul_item"
+
+
+def test_an_off_topic_reply_that_does_what_they_asked_falls_back():
+    """Live, the model apologised and then gave the recipe anyway."""
+    reply = (
+        "I mainly help with trailers, but here you go: toast two slices of bread, add ham, "
+        "cheese and lettuce, then close it up and cut it in half. What will you be hauling?"
+    )
+    assert _falls_back(_off_topic(), _output(reply, ["haul_item"]))
+
+
+def test_an_off_topic_reply_with_code_falls_back():
+    reply = "Only trailers here. ```print('hi')``` What will you be hauling?"
+    assert _falls_back(_off_topic(), _output(reply, ["haul_item"]))
+
+
+def test_an_off_topic_reply_must_decline():
+    assert _falls_back(_off_topic(), _output("What will you be hauling?", ["haul_item"]))
+
+
+def test_off_topic_with_nothing_left_to_ask_may_just_stop():
+    state = _off_topic(_state(slots={"haul_item": "gravel", "payload_capacity": 5000}))
+    reply = "Sorry, I can only help with trailers and TrailerPlace here."
+    outcome = _send(state, _output(reply, []))
+
+    assert outcome["assistant_text"] == reply
+
+
+def test_an_off_topic_first_message_still_gets_the_welcome():
+    from src.graph.nodes import greeting
+
+    state = _off_topic(_state(turn_index=1, category=None, required_slots=[], slots={}))
+    bare = "Sorry, I can only help with trailers here. Which type fits what you need - Utility, Dump or Enclosed?"
+    assert _falls_back(state, _output(bare, []))
+
+    state = _off_topic(_state(turn_index=1, category=None, required_slots=[], slots={}))
+    welcomed = f"{greeting.OPENING} {bare}"
+    assert _send(state, _output(welcomed, []))["assistant_text"] == welcomed
+
+
+def test_accepting_a_refusal_is_not_asking_for_contact():
+    """Live: "Understood - no contact details needed." read as asking again."""
+    reply = "Understood - no contact details needed. What will you be hauling?"
+    outcome = _send(_state(contact={"declined": True}), _output(reply, ["haul_item"]))
+
+    assert outcome["assistant_text"] == reply
+
+
+def test_a_request_without_a_question_mark_still_counts():
+    reply = "What will you be hauling? Please share your name and the best email or phone to reach you on."
+    assert _falls_back(_state(), _output(reply, ["haul_item"]))
+
+
+def test_our_own_menu_shape_is_one_question():
+    """Two question marks, one question - word for word what orientation_question sends."""
+    state = _state(category=None, required_slots=[], slots={})
+    reply = (
+        "No problem at all. What type of trailer are you looking for? We have Utility, "
+        "Enclosed, Equipment, Dump and Car Hauler, and many more - which one fits what you need?"
+    )
+    assert _send(state, _output(reply, []))["assistant_text"] == reply
+
+
+def test_two_real_questions_with_no_category_still_fall_back():
+    state = _state(category=None, required_slots=[], slots={})
+    reply = "What type of trailer are you looking for? And what's your budget?"
+    assert _falls_back(state, _output(reply, []))
+
+
+def test_a_due_contact_ask_may_be_the_one_question():
+    state = _state(contact={})
+    reply = "You're welcome! Could you share your name and either an email or phone number so our team can follow up?"
+    outcome = _send(state, _output(reply, []))
+
+    assert outcome["assistant_text"] == reply
+    assert outcome["asked_slot"] is None
+    assert state["contact"]["asks_without_progress"] == 1

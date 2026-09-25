@@ -40,16 +40,20 @@ _PYTHON_QUESTIONS = (
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 
 
-def use_model_reply(state: dict, output: Any) -> bool:
-    """Send ``output.reply`` as this turn's reply if it passes. True when it was used."""
+def use_model_reply(state: dict, output: Any, situation: str = "flow") -> bool:
+    """Send ``output.reply`` as this turn's reply if it passes. True when it was used.
+
+    ``situation`` is the kind of turn compose is on: "flow" for an ordinary one, or one of
+    the turns that used to be wholly ours - "off_topic" - which add checks of their own.
+    """
     reply = str(getattr(output, "reply", "") or "").strip()
     asked = [str(slot).strip() for slot in (getattr(output, "asked_slots", None) or []) if str(slot).strip()]
 
-    problem = _problem(state, reply, asked)
+    problem = _problem(state, reply, asked, situation)
     if problem:
         logger.info(
-            "COMPOSE fell back: session=%s reason=%s asked_slots=%s reply=%r",
-            state.get("session_id"), problem, asked, reply,
+            "COMPOSE fell back: session=%s situation=%s reason=%s asked_slots=%s reply=%r",
+            state.get("session_id"), situation, problem, asked, reply,
         )
         return False
 
@@ -77,13 +81,13 @@ def use_model_reply(state: dict, output: Any) -> bool:
     if slot:
         mark_asked(state, slot)
     logger.info(
-        "COMPOSE used the model's reply: session=%s asked_slot=%s",
-        state.get("session_id"), slot,
+        "COMPOSE used the model's reply: session=%s situation=%s asked_slot=%s",
+        state.get("session_id"), situation, slot,
     )
     return True
 
 
-def _problem(state: dict, reply: str, asked: list[str]) -> str | None:
+def _problem(state: dict, reply: str, asked: list[str], situation: str = "flow") -> str | None:
     """Why this reply cannot go out as written, or None when it can."""
     from src.graph.nodes.compose import _contact_ask_is_due, _names_too_many_categories
 
@@ -92,6 +96,10 @@ def _problem(state: dict, reply: str, asked: list[str]) -> str | None:
 
     if not reply:
         return "no reply written"
+    if situation == "off_topic":
+        problem = _off_topic_problem(state, reply)
+        if problem:
+            return problem
 
     # ---- turns that belong to Python whatever the model wrote ----
     for key in _PYTHON_QUESTIONS:
@@ -108,6 +116,8 @@ def _problem(state: dict, reply: str, asked: list[str]) -> str | None:
 
     # ---- one question ----
     questions = [q for q in _questions(reply) if not _asks_for_contact(q)]
+    if not state.get("category") and _one_category_question(questions):
+        questions = [" ".join(questions)]
     if len(questions) > 1:
         return f"{len(questions)} questions"
     if len(asked) > 1:
@@ -133,8 +143,10 @@ def _problem(state: dict, reply: str, asked: list[str]) -> str | None:
         # the model forgot to name - that ask would never be counted.
         if remaining:
             return "asks a question but names no slot"
-    elif remaining:
+    elif remaining and not (_asks_for_contact(reply) and _contact_ask_is_due(state)):
         # Nothing asked with questions still open stalls the flow: compose would have asked.
+        # Unless the one question it asks is for their details, when those are due - one
+        # question per reply, and that one counts.
         return "asks nothing with questions left"
 
     # A question about something they already told us. Only when it is not also about the
@@ -155,14 +167,66 @@ def _problem(state: dict, reply: str, asked: list[str]) -> str | None:
     return None
 
 
+def _off_topic_problem(state: dict, reply: str) -> str | None:
+    """An off-topic reply declines in one short line and does not do what they asked.
+
+    Measured on what is left once the questions and the opening are taken out - that is the
+    decline. The cap is scope's own, and it is there because live the model opened "I mainly
+    help with trailers, but here you go:" and gave the recipe; a real decline never runs long.
+    """
+    from src.graph.nodes.compose import _OPENING_RE
+    from src.tools.scope import MAX_DECLINE_CHARS
+
+    if "```" in reply:
+        return "off-topic reply carries code"
+    if greeting.is_first_turn(state) and not _OPENING_RE.search(reply):
+        return "off-topic first reply has no welcome"
+    decline = " ".join(
+        s for s in _SENTENCE_END.split(reply.replace(greeting.OPENING, ""))
+        if s.strip() and not s.strip().endswith("?") and not _asks_for_contact(s)
+    ).strip()
+    if not decline:
+        return "off-topic reply does not decline"
+    if len(decline) > MAX_DECLINE_CHARS:
+        return f"off-topic decline runs {len(decline)} chars"
+    return None
+
+
 def _questions(text: str) -> list[str]:
     return [s.strip() for s in _SENTENCE_END.split(text) if s.strip().endswith("?")]
 
 
+# How a request starts when it is not phrased as a question: "Please share your name...".
+_REQUEST_OPENING = re.compile(r"^(please|kindly|feel free|when you (get|have) a (moment|chance)|share|send|drop|let me)\b", re.IGNORECASE)
+
+
 def _asks_for_contact(text: str) -> bool:
+    """Whether the text REQUESTS their details, sentence by sentence.
+
+    compose's pattern matches the words, and "Understood - no contact details needed." has
+    the words: live, that acknowledgement of a refusal read as asking again and the reply
+    was turned down. A request is a question, or a sentence that opens like one.
+    """
     from src.graph.nodes.compose import _already_asks_for_contact
 
-    return _already_asks_for_contact(text)
+    for sentence in _SENTENCE_END.split(text or ""):
+        sentence = sentence.strip()
+        if not _already_asks_for_contact(sentence):
+            continue
+        if sentence.endswith("?") or _REQUEST_OPENING.search(sentence):
+            return True
+    return False
+
+
+def _one_category_question(questions: list[str]) -> bool:
+    """The type question in the shape our own menu uses: "What type of trailer are you
+    looking for? We have Utility, Dump, ... - which one fits what you need?" Two question
+    marks, one question - it is word for word what greeting.orientation_question sends."""
+    from src.graph.nodes.compose import _category_names_in
+
+    return len(questions) == 2 and _is_about(questions[0], "base_category") and len(
+        _category_names_in(questions[1])
+    ) >= 2
 
 
 def _is_about(question: str, slot: str) -> bool:
