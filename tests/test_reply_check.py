@@ -506,7 +506,7 @@ def test_a_first_reply_without_thank_you_for_contacting_is_turned_down(rewrites)
     reply = "Hi Tony, welcome! Which type of trailer fits what you need?"
     assert _turned_down(_first_turn_with_contact(),
                         _output(reply, [], questions=1, covers=["welcome", "greeted_by_name"]), rewrites)
-    assert "Thank you for contacting TrailerPlace" in rewrites.calls[0]["problem"]
+    assert "Thanks for contacting TrailerPlace" in rewrites.calls[0]["problem"]
 
 
 def test_a_first_reply_to_someone_who_gave_their_name_must_open_with_it(rewrites):

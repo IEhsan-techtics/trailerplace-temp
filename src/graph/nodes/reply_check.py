@@ -178,7 +178,7 @@ def _opening_problem(state: dict, reply: _Reply) -> str | None:
     if not greeting.is_first_turn(state):
         return None
     if "thanked_for_contacting" not in reply.covers:
-        return 'it is their first message and it does not say "Thank you for contacting TrailerPlace"'
+        return 'it is their first message and it does not say "Thanks for contacting TrailerPlace"'
     if greeting.has_name(state.get("contact") or {}) and "greeted_by_name" not in reply.covers:
         return 'they gave their name and the reply does not open with "Hi <their name>"'
     return None
@@ -336,7 +336,7 @@ def _needs(state: dict, situation: str, due: bool) -> str:
         needs.append(
             (f'It is their first message: open with "Hi {name}," and ' if name else
              "It is their first message: ")
-            + 'say "Thank you for contacting TrailerPlace"; the rest in your own words.'
+            + 'say "Thanks for contacting TrailerPlace!"; the rest in your own words.'
         )
 
     if situation == "unavailable":

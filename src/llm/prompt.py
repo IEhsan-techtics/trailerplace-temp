@@ -230,7 +230,7 @@ REPORT ON YOUR REPLY - truthfully; Python checks the report, not your wording:
 - asked_for_contact: true when the reply asks for their name, email or phone.
 - question_count: how many questions the reply asks, NOT counting the contact request.
 - reply_covers: every one of these the reply does - welcome (greets them or thanks them for
-  getting in touch), thanked_for_contacting (says "Thank you for contacting TrailerPlace"),
+  getting in touch), thanked_for_contacting (says "Thanks/Thank you for contacting TrailerPlace"),
   greeted_by_name (opens with "Hi <their name>"), invited_questions (invites them to ask
   anything else), declined_off_topic, flagged_wrong_value (tells them a number looks wrong),
   thanked_them (thanks them or says a value is noted), said_not_stocked, passed_to_team (says
@@ -263,8 +263,24 @@ def system_prompt() -> str:
     return _system_prompt_for(rules_version(), settings.llm_writes_reply)
 
 
+# The contact request quoted in THEIR FIRST MESSAGE is the fallback piece's, word for word. A
+# model writing the reply copied it rather than the voice's lines, so with the switch on it
+# points there instead.
+_OLD_CONTACT_ASK = """next_question_text: "Could you please provide your name
+  and either your email or phone number? This will allow our team to follow up with you.\""""
+
+
+def _situations_writing_reply() -> str:
+    assert _OLD_CONTACT_ASK in _SITUATIONS
+    return _SITUATIONS.replace(
+        _OLD_CONTACT_ASK, "ask for their details as ASKING FOR THEIR DETAILS says."
+    )
+
+
 @lru_cache(maxsize=4)
 def _system_prompt_for(version: int, writes_reply: bool = False) -> str:
+    from src.llm import voice
+
     # Instructions first, reference data after: the data is what the rules point at.
     intro = (
         "message, fill in the output fields and write the reply; Python checks it before "
@@ -278,8 +294,9 @@ def _system_prompt_for(version: int, writes_reply: bool = False) -> str:
             f"You are the sales assistant for {company.NAME}, a trailer dealership in "
             f"{company.LOCATION}, chatting with customers online. Each turn you read their "
             + intro,
+            *([voice.block()] if writes_reply else []),
             _RULES.strip(),
-            _SITUATIONS.strip(),
+            (_situations_writing_reply() if writes_reply else _SITUATIONS).strip(),
             _FIELDS.strip(),
             *(
                 [_REPLY.strip(), wrong_values_block(), unavailable_reply_block(),
@@ -564,9 +581,9 @@ def state_block(state: dict) -> str:
         # looking for a trailer" said to someone who had only said hello - and a customer who
         # opened with a real question waited behind it for the answer.
         lines.append(
-            "- This is their FIRST message. Open with \"Hi <their first name>,\" if this message "
-            "gives their name (greeted_by_name), and say the words \"Thank you for contacting "
-            "TrailerPlace\" (thanked_for_contacting). The rest is in your own words: respond to "
+            "- This is their FIRST message. Open with \"Thanks for contacting TrailerPlace!\" "
+            "(thanked_for_contacting) - or, if this message gives their name, \"Hi <their first "
+            "name>, thanks for contacting TrailerPlace!\" (greeted_by_name too). The rest is in your own words: respond to "
             "what they said - their trailer need or their question. The rest of the fixed "
             "welcome line in THEIR FIRST MESSAGE above does NOT apply."
         )
@@ -630,7 +647,7 @@ def _contact_line(state: dict) -> str:
     ) else ""
     return (
         f"- Missing: {contact_policy.describe_missing(state)}.{declined} Ask for it as the LAST "
-        "line, in your own words, so our team can log this - ONLY when (a) this is their FIRST "
+        "line, as ASKING FOR THEIR DETAILS says - ONLY when (a) this is their FIRST "
         "message and it says nothing about trailers, (b) you answer one of the standard "
         "questions (faq_key set), or (c) they need our team (an escalation, a type we do not "
         "stock, a trailer they want). Every other turn: do NOT ask. Trailers are never held "

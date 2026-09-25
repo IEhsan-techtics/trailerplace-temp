@@ -192,7 +192,8 @@ def _state_line(state: dict, turn: Any) -> str:
             "not something they said. Show them the trailers we have in stock for their "
             "category, based on the information they have shared so far: say exactly that in "
             "the line before the first card, in your own words. Do not ask the question they "
-            "left unanswered, and do not mention that they went quiet."
+            "left unanswered, and do not mention that they went quiet. If you ask for their details, "
+            "use the line for the trailers we sent because they went quiet."
         )
     idle = bool((state.get("turn_outcome") or {}).get("idle_results"))
     # Not on the idle turn: it follows their first message without one of its own, and live it
@@ -200,7 +201,7 @@ def _state_line(state: dict, turn: Any) -> str:
     if contact_policy.active() and int(state.get("turn_index") or 0) <= 1 and not idle:
         # The dealership's opening, on the first reply whoever writes it.
         name = str(contact.get("name") or "").split(" ")[0]
-        opening = (f"Hi {name}, thank you" if name else "Thank you") + " for contacting TrailerPlace."
+        opening = (f"Hi {name}, thanks" if name else "Thanks") + " for contacting TrailerPlace!"
         lines.append(
             f'- This is their FIRST message. The reply\'s VERY FIRST words are "{opening}" - '
             "before the line that comes before the first card, and before anything else. Then "
@@ -214,8 +215,7 @@ def _state_line(state: dict, turn: Any) -> str:
         lines.append(
             f"- We do not have {contact_policy.describe_missing(state)}. If you show trailers, "
             "answer a standard question or pass something to our team, end with ONE short line "
-            "asking for it, in your own words, so our team can log this - after the closing "
-            "question. This overrides \"nothing else after the listings\"."
+            "asking for it, as ASKING FOR THEIR DETAILS above says - after the closing question. This overrides \"nothing else after the listings\"."
         )
     assumed = {slot: entry.get("value") for slot, entry in (state.get("rule_defaults") or {}).items()}
     if assumed:
@@ -297,6 +297,9 @@ def _lookup_hint(turn: Any) -> str:
 
 
 def build_system_prompt(state: dict, turn: Any) -> str:
+    from src.config import settings
+    from src.llm import voice
+
     # Everything before the customer line is identical on every turn, so the provider caches
     # it; the customer line goes last for the same reason.
     return "\n\n".join(
@@ -310,6 +313,7 @@ def build_system_prompt(state: dict, turn: Any) -> str:
             _CARD_FORMAT.strip(),
             _RECOMMENDING.strip(),
             _SALES_REP.strip(),
+            *([voice.block()] if settings.llm_writes_reply else []),
             _WHAT_YOU_CAN_DO.strip(),
             _SCOPE.strip(),
             company.company_facts_block(),
