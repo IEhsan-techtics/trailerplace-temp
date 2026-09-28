@@ -17,7 +17,9 @@ logger = logging.getLogger(__name__)
 #
 #   [Reason] one-line description
 # Reason vocabulary is fixed by milestone.md M7 step 2.
-_NOT_PROVIDED = "Not provided"
+_UNKNOWN_NAME = "Unknown user"
+_UNKNOWN_EMAIL = "Unknown email"
+_UNKNOWN_PHONE = "Unknown phone number"
 
 
 def render_email_body(
@@ -32,10 +34,17 @@ def render_email_body(
 ) -> str:
     """Exact email body per spec §Tools / milestone.md M7 step 2 — do not paraphrase.
 
-    The description stays ONE short line. A Facebook or Instagram URL is taken out of it and
-    replaced by the platform's name: a post URL is opaque, it expires, and pasted into a
-    one-line summary it swamps the sentence that matters. Our own listing links stay - they
-    say which trailer. The only other link is the one back to the conversation.
+    The description is ONE line, straight under the phone number, with no blank line before
+    it, no line break inside it and no extra spaces: Transax keeps a description only up to
+    its first line break, so the blank line that used to sit here - or a break inside the
+    text - cut off the part that says what the email is about. It reads:
+
+        [Results Shown to User] Showed 1 trailer | Chat: <url>
+
+    A Facebook or Instagram URL is taken out of it and replaced by the platform's name: a post
+    URL is opaque, it expires, and pasted into a one-line summary it swamps the sentence that
+    matters. Our own listing links stay - they say which trailer. The only other link is the
+    one back to the conversation.
     """
     from src.domain import links
 
@@ -46,11 +55,10 @@ def render_email_body(
     if chat_url:
         line += f" | Chat: {chat_url}"
     return (
-        f"Full Name: {name or _NOT_PROVIDED}\n"
-        f"Email: {email or _NOT_PROVIDED}\n"
-        f"Phone Number: {phone or _NOT_PROVIDED}\n"
-        f"\n"
-        f"{line}"
+        f"Full Name: {name or _UNKNOWN_NAME}\n"
+        f"Email: {email or _UNKNOWN_EMAIL}\n"
+        f"Phone Number: {phone or _UNKNOWN_PHONE}\n"
+        f"{' '.join(line.split())}"
     )
 
 

@@ -273,6 +273,9 @@ class ChatbotOutbox(Base):
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    # The bot that queued the row (settings.outbox_origin); only that bot sends it. Null on
+    # rows queued before the column existed.
+    origin: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
 class ChatbotQuestionRules(Base):

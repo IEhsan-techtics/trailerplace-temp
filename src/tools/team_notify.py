@@ -8,7 +8,7 @@ nothing without a way to reach that customer. So the rule is absolute:
 A name is not part of that test. It makes the lead easier to work and we still ask for it
 (the contact gate in greeting.py is unchanged, and so is the prompt), but a number with no
 name is a customer the team can call, and holding their request back for a formality is how
-a real lead turns into nothing. The body says "Full Name: Not provided" and the team rings
+a real lead turns into nothing. The body says "Full Name: Unknown user" and the team rings
 the number.
 
 A request that arrives before then is STASHED, never dropped - ``state["pending_email_actions"]``
@@ -192,7 +192,7 @@ def build_event(state: dict, *, reason: str, description: str) -> dict[str, Any]
     return {
         "reason": reason,
         "description": shorten(description) or "No detail given.",
-        "event_type": reason.lower().replace(" ", "_").replace("–", "-")[:64],
+        "event_type": "_".join(re.findall(r"\w+", reason.lower()))[:64],
     }
 
 

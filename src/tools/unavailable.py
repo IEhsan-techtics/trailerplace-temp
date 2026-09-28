@@ -100,8 +100,8 @@ def record(state: dict, output: Any, requested: str) -> str:
     # names the type; this only has to say that they asked for it.
     return team_notify.record(
         state,
-        reason=f"Trailer type not in stock - {requested}",
-        description=f"Asked for {_label(requested)} - not stocked",
+        reason="Trailer_type_not_in_stock_" + "_".join(str(requested).split()),
+        description=f"Asked for {_label(requested)}, not in stock",
     )
 
 

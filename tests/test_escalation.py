@@ -55,9 +55,26 @@ def test_escalating_queues_an_email_in_the_spec_format():
     assert payload["body"] == (
         "Full Name: Dave\n"
         "Email: d@x.ai\n"
-        "Phone Number: Not provided\n"
-        "\n"
+        "Phone Number: Unknown phone number\n"
         "[Escalation] order arrived damaged"
+    )
+
+
+def test_the_description_is_one_line_straight_under_the_phone_number():
+    """Transax keeps a description only up to its first line break: the blank line that sat
+    here, or a break inside the text, cut off what the email was about. No extra spaces
+    either, anywhere in it."""
+    from src.tools import email_sender
+
+    body = email_sender.render_email_body(
+        name="Dave", email=None, phone="555-0100", reason="Results Shown to User",
+        description="  Showed 1\n  trailer ", chat_url="https://ui.example/?chat_session=abc",
+    )
+    assert body == (
+        "Full Name: Dave\n"
+        "Email: Unknown email\n"
+        "Phone Number: 555-0100\n"
+        "[Results Shown to User] Showed 1 trailer | Chat: https://ui.example/?chat_session=abc"
     )
 
 
@@ -342,6 +359,44 @@ def test_the_drain_never_raises(draining, monkeypatch):
     conversation_store.deliver_pending_outbox()  # must not raise
 
 
+def _drain_filter(monkeypatch, origin):
+    import dataclasses
+
+    from sqlalchemy.dialects import postgresql
+
+    from src import conversation_store
+
+    monkeypatch.setattr(
+        conversation_store, "settings",
+        dataclasses.replace(conversation_store.settings, outbox_origin=origin),
+    )
+    clause = conversation_store._queued_here()
+    return str(clause.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
+
+
+def test_a_local_bot_sends_only_the_rows_it_queued(monkeypatch):
+    """Live: a local test queued a row on the shared table and Azure sent it to Transax."""
+    sql = _drain_filter(monkeypatch, "local-laptop")
+    assert sql == "chatbot_outbox.origin = 'local-laptop'", "and never the legacy rows"
+
+
+def test_the_deployed_bot_sends_its_own_rows_and_the_ones_from_before_the_column(monkeypatch):
+    sql = _drain_filter(monkeypatch, "trailerplace-backend")
+    assert sql == "chatbot_outbox.origin = 'trailerplace-backend' OR chatbot_outbox.origin IS NULL"
+
+
+def test_origin_defaults_to_the_container_app_then_the_machine(monkeypatch):
+    from src import config
+
+    monkeypatch.delenv("OUTBOX_ORIGIN", raising=False)
+    monkeypatch.setenv("CONTAINER_APP_NAME", "trailerplace-backend")
+    assert config._outbox_origin() == "trailerplace-backend"
+    monkeypatch.delenv("CONTAINER_APP_NAME")
+    assert config._outbox_origin().startswith("local-")
+    monkeypatch.setenv("OUTBOX_ORIGIN", "staging")
+    assert config._outbox_origin() == "staging"
+
+
 def test_the_drain_is_a_no_op_without_persistence(no_mail):
     from src import conversation_store
 
@@ -378,13 +433,13 @@ def _state(**contact):
 def test_a_way_to_reach_them_is_enough_on_its_own():
     """A number with no name beside it is still a customer the team can ring. Holding the
     request back for a formality is how a real lead turns into nothing - the body says
-    "Full Name: Not provided" and someone calls them."""
+    "Full Name: Unknown user" and someone calls them."""
     from src.tools import team_notify
 
     state = _state(email="d@x.ai")
     assert team_notify.record(state, reason="Escalation", description="x") == "sent"
     assert len(state["turn_outcome"]["outbox_events"]) == 1
-    assert "Full Name: Not provided" in state["turn_outcome"]["outbox_events"][0]["payload"]["body"]
+    assert "Full Name: Unknown user" in state["turn_outcome"]["outbox_events"][0]["payload"]["body"]
     assert not state.get("pending_email_actions")
 
 
@@ -411,11 +466,11 @@ def test_several_stashed_requests_all_go_out_together():
 
     state = _state()
     for reason, description in [
-        ("FAQ - financing", "asked about financing"),
+        ("FAQ_financing", "asked about financing"),
         ("Team Request", "wants a callback"),
         ("Escalation", "order arrived damaged"),
         ("Listing Interest", "likes the Iron Bull DTB"),
-        ("FAQ - trade_in", "asked about trade-ins"),
+        ("FAQ_trade_in", "asked about trade-ins"),
     ]:
         team_notify.record(state, reason=reason, description=description)
     assert len(state["pending_email_actions"]) == 5
@@ -439,7 +494,7 @@ def test_a_flushed_email_carries_the_contact_details_we_finally_got():
     body = state["turn_outcome"]["outbox_events"][0]["payload"]["body"]
     assert "Full Name: Dave" in body
     assert "Email: d@x.ai" in body
-    assert "Not provided" in body  # the phone, which they never gave
+    assert "Unknown phone number" in body  # the phone, which they never gave
 
 
 def test_half_the_details_is_still_not_enough_to_flush():
@@ -512,7 +567,7 @@ def test_an_faq_before_we_have_contact_details_is_stashed(fake_llm, no_reply_pas
     apply_node(state, turn_output(intent="faq", faq_key="financing"), "do you offer financing?")
 
     assert len(state["pending_email_actions"]) == 1
-    assert state["pending_email_actions"][0]["reason"] == "FAQ - financing"
+    assert state["pending_email_actions"][0]["reason"] == "FAQ_financing"
 
 
 def test_an_faq_still_costs_no_second_model_call(fake_llm, no_reply_pass):

@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 VERSIONS = ROOT / "alembic" / "versions"
 
 # The head a new revision must be parented on.
-CURRENT_HEAD = "20260925_0010"
+CURRENT_HEAD = "20260929_0011"
 # Luna's own first revision.
 LUNA_FIRST = "20260920_0009"
 # What the live database was stamped at when Luna picked the history up.

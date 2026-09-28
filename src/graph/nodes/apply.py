@@ -217,7 +217,7 @@ def _apply_faq_notification(state: dict, output: Any) -> None:
         return
     team_notify.record(
         state,
-        reason=f"FAQ - {faq_key}",
+        reason=f"FAQ_{faq_key}",
         description=_FAQ_DESCRIPTIONS.get(
             str(faq_key), f"Asked about {str(faq_key).replace('_', ' ')}"
         ),

@@ -39,6 +39,24 @@ def _int(value: str | None, default: int) -> int:
         return default
 
 
+def _outbox_origin() -> str:
+    """Which running bot this is, so it only sends the team emails it queued itself.
+
+    Every bot shares one ``chatbot_outbox`` table, and each used to send every pending row it
+    found: a local test on the production database queued a row, the Azure bot sent it to
+    Transax with its own settings. OUTBOX_ORIGIN wins when set. Otherwise Azure Container
+    Apps names the app in CONTAINER_APP_NAME (every replica shares it, so any replica may
+    send the app's rows), and anything else is this machine.
+    """
+    import socket
+
+    return (
+        _env("OUTBOX_ORIGIN")
+        or _env("CONTAINER_APP_NAME")
+        or f"local-{socket.gethostname()}"
+    )[:64]
+
+
 def _float(value: str | None, default: float = 0.0) -> float:
     try:
         return float(str(value).strip())
@@ -111,6 +129,9 @@ class Settings:
     # conversation it is about (app.py restores a session from ?chat_session=<id>). Unset
     # means no link: a wrong one is worse than none.
     chat_ui_url: str = ""
+    # Stamped on every outbox row this process queues; it only sends rows with its own
+    # stamp. See _outbox_origin.
+    outbox_origin: str = "local"
     # Commit a finished turn off the reply path (src/turn_saver.py). About 2.4 s of every
     # turn against Azure Postgres from outside the region. Set to 0 to go back to committing
     # before the customer is answered.
@@ -238,6 +259,7 @@ class Settings:
             smtp_from=_env("SMTP_FROM", ""),
             email_to=_env("EMAIL_TO", ""),
             chat_ui_url=_env("CHAT_UI_URL", ""),
+            outbox_origin=_outbox_origin(),
             background_turn_save=_bool(_env("BACKGROUND_TURN_SAVE"), True),
             db_pool_size=_int(_env("DB_POOL_SIZE"), 3),
             db_max_overflow=_int(_env("DB_MAX_OVERFLOW"), 2),

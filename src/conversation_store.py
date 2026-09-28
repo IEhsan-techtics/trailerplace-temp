@@ -278,6 +278,7 @@ def save_turn(
                     event_key=str(event.get("event_key") or uuid.uuid4()),
                     event_type=str(event.get("event_type") or "team_request")[:64],
                     payload=dict(event.get("payload") or {}),
+                    origin=settings.outbox_origin,
                 )
             )
 
@@ -478,6 +479,21 @@ _OUTBOX_POOL: Any = None
 MAX_OUTBOX_ATTEMPTS = 5
 
 
+def _queued_here() -> Any:
+    """Only the rows this bot queued.
+
+    Local runs and the Azure bot share the table, and used to send each other's mail: a
+    local test's email went out through Azure's settings, to Transax. A row with no origin
+    predates the column and belongs to the deployed bot, never to a local one.
+    """
+    from sqlalchemy import or_
+
+    mine = settings.outbox_origin
+    if mine.startswith("local"):
+        return ChatbotOutbox.origin == mine
+    return or_(ChatbotOutbox.origin == mine, ChatbotOutbox.origin.is_(None))
+
+
 def deliver_pending_outbox(limit: int = 10) -> None:
     """Send queued mail. Never raises: a failed send leaves the row retryable.
 
@@ -496,6 +512,7 @@ def deliver_pending_outbox(limit: int = 10) -> None:
                 .filter(
                     ChatbotOutbox.status == "pending",
                     ChatbotOutbox.attempt_count < MAX_OUTBOX_ATTEMPTS,
+                    _queued_here(),
                 )
                 .order_by(ChatbotOutbox.created_at)
                 .limit(limit)
