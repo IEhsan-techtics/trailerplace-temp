@@ -34,12 +34,9 @@ from src.tools.questions import is_answered, is_resolved, mark_asked, required_r
 
 logger = logging.getLogger(__name__)
 
-# Questions Python asks in its own words. While one is open the reply is compose's: the
-# customer must see the question the next turn is going to read their answer against.
-_PYTHON_QUESTIONS = (
-    "pending_gooseneck_clarification", "pending_category_switch", "pending_keep_filters",
-    "pending_axle_basis", "pending_axle_count",
-)
+# The ReplyCover tag the model sets when its reply asks our own open question (hitch or
+# brand, switch category, keep answers, the axle questions).
+ASKED_OUR_QUESTION = "asked_our_question"
 
 # An off-topic reply is a one-line decline and, at most, one question. Anything this long has
 # done what they asked behind an apology - live, "I mainly help with trailers, but here you
@@ -125,6 +122,12 @@ def _send(state: dict, reply: _Reply, situation: str, *, rewritten: bool) -> Non
     outcome["asked_slot"] = slot
     if slot:
         mark_asked(state, slot)
+    ours = _our_question(state)
+    if ours and ASKED_OUR_QUESTION in reply.covers:
+        # Counted where it goes out, as compose counts its own wording of it.
+        from src.graph.nodes.compose import note_python_question_asked
+
+        note_python_question_asked(state, ours[0])
     logger.info(
         "COMPOSE used the model's reply: session=%s situation=%s asked_slot=%s rewritten=%s",
         state.get("session_id"), situation, slot, rewritten,
@@ -169,7 +172,38 @@ def _problem(state: dict, reply: _Reply, situation: str, due: bool) -> str | Non
         problem = _off_topic_problem(reply)
         if problem:
             return problem
+    if _our_question(state):
+        # Our own question is waiting: the reply answers what they said and asks it, in its
+        # own words. The slot-question rules do not apply - it replaces the slot question.
+        return (_our_question_problem(state, reply) or _contact_problem(reply, due)
+                or _handoff_problem(state, reply))
     return _flow_problem(state, reply, due) or _contact_problem(reply, due) or _handoff_problem(state, reply)
+
+
+def _our_question(state: dict) -> tuple[str, str] | None:
+    """Our own open question - (which, our wording) - or None."""
+    from src.graph.nodes.compose import python_question
+
+    return python_question(state)
+
+
+def _our_question_problem(state: dict, reply: _Reply) -> str | None:
+    """The reply must ask our open question, and nothing else.
+
+    It used to be ours outright: the model's reply was dropped and a fixed sentence went out,
+    so a customer who said something else heard the identical sentence again with nothing
+    they said acknowledged - live, "my daughter lives in Wharton" got the switch question
+    word for word, and the template read "For my skid steer" back to them. The model writes
+    it now, for the conversation it is in; the fixed sentence is only the fallback.
+    """
+    which, wording = _our_question(state)
+    if ASKED_OUR_QUESTION in reply.covers and reply.question_count == 1 and not reply.asked:
+        return None
+    return (
+        f'our own question is still waiting on them and the reply does not ask it (or asks '
+        f'something else too). Respond to what they said, then ask it - once, in your own '
+        f'words, keeping this meaning: "{wording}"'
+    )
 
 
 def _opening_problem(state: dict, reply: _Reply) -> str | None:
@@ -188,9 +222,6 @@ def _pythons_turn(state: dict, situation: str) -> None:
     outcome = state.get("turn_outcome") or {}
     if situation == "unavailable":
         return
-    for key in _PYTHON_QUESTIONS:
-        if state.get(key):
-            raise _PythonsTurn(f"python asks this turn ({key})")
     if state.get("invalid_retry_slot") == "axle_count":
         raise _PythonsTurn("python asks this turn (axle count)")
     if outcome.get("search_ran"):
@@ -353,6 +384,20 @@ def _needs(state: dict, situation: str, due: bool) -> str:
 
     if situation == "off_topic":
         needs.append("One short line saying you only help with trailers - never do what they asked.")
+
+    ours = _our_question(state)
+    if ours:
+        needs.append(
+            f'Respond to what they said, then ask this question of ours - once, in your own '
+            f'words, keeping its meaning: "{ours[1]}" Put {ASKED_OUR_QUESTION} in reply_covers, '
+            "leave asked_slots empty, and ask nothing else."
+        )
+        if due:
+            from src.tools import contact_policy
+
+            needs.append(f"End by asking for {contact_policy.describe_missing(state)}, so our team "
+                         "can log this.")
+        return " ".join(needs)
 
     if outcome.get("holding"):
         needs.append(

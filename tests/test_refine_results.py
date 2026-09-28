@@ -86,16 +86,18 @@ def test_changing_the_hitch_after_results_searches_again(fake_llm, no_search):
     assert no_search[-1]["slots"]["hitch_type"] == ["Bumper Pull"]
 
 
-def test_a_bare_gooseneck_after_results_asks_which_one_before_searching(fake_llm, no_search):
-    """It is both a hitch type and a make we stock, so it is a question, not a filter."""
+def test_a_bare_gooseneck_after_results_is_the_hitch_not_a_question(fake_llm, no_search):
+    """They have seen trailers, so "gooseneck" refines them - live, asking "hitch or brand?"
+    here was a question the listings on their screen had already answered."""
     shown_results(fake_llm)
     before = len(no_search)
 
     fake_llm.push(turn_output(intent="requirement_change"))
     result = run_turn("s1", "gooseneck please")
 
-    assert len(no_search) == before, "no search while the ambiguity is open"
-    assert "gooseneck hitch" in result["assistant_text"]
+    assert len(no_search) == before + 1
+    assert no_search[-1]["slots"]["hitch_type"] == ["Gooseneck"]
+    assert "Quick check" not in result["assistant_text"]
 
 
 def test_dropping_a_requirement_after_results_searches_again(fake_llm, no_search):
@@ -149,7 +151,7 @@ def test_nothing_re_searches_before_the_first_results(fake_llm, no_search):
 
 
 # --------------------------------------------------------- a category change is different
-def test_a_new_category_asks_the_keep_question_instead_of_searching(fake_llm, no_search):
+def test_a_new_category_asks_the_keep_question_instead_of_searching(fake_llm, no_search, no_rewrite):
     shown_results(fake_llm)
     before = len(no_search)
 

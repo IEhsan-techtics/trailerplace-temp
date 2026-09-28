@@ -198,6 +198,11 @@ _OPEN_CONFIRMATIONS = (
 )
 
 
+def confirmation_open(state: dict) -> bool:
+    """One of our own questions is waiting on them."""
+    return any(state.get(key) for key in _OPEN_CONFIRMATIONS)
+
+
 def carry_on_question(state: dict) -> tuple[str, str] | None:
     """After a side question mid-qualification (a lookup), the question that picks the flow
     back up: (slot, wording). None when there is no flow to go back to, or when one of our

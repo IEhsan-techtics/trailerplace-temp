@@ -76,6 +76,8 @@ class SessionState(TypedDict, total=False):
     # "gooseneck" is both a hitch type and a make we stock, so a bare mention is worth one
     # short question rather than a guess. Holds the text that was ambiguous.
     pending_gooseneck_clarification: str | None
+    # Times that question has gone out since it was opened. Capped: after two we take the hitch.
+    gooseneck_asks: int
     # An axle capacity whose wording says neither per-axle nor total ("14,000 lbs of axle
     # capacity"): {"value": 14000.0, "asks": 1}. Held here, stored nowhere, until they say.
     pending_axle_basis: dict | None
@@ -155,6 +157,7 @@ def new_state(session_id: str) -> SessionState:
         rejected_switches=[],
         unavailable_requests=[],
         pending_gooseneck_clarification=None,
+        gooseneck_asks=0,
         pending_axle_basis=None,
         pending_axle_count=None,
         contact={

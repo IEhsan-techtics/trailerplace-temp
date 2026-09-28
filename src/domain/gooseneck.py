@@ -146,8 +146,10 @@ def apply_clarification_answer(text: object) -> Optional[str]:
         return None
     # Checked before the hitch words: "the brand" is decisive even in a sentence that also
     # says "hitch", as in "the brand, not the hitch".
-    if re.search(r"\b(brand|make|manufacturer|company)\b", low):
+    # "the company" answers the question; "I'm a trucking company" is who they are.
+    if re.search(r"\b(brand|make|manufacturer)\b|\bthe\s+company\b", low):
         return BRAND
-    if re.search(r"\b(hitch|coupler|coupling|tow\w*|attach\w*|pull\w*)\b", low):
+    # Not "pull": "pulling cattle" says what they haul, not how it hitches.
+    if re.search(r"\b(hitch|coupler|coupling|tow\w*|attach\w*)\b", low):
         return HITCH
     return None

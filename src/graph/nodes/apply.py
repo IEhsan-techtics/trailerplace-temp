@@ -185,7 +185,7 @@ def _stock_in(url: Any) -> str:
 
 
 def _apply_faq_notification(state: dict, output: Any) -> None:
-    """Every one of the five standard questions is worth telling the team about.
+    """Every one of the six standard questions is worth telling the team about.
 
     Handled here rather than through the escalate tool because an FAQ must NOT cost the
     customer their place in the qualification flow: the analysis pass writes the answer, and
@@ -214,6 +214,7 @@ _FAQ_DESCRIPTIONS = {
     "service_parts": "Asked about service and parts",
     "store_info": "Asked about hours or location",
     "contact_human": "Asked to speak to someone",
+    "photos": "Asked for more pictures",
 }
 
 
@@ -367,25 +368,60 @@ def _apply_unavailable_type(state: dict, output: Any) -> None:
 # --------------------------------------------------------------- 2. pending confirmations
 def _apply_pending_confirmations(state: dict, output: Any, user_message: str) -> bool:
     """Settle a yes/no we asked last turn. Returns True when it consumed this message."""
-    if _apply_gooseneck_answer(state, user_message):
+    if _apply_gooseneck_answer(state, output, user_message):
         return True
     if _apply_category_switch_answer(state, output):
         return True
     return _apply_keep_filters_answer(state, output)
 
 
-def _apply_gooseneck_answer(state: dict, user_message: str) -> bool:
+# How many times each of our own yes/no questions goes out before we stop asking and take
+# the usual answer. The same two the slot and axle questions get.
+MAX_CONFIRMATION_ASKS = 2
+# Gooseneck the make is four Livestock rows; the hitch is on every category.
+MAX_GOOSENECK_ASKS = MAX_CONFIRMATION_ASKS
+
+
+def _asked_out(pending: Any) -> bool:
+    return int((pending or {}).get("asks") or 0) >= MAX_CONFIRMATION_ASKS
+
+
+def _gooseneck_answer_from_model(output: Any) -> str | None:
+    """The model's reading of their reply: HITCH, BRAND, or None when this message did not
+    answer. These fields hold what THIS message said, so nothing carried over counts."""
+    extracted = getattr(output, "extracted", None)
+    hitch = getattr(extracted, "hitch_type", None) or []
+    brand = str(getattr(extracted, "brand_preference", None) or "").strip()
+    if "Gooseneck" in hitch:
+        return gooseneck_domain.HITCH
+    if brand.casefold() == gooseneck_domain.GOOSENECK_MAKE.casefold():
+        return gooseneck_domain.BRAND
+    return None
+
+
+def _apply_gooseneck_answer(state: dict, output: Any, user_message: str) -> bool:
     pending = state.get("pending_gooseneck_clarification")
     if not pending:
         return False
 
-    meaning = gooseneck_domain.apply_clarification_answer(user_message)
+    # The model reads the answer; the keywords are only there for a turn where the model
+    # call failed and came back empty.
+    meaning = _gooseneck_answer_from_model(output) or gooseneck_domain.apply_clarification_answer(user_message)
     if meaning is None:
-        # Still unclear. Left pending so the question can be repeated once, but not
-        # treated as consuming the turn.
+        if int(state.get("gooseneck_asks") or 0) < MAX_GOOSENECK_ASKS:
+            # Left open: compose asks it again this turn.
+            return False
+        # Asked twice and still not answered: take the reading that is almost always right
+        # rather than end every reply on the same question. Not consuming the turn - they
+        # said something else, and that is what this turn is about.
+        state["pending_gooseneck_clarification"] = None
+        state["gooseneck_asks"] = 0
+        state.setdefault("slots", {})["hitch_type"] = ["Gooseneck"]
+        logger.info("GOOSENECK defaulted: session=%s -> hitch", state.get("session_id"))
         return False
 
     state["pending_gooseneck_clarification"] = None
+    state["gooseneck_asks"] = 0
     if meaning == gooseneck_domain.BRAND:
         state["brand_preference"] = gooseneck_domain.GOOSENECK_MAKE
         logger.info("GOOSENECK resolved: session=%s -> brand", state.get("session_id"))
@@ -399,6 +435,15 @@ def _apply_category_switch_answer(state: dict, output: Any) -> bool:
     """They are answering "Equipment suits that better - want to switch?"."""
     pending = state.get("pending_category_switch")
     answer = getattr(output, "category_confirm_answer", None)
+    if pending and answer is None and _asked_out(pending):
+        # Asked twice, never answered: they stay where they are, and it is not suggested
+        # again. Not consuming the turn - they said something else, and that is this turn.
+        state["pending_category_switch"] = None
+        rejected = state.setdefault("rejected_switches", [])
+        if pending.get("pair") and pending["pair"] not in rejected:
+            rejected.append(pending["pair"])
+        logger.info("CATEGORY switch defaulted: session=%s -> stay", state.get("session_id"))
+        return False
     if not pending or answer is None:
         return False
 
@@ -433,6 +478,16 @@ def _apply_keep_filters_answer(state: dict, output: Any) -> bool:
     """They are answering "keep what you have already told me?" after a category change."""
     pending = state.get("pending_keep_filters")
     answer = getattr(output, "keep_fields_answer", None)
+    if pending and answer is None and _asked_out(pending):
+        # Asked twice, never answered: what they told us is what we know, so it is kept -
+        # the same call the idle timer makes. Not consuming the turn.
+        output.keep_fields_answer = "all"
+        try:
+            _apply_keep_filters_answer(state, output)
+        finally:
+            output.keep_fields_answer = None
+        logger.info("CATEGORY keep-filters defaulted: session=%s -> keep all", state.get("session_id"))
+        return False
     if not pending or answer is None:
         return False
 
@@ -478,11 +533,26 @@ def _apply_keep_filters_answer(state: dict, output: Any) -> bool:
 
 
 # ----------------------------------------------------------------------- 3. gooseneck
+def _gooseneck_already_settled(state: dict) -> str | None:
+    """Why "gooseneck" needs no question any more, or None when it still might."""
+    if "Gooseneck" in (state.get("slots", {}).get("hitch_type") or []):
+        return "hitch_set"
+    if str(state.get("brand_preference") or "").casefold() == gooseneck_domain.GOOSENECK_MAKE.casefold():
+        return "brand_set"
+    return None
+
+
 def _apply_gooseneck(state: dict, output: Any, user_message: str) -> None:
     """Decide what "gooseneck" meant, or open a clarification question."""
     if state.get("pending_gooseneck_clarification"):
         return
     if not gooseneck_domain.mentions_gooseneck(user_message):
+        return
+    settled = _gooseneck_already_settled(state)
+    if settled:
+        # Asking now would ask about something we have already acted on - live, a customer
+        # shown gooseneck-hitch trailers was asked "hitch or brand?" the next time he said it.
+        logger.info("GOOSENECK already settled: session=%s reason=%s", state.get("session_id"), settled)
         return
 
     reading = gooseneck_domain.resolve_gooseneck_mention(
@@ -491,8 +561,17 @@ def _apply_gooseneck(state: dict, output: Any, user_message: str) -> None:
         # Brand recognition is the model's job - it has the make list in its prompt.
         extracted_brand=getattr(getattr(output, "extracted", None), "brand_preference", None),
     )
+    if reading.meaning == gooseneck_domain.AMBIGUOUS and state.get("results_shown"):
+        # They have seen trailers already, so this refines them - and a refinement means the
+        # hitch far more often than the four Livestock rows Gooseneck builds. Asking here is
+        # asking about something they can see the answer to; "the Gooseneck brand" still
+        # reads as the make above, because it says so.
+        state.setdefault("slots", {})["hitch_type"] = ["Gooseneck"]
+        logger.info("GOOSENECK after results: session=%s -> hitch", state.get("session_id"))
+        return
     if reading.meaning == gooseneck_domain.AMBIGUOUS:
         state["pending_gooseneck_clarification"] = user_message
+        state["gooseneck_asks"] = 0
         logger.info("GOOSENECK ambiguous: session=%s asking", state.get("session_id"))
         return
     if reading.meaning == gooseneck_domain.BRAND:
@@ -879,11 +958,11 @@ def _apply_attempts(state: dict, output: Any, result: Any) -> None:
     if pending and (pending in result.stored or pending in result.no_preference):
         answered = True
     if _holding(state, output, pending, answered):
-        # "ok thanks", or a question of their own, while ours is waiting. Under
-        # LLM_WRITES_REPLY the question stays open - not re-asked, not counted again, not
-        # given up on - until they answer it or skip it, and nothing else is asked meanwhile.
-        # Live, "Ok thanks" was met with the same question again, which spent its second
-        # and last ask on a customer who was simply being polite.
+        # "ok thanks" while ours is waiting. Under LLM_WRITES_REPLY the question stays open -
+        # not re-asked, not counted again, not given up on - until they answer it or skip it,
+        # and nothing else is asked meanwhile. Live, "Ok thanks" was met with the same
+        # question again, which spent its second and last ask on a customer who was simply
+        # being polite.
         state.setdefault("turn_outcome", {})["holding"] = pending
         return
     resolve_pending_slot(state, answered=answered)
@@ -893,11 +972,20 @@ def _apply_attempts(state: dict, output: Any, result: Any) -> None:
 
 
 def _holding(state: dict, output: Any, pending: str | None, answered: bool) -> bool:
-    """A question of ours is waiting and this message neither answered nor skipped it."""
+    """A question of ours is waiting and this message only acknowledged it ("ok thanks").
+
+    Only then. A message that says something - small talk, a question of their own, an
+    answer to something else - is a customer still talking to us, and the question goes
+    out again (its second and last ask) after we respond to what they said. Held for those
+    too, the reply had nothing left to ask: live, "Gooseneck trailer" with the length
+    question open got "Got it - you mean the Gooseneck brand." and the conversation stopped.
+    """
     if not contact_policy.active() or not pending or answered:
         return False
     if getattr(output, "intent", "") in _SHOW_RESULTS_INTENTS:
         return False  # "just show me" ends the questions; the results gate takes it from here
+    if not getattr(output, "only_acknowledges", False):
+        return False
     # Still the question on the table: a category change clears it, and so does anything
     # else that resolved it this turn.
     return state.get("pending_slot") == pending and pending in (state.get("required_slots") or [])

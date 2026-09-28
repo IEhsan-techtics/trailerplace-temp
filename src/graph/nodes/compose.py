@@ -18,7 +18,7 @@ from src.domain import axles
 from src.domain import gooseneck as gooseneck_domain
 from src.graph.nodes import greeting
 from src.graph.nodes import reply_check
-from src.tools.questions import carry_on_question, mark_asked, next_unanswered_slot, question_text
+from src.tools.questions import carry_on_question, confirmation_open, mark_asked, next_unanswered_slot, question_text
 
 logger = logging.getLogger(__name__)
 
@@ -990,8 +990,11 @@ def _closing_part(state: dict, output: Any) -> tuple[str, str | None]:
     """The last thing the reply says: listings, a confirmation, or the next question."""
     outcome = state.get("turn_outcome") or {}
 
-    # Our question is still waiting on them (apply._holding): nothing more is asked.
-    if outcome.get("holding") and not outcome.get("search_ran"):
+    # Our question is still waiting on them (apply._holding): no NEXT slot question is asked.
+    # Our own confirmations are not held back by it - they outrank the slot question, and
+    # reply_check has already handed the turn to us to ask one. Live, "I want the gooseneck
+    # trailer" with the length question open got "Got it." and nothing else, three turns running.
+    if outcome.get("holding") and not outcome.get("search_ran") and not confirmation_open(state):
         return "", None
 
     # 1. A search ran. The listings ARE the answer; no question is appended to them.
@@ -1011,35 +1014,10 @@ def _closing_part(state: dict, output: Any) -> tuple[str, str | None]:
         return company.website_redirect_line(), None
 
     # 3. A pending confirmation outranks a new question - it is about what they just said.
-    if state.get("pending_gooseneck_clarification"):
-        return gooseneck_domain.clarification_question(), None
-
-    switch = state.get("pending_category_switch")
-    if switch:
-        return _switch_question(switch), None
-
-    keep = state.get("pending_keep_filters")
-    if keep:
-        return _keep_filters_question(keep), None
-
-    # The axle questions, after the confirmations above: those are about the category or the
-    # hitch, which decide what the axles are even for.
-    # They replace whatever slot question was pending: that one was not asked this turn, and
-    # left in place it would claim their answer to ours ("about 5,000 lbs" read as the load).
-    held = state.get("pending_axle_basis")
-    if held:
-        held["asks"] = int(held.get("asks") or 0) + 1
-        state["pending_slot"] = None
-        return axles.BASIS_QUESTION, None
-    count = state.get("pending_axle_count")
-    if count and state.get("category"):
-        count["asks"] = int(count.get("asks") or 0) + 1
-        state["pending_slot"] = None
-        question = axles.COUNT_QUESTION
-        if state.get("invalid_retry_slot") == "axle_count":
-            prefix = _RETRY_PREFIX.get(str(state.get("invalid_retry_reason")), "")
-            question = f"{prefix} {question.removeprefix('And ').capitalize()}" if prefix else question
-        return question, None
+    ours = python_question(state)
+    if ours:
+        note_python_question_asked(state, ours[0])
+        return ours[1], None
 
     # 4. No category yet. There is no slot to ask about, but there is still a conversation
     #    to carry: the contact opener on turn one, and "what will you be hauling?" after
@@ -1117,6 +1095,50 @@ def _article_for(name: str) -> str:
     if word.startswith(_SOUNDS_CONSONANT):
         return "a"
     return "an" if word[:1] in "aeiou" else "a"
+
+
+def python_question(state: dict) -> tuple[str, str] | None:
+    """The question of our own that is waiting on them: (which one, our wording of it).
+
+    No side effects - reply_check reads it too, to hold the model's reply to asking it. The
+    model words it for the conversation; this wording is what goes out when it does not.
+    Order matters: the confirmations are about the category or the hitch, which decide what
+    the axles are even for, so they go first.
+    """
+    if state.get("pending_gooseneck_clarification"):
+        return "gooseneck", gooseneck_domain.clarification_question()
+    switch = state.get("pending_category_switch")
+    if switch:
+        return "switch", _switch_question(switch)
+    keep = state.get("pending_keep_filters")
+    if keep:
+        return "keep", _keep_filters_question(keep)
+    if state.get("pending_axle_basis"):
+        return "axle_basis", axles.BASIS_QUESTION
+    if state.get("pending_axle_count") and state.get("category"):
+        question = axles.COUNT_QUESTION
+        if state.get("invalid_retry_slot") == "axle_count":
+            prefix = _RETRY_PREFIX.get(str(state.get("invalid_retry_reason")), "")
+            question = f"{prefix} {question.removeprefix('And ').capitalize()}" if prefix else question
+        return "axle_count", question
+    return None
+
+
+def note_python_question_asked(state: dict, which: str) -> None:
+    """Book one ask of our own question, whoever worded it. Each is capped at two."""
+    if which == "gooseneck":
+        state["gooseneck_asks"] = int(state.get("gooseneck_asks") or 0) + 1
+        return
+    pending = state.get({
+        "switch": "pending_category_switch", "keep": "pending_keep_filters",
+        "axle_basis": "pending_axle_basis", "axle_count": "pending_axle_count",
+    }[which])
+    pending["asks"] = int(pending.get("asks") or 0) + 1
+    if which in ("axle_basis", "axle_count"):
+        # It replaces whatever slot question was pending: that one was not asked this turn,
+        # and left in place it would claim their answer to ours ("about 5,000 lbs" read as
+        # the load).
+        state["pending_slot"] = None
 
 
 def _switch_question(switch: dict) -> str:

@@ -223,3 +223,15 @@ def rules_from_seed(monkeypatch):
     monkeypatch.setattr(store, "_enabled", lambda: False)
     yield
     store.reset()
+
+
+@pytest.fixture
+def no_rewrite(monkeypatch):
+    """The rewrite call fails, so compose's own wording goes out.
+
+    For a test about that wording. Without it an empty scripted reply is sent to the real
+    rewrite model, and the test reads whatever it happened to write.
+    """
+    from src.llm import client
+
+    monkeypatch.setattr(client, "rewrite_reply", lambda *args, **kwargs: None)

@@ -444,6 +444,7 @@ def run_idle_turn(session_id: str, category: str, *, turn_id: Any, channel_id: s
         for key in ("pending_slot", "pending_category_switch", "pending_gooseneck_clarification",
                     "pending_axle_basis", "pending_axle_count", "invalid_retry_slot"):
             state[key] = None
+        state["gooseneck_asks"] = 0
 
         reply = respond_with_tools(state, output, IDLE_MESSAGE, prefetch_search=True)
         if reply is not None:

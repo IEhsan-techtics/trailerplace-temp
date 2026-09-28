@@ -25,7 +25,7 @@ PHONE = company.PHONE
 HOURS = company.HOURS
 WEBSITE = company.website()
 
-# The five things people ask that we answer from a script. Answering one is NOT an escalation.
+# The six things people ask that we answer from a script. Answering one is NOT an escalation.
 FAQ_ANSWERS: dict[str, str] = {
     "contact_human": (
         f"You can reach our team at {PHONE}. Happy to keep helping with your trailer search too."
@@ -39,6 +39,10 @@ FAQ_ANSWERS: dict[str, str] = {
     "store_info": (
         f"We're located in Wharton, TX and open {HOURS}. Call {PHONE} or visit {WEBSITE}. "
         "We also offer financing and delivery."
+    ),
+    "photos": (
+        f"You can see all the photos on each trailer's page at {WEBSITE}. For more pictures, "
+        f"call our sales team at {PHONE} and they can send them over."
     ),
 }
 

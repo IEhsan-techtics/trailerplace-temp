@@ -60,7 +60,7 @@ def company_facts_block() -> str:
     )
 
 
-# The five questions the bot answers from a script instead of escalating. Written once and
+# The six questions the bot answers from a script instead of escalating. Written once and
 # shared by both prompts, so the analysis call and the reply pass can never drift apart.
 # The key is the faq_key the analysis call returns; the team is emailed about every one.
 STANDARD_ANSWERS = (
@@ -74,12 +74,15 @@ STANDARD_ANSWERS = (
      "We also offer financing and delivery."),
     ("contact_human", "Wanting a person",
      f"You can reach our team at {PHONE}. Happy to keep helping with your trailer search too."),
+    ("photos", "More pictures or photos of a trailer",
+     "You can see all the photos on each trailer's page at {website}. For more pictures, "
+     f"call our sales team at {PHONE} and they can send them over."),
 )
 
 
 def standard_answers_block(with_keys: bool = False) -> str:
     """The scripted answers. ``with_keys`` adds the faq_key the analysis call must set."""
-    lines = ["THE FIVE STANDARD QUESTIONS - answer them yourself with this script, keeping "
+    lines = ["THE SIX STANDARD QUESTIONS - answer them yourself with this script, keeping "
              "its meaning and the phone number. Never escalate them."]
     for key, label, answer in STANDARD_ANSWERS:
         tag = f" (faq_key {key})" if with_keys else ""

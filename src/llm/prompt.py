@@ -54,7 +54,7 @@ spec, not a bare hello. Message one only, never again.
   Name only: use their name, ask for the email or phone, say it is optional.
   Name and contact: use their name, then ask which type of trailer.
 
-One of the five STANDARD QUESTIONS (listed below) -> set faq_key and give its script in
+One of the six STANDARD QUESTIONS (listed below) -> set faq_key and give its script in
 answer_to_customer_question, then still ask your next question. Never send these away.
 
 A fact we were not given (delivery dates, stock levels, which days we open) -> say what you do
@@ -234,7 +234,8 @@ REPORT ON YOUR REPLY - truthfully; Python checks the report, not your wording:
   greeted_by_name (opens with "Hi <their name>"), invited_questions (invites them to ask
   anything else), declined_off_topic, flagged_wrong_value (tells them a number looks wrong),
   thanked_them (thanks them or says a value is noted), said_not_stocked, passed_to_team (says
-  their request has gone to our team), gave_phone.
+  their request has gone to our team), gave_phone, asked_our_question (asks the question of
+  ours the state block says is WAITING ON THEM).
 - offered_categories: OUR CATEGORIES the reply suggests, in our spelling; else empty.
 
 OFF TOPIC in reply (off_topic = true):
@@ -436,6 +437,35 @@ def _format_value(value: Any) -> str:
     return str(value)
 
 
+def _our_question_lines(state: dict) -> list[str]:
+    """How to handle the question of ours that is open, when one is (see the lines above)."""
+    from src.config import settings
+    from src.graph.nodes.compose import python_question
+
+    ours = python_question(state)
+    if not ours or not settings.llm_writes_reply:
+        return []
+    which, wording = ours
+    if which == "gooseneck":
+        asks = int(state.get("gooseneck_asks") or 0)
+    else:
+        pending = state.get({
+            "switch": "pending_category_switch", "keep": "pending_keep_filters",
+            "axle_basis": "pending_axle_basis", "axle_count": "pending_axle_count",
+        }[which]) or {}
+        asks = int(pending.get("asks") or 0)
+    if asks >= 2:
+        # Python closes it on this message if they do not answer: a third ask never goes out.
+        return ["- You have asked that question twice. If this message does not answer it, "
+                "do NOT ask it again - we will go with the usual answer."]
+    return [
+        "- That question of yours is WAITING ON THEM. If this message does not answer it, "
+        "respond to what they said first, then ask it again in your own words - once, nothing "
+        f'else asked - keeping its meaning: "{wording}" Set asked_our_question in reply_covers '
+        "and leave asked_slots empty."
+    ]
+
+
 def state_block(state: dict) -> str:
     """What is true about THIS conversation right now.
 
@@ -517,11 +547,12 @@ def state_block(state: dict) -> str:
 
         if settings.llm_writes_reply:
             lines.append(
-                f"- That question is WAITING on them. If this message neither answers it nor "
-                "skips it, ask NO question at all this turn - not that one, not another: respond "
-                "to what they said (answer their question, handle what they asked). If they only "
-                "acknowledged ('ok', 'thanks'), reply briefly and invite them to ask anything else "
-                "(invited_questions). If it answers it, carry on as usual."
+                f"- That question is WAITING on them. If they only acknowledged ('ok', 'thanks', "
+                "'got it') ask NO question at all: reply briefly and invite them to ask anything "
+                "else (invited_questions). If they said something else instead - small talk, a "
+                "question of their own, an answer to something else - respond to that first, then "
+                f"ask the {pending} question again in fresh words (asked_slots [{pending}]); no "
+                "other question. If it answers it, carry on as usual."
             )
 
     retry = state.get("invalid_retry_slot")
@@ -557,10 +588,22 @@ def state_block(state: dict) -> str:
         )
 
     gooseneck = state.get("pending_gooseneck_clarification")
-    if gooseneck:
+    if gooseneck and not int(state.get("gooseneck_asks") or 0):
+        # Opened by THIS message, so not asked yet. The rule below is for their reply to the
+        # question - shown here, the model read "I want the gooseneck trailer" by it and wrote
+        # "Got it - you mean the Gooseneck trailer brand. Quick check, the hitch or the brand?"
+        lines.append(
+            "- They said \"gooseneck\", which could mean a gooseneck HITCH or Gooseneck the "
+            "BRAND. Do not say or guess which they mean: ask them."
+        )
+    elif gooseneck:
         lines.append(
             "- You asked whether they meant a gooseneck HITCH or Gooseneck the BRAND. "
-            "They are answering that now."
+            "If this message answers it, set brand_preference=\"Gooseneck\" for the brand or "
+            "hitch_type=[\"Gooseneck\"] for the hitch. Saying they mean the TRAILER (\"Gooseneck "
+            "trailer\", \"the trailer\", \"the trailer itself\") is choosing the brand - the "
+            "question offered Gooseneck the trailer brand. The hitch is the hitch, coupler or "
+            "how it hooks up to the truck. If this message does not answer it, set neither."
         )
 
     keep = state.get("pending_keep_filters")
@@ -571,6 +614,8 @@ def state_block(state: dict) -> str:
             f"keep_fields_answer, and for 'some' list in kept_fields which of these they keep: "
             f"{', '.join(keep.get('filters') or {})}."
         )
+
+    lines.extend(_our_question_lines(state))
 
     from src.graph.nodes import greeting
 

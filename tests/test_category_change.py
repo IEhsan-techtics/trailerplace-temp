@@ -23,7 +23,7 @@ def start_with_filters(fake_llm):
 
 
 # ------------------------------------------------------------- the keep question (S12)
-def test_changing_category_asks_whether_to_keep_collected_filters(fake_llm):
+def test_changing_category_asks_whether_to_keep_collected_filters(fake_llm, no_rewrite):
     start_with_filters(fake_llm)
 
     fake_llm.push(turn_output(category_mentioned="equipment trailer", intent="category_change"))
@@ -201,7 +201,7 @@ def start_with_axles_and_features(fake_llm):
     run_turn("s1", "gravel, 14,000 lbs total on a tandem, with ramps")
 
 
-def test_axles_and_features_are_named_in_plain_words(fake_llm):
+def test_axles_and_features_are_named_in_plain_words(fake_llm, no_rewrite):
     start_with_axles_and_features(fake_llm)
     fake_llm.push(turn_output(category_mentioned="equipment", intent="category_change"))
     text = run_turn("s1", "actually an equipment trailer")["assistant_text"]
@@ -240,7 +240,7 @@ def test_keeping_all_keeps_the_features(fake_llm):
     assert state["slots"]["total_axle_capacity_lbs"] == 14000.0
 
 
-def test_the_models_own_line_does_not_claim_the_switch_before_the_keep_question(fake_llm):
+def test_the_models_own_line_does_not_claim_the_switch_before_the_keep_question(fake_llm, no_rewrite):
     """Live: "we'll switch your search to a 16-foot Flatbed with tandem 7,000 lb axles.
     ... should I keep those, or start fresh?" - kept before it was asked."""
     start_with_filters(fake_llm)
@@ -305,7 +305,7 @@ def test_their_wording_is_still_kept_when_the_model_reads_nothing(fake_llm):
     assert state_after()["slots"]["haul_item"] == "whatever the yard sends over"
 
 
-def test_the_models_own_line_does_not_contradict_the_switch_question(fake_llm):
+def test_the_models_own_line_does_not_contradict_the_switch_question(fake_llm, no_rewrite):
     """It writes its line knowing only the category they are on, so it praised the Dump
     trailer in the same breath as asking whether to leave it."""
     complete_welcome(fake_llm)
@@ -323,7 +323,7 @@ def test_the_models_own_line_does_not_contradict_the_switch_question(fake_llm):
     assert text.startswith("For cattle,")
 
 
-def test_the_switch_question_says_a_utility_not_an_utility(fake_llm):
+def test_the_switch_question_says_a_utility_not_an_utility(fake_llm, no_rewrite):
     complete_welcome(fake_llm)
     fake_llm.push(turn_output(category_mentioned="dump trailer", intent="category_selection"))
     run_turn("s1", "dump trailer")
@@ -372,3 +372,51 @@ def test_the_category_question_still_goes_out_when_the_model_asks_nothing(fake_l
     # not by question marks.
     assert text.lower().count("type of trailer") == 1
     assert "which one fits what you need?" in text
+
+
+# ----------------------------------------------------------------- unanswered, asked twice
+def test_an_unanswered_switch_question_is_asked_twice_then_dropped():
+    """Like every question of ours: two asks, then the usual answer - they stay put."""
+    from src.graph.nodes.apply import _apply_category_switch_answer
+    from src.graph.state import new_state
+
+    state = new_state("s1")
+    state["category"] = "Dump"
+    state["pending_category_switch"] = {"suggested": "Equipment", "pair": "Dump->Equipment", "asks": 1}
+    assert _apply_category_switch_answer(state, turn_output()) is False
+    assert state["pending_category_switch"] is not None  # goes out a second time
+
+    state["pending_category_switch"]["asks"] = 2
+    assert _apply_category_switch_answer(state, turn_output()) is False
+    assert state["pending_category_switch"] is None
+    assert state["category"] == "Dump"
+    assert "Dump->Equipment" in state["rejected_switches"]
+
+
+def test_an_unanswered_keep_question_is_asked_twice_then_everything_is_kept():
+    from src.graph.nodes.apply import _apply_keep_filters_answer
+    from src.graph.state import new_state
+
+    state = new_state("s1")
+    state["category"] = "Dump"
+    state["slots"] = {"length": 14.0, "payload_capacity": 6000.0}
+    state["pending_keep_filters"] = {
+        "new_category": "Equipment", "filters": {"length": 14.0, "payload_capacity": 6000.0},
+        "base_category": None, "asks": 1,
+    }
+    assert _apply_keep_filters_answer(state, turn_output()) is False
+    assert state["pending_keep_filters"] is not None
+
+    state["pending_keep_filters"]["asks"] = 2
+    assert _apply_keep_filters_answer(state, turn_output()) is False
+    assert state["pending_keep_filters"] is None
+    assert state["category"] == "Equipment"
+    assert state["slots"]["length"] == 14.0
+    assert state["slots"]["payload_capacity"] == 6000.0
+
+
+def test_each_time_the_keep_question_goes_out_it_is_counted(fake_llm):
+    start_with_filters(fake_llm)
+    fake_llm.push(turn_output(category_mentioned="equipment trailer", intent="category_change"))
+    run_turn("s1", "actually I need an equipment trailer")
+    assert state_after()["pending_keep_filters"]["asks"] == 1

@@ -180,6 +180,99 @@ def test_gooseneck_answering_the_hitch_question_is_never_ambiguous(fake_llm):
         assert state["slots"]["hitch_type"] == ["Gooseneck"]
 
 
+def test_the_models_reading_of_gooseneck_trailer_settles_it_as_the_brand(fake_llm):
+    """Live: "Gooseneck trailer" matched no keyword and the question was asked 7 times. The
+    question offers "Gooseneck the trailer brand", so naming the trailer picks the brand -
+    the model reads that, not a keyword list."""
+    pick_dump(fake_llm)
+    fake_llm.push(turn_output(intent="general_question"))
+    run_turn("s1", "I want the gooseneck trailer")
+
+    fake_llm.push(turn_output(intent="qualification_answer", extracted={"brand_preference": "Gooseneck"}))
+    result = run_turn("s1", "Gooseneck trailer")
+
+    state = state_after()
+    assert state["pending_gooseneck_clarification"] is None
+    assert state["brand_preference"] == "Gooseneck"
+    assert "Quick check" not in result["assistant_text"]
+
+
+def test_the_models_reading_can_settle_it_as_the_hitch(fake_llm):
+    pick_dump(fake_llm)
+    fake_llm.push(turn_output(intent="general_question"))
+    run_turn("s1", "I want the gooseneck trailer")
+
+    fake_llm.push(turn_output(intent="qualification_answer", extracted={"hitch_type": ["Gooseneck"]}))
+    run_turn("s1", "the hitch, how it hooks to my truck")
+
+    state = state_after()
+    assert state["pending_gooseneck_clarification"] is None
+    assert state["slots"]["hitch_type"] == ["Gooseneck"]
+
+
+def test_the_models_reading_can_settle_it_as_the_brand(fake_llm):
+    pick_dump(fake_llm)
+    fake_llm.push(turn_output(intent="general_question"))
+    run_turn("s1", "I want the gooseneck trailer")
+
+    fake_llm.push(turn_output(intent="qualification_answer", extracted={"brand_preference": "Gooseneck"}))
+    run_turn("s1", "the brand")
+
+    state = state_after()
+    assert state["pending_gooseneck_clarification"] is None
+    assert state["brand_preference"] == "Gooseneck"
+
+
+def test_the_question_is_asked_twice_then_the_hitch_is_assumed():
+    """Live: small talk kept the question open and it went out on seven replies in a row."""
+    from src.graph.nodes.apply import _apply_gooseneck_answer
+    from src.graph.state import new_state
+
+    state = new_state("s1")
+    state["pending_gooseneck_clarification"] = "I want the gooseneck trailer"
+    state["gooseneck_asks"] = 1  # asked once
+    assert _apply_gooseneck_answer(state, turn_output(), "my daughter lives in Wharton") is False
+    assert state["pending_gooseneck_clarification"] is not None  # so it goes out a second time
+
+    state["gooseneck_asks"] = 2  # asked twice
+    assert _apply_gooseneck_answer(state, turn_output(), "nice weather today") is False
+    assert state["pending_gooseneck_clarification"] is None
+    assert state["slots"]["hitch_type"] == ["Gooseneck"]
+    assert state["gooseneck_asks"] == 0
+
+
+def test_a_later_mention_does_not_reopen_it_once_the_hitch_is_set(fake_llm):
+    pick_dump(fake_llm)
+    fake_llm.push(turn_output(intent="qualification_answer", extracted={"hitch_type": ["Gooseneck"]}))
+    run_turn("s1", "I want a gooseneck hitch")
+    assert state_after()["slots"]["hitch_type"] == ["Gooseneck"]
+
+    fake_llm.push(turn_output(intent="general_question"))
+    run_turn("s1", "I want the gooseneck trailer")
+    assert state_after()["pending_gooseneck_clarification"] is None
+
+
+def test_a_mention_after_listings_went_out_does_not_ask():
+    """Live: the idle timer showed gooseneck-hitch trailers, then "35ft gooseneck" asked again."""
+    from src.graph.nodes.apply import _apply_gooseneck
+    from src.graph.state import new_state
+
+    state = new_state("s1")
+    state["results_shown"] = True
+    _apply_gooseneck(state, turn_output(), "a quote on a flat 35ft gooseneck with mega ramps")
+    assert state["pending_gooseneck_clarification"] is None
+    assert state["slots"]["hitch_type"] == ["Gooseneck"]
+
+
+def test_everyday_words_are_not_read_as_an_answer():
+    from src.domain import gooseneck
+
+    assert gooseneck.apply_clarification_answer("I'm a hotshot trucking company") is None
+    assert gooseneck.apply_clarification_answer("for pulling cattle") is None
+    assert gooseneck.apply_clarification_answer("the brand") == gooseneck.BRAND
+    assert gooseneck.apply_clarification_answer("the hitch") == gooseneck.HITCH
+
+
 # ------------------------------------------------------------------------ degraded turns
 def test_a_failed_model_call_still_produces_a_reply(fake_llm):
     """The queue is empty, so the fixture returns client.empty_output - the degraded path."""

@@ -195,11 +195,33 @@ def test_a_rewrite_that_still_breaks_a_rule_goes_to_compose(rewrites):
     assert outcome["assistant_text"] == "Thanks for that. What will you be hauling?"
 
 
-def test_a_turn_python_owns_is_not_rewritten(rewrites):
+def test_a_reply_that_asks_our_own_question_goes_out_and_is_counted(rewrites):
+    """Our own questions are the model's to word now: live, the fixed sentence went out word
+    for word a second time and ignored what the customer had just said."""
+    state = _state(pending_category_switch={"suggested": "Equipment", "from_haul_item": "a skid steer"})
+    text = "Oh nice, Wharton's where we are! Would an Equipment trailer suit your skid steer better?"
+    outcome = _send(state, _output(text, [], questions=1, covers=["asked_our_question"]))
+
+    assert rewrites.calls == []
+    assert outcome["assistant_text"] == text
+    assert state["pending_category_switch"]["asks"] == 1
+
+
+def test_a_reply_that_skips_our_own_question_is_rewritten_to_ask_it(rewrites):
     state = _state(pending_category_switch={"suggested": "Equipment", "from_haul_item": "a skid steer"})
     _send(state, _output("What will you be hauling?", ["haul_item"]))
 
-    assert rewrites.calls == []
+    call = rewrites.calls[0]
+    assert "our own question" in call["problem"]
+    assert "Equipment" in call["problem"] and "asked_our_question" in call["needs"]
+
+
+def test_when_the_rewrite_fails_our_own_wording_goes_out(rewrites):
+    state = _state(pending_category_switch={"suggested": "Equipment", "from_haul_item": "a skid steer"})
+    outcome = _send(state, _output("What will you be hauling?", ["haul_item"]))
+
+    assert "Equipment trailer is usually the better fit" in outcome["assistant_text"]
+    assert state["pending_category_switch"]["asks"] == 1
 
 
 # ---- a wrong value ----

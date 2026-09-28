@@ -36,7 +36,7 @@ class SlotAnswer(StrictBaseModel):
 
 class EmailTrigger(StrictBaseModel):
     kind: Literal["faq", "escalation", "team_request", "listing_interest"] = Field(description="Email-worthy request kind.")
-    faq_key: Literal["contact_human", "financing", "trade_in", "service_parts", "store_info"] | None = Field(description="Required for FAQ triggers, otherwise null.")
+    faq_key: Literal["contact_human", "financing", "trade_in", "service_parts", "store_info", "photos"] | None = Field(description="Required for FAQ triggers, otherwise null.")
     listing_reference: int | None = Field(description="1-based shown-listing index for listing interest, otherwise null.")
     description: str = Field(description="One-line summary for the email body.")
 
@@ -189,7 +189,7 @@ class ChatbotTurnOutput(StrictBaseModel):
     )
     user_question_to_answer: str | None = Field(description="Their question, verbatim, else null.")
     faq_key: Literal[
-        "contact_human", "financing", "trade_in", "service_parts", "store_info"
+        "contact_human", "financing", "trade_in", "service_parts", "store_info", "photos"
     ] | None = Field(description="Which standard question they asked, even alongside something bigger.")
     listing_reference: int | None = Field(description="1-based number of a listing we showed.")
     shared_link_interest: bool = Field(
@@ -223,6 +223,7 @@ ReplyCover = Literal[
     "passed_to_team",        # said their request has been passed to our team
     "gave_phone",            # gave our phone number
     "invited_questions",     # invited them to ask anything else they want to know
+    "asked_our_question",    # asked the question of ours WAITING ON THEM (state block)
 ]
 
 
