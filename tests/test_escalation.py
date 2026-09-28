@@ -572,3 +572,17 @@ def test_the_fallback_reply_matches_what_became_of_the_email(fake_llm, monkeypat
 
     assert not _CLAIMS_IT_WENT_OUT.search(text), text
     assert "name" in text.lower(), "and it asks for what is missing"
+
+
+def test_with_trailers_on_the_turn_the_team_line_goes_after_the_cards():
+    """Live: "Say TWO things ... ask for nothing else" was read as the whole reply, and the
+    six trailers the search had found were never shown."""
+    from src.llm.tools import _reply_instruction
+
+    state = {"contact": {}}
+    with_cards = _reply_instruction(state, "Noted for the team.", "stashed", with_listings=True)
+    assert "show every card" in with_cards and "AFTER the last card" in with_cards
+    assert "never say it has been passed on" in with_cards
+
+    sent = _reply_instruction(state, "Shared with the team.", "sent", with_listings=True)
+    assert "Say it ONCE" in sent and "never say it has been passed on" not in sent

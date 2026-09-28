@@ -240,7 +240,11 @@ def _state_line(state: dict, turn: Any) -> str:
         lines.append(f"- What they just said: {summary}")
     question = (getattr(turn, "user_question_to_answer", None) or "").strip()
     if question:
-        lines.append(f'- Answer this first, in one or two sentences: "{question}"')
+        lines.append(
+            f'- Answer this first, in one or two sentences: "{question}" - unless only our team '
+            "can answer it (you call escalate for it) and you are showing trailers: then its "
+            "answer is what escalate tells you, said once, AFTER the last card."
+        )
     referenced = referenced_listing(state, turn)
     if referenced is not None:
         lines.append(

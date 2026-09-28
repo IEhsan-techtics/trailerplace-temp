@@ -192,31 +192,50 @@ _LOOKUP_CONTACT_RULE = (
 )
 
 
-def _reply_instruction(state: dict, answer: str, status: str) -> str:
+def _reply_instruction(state: dict, answer: str, status: str, with_listings: bool = False) -> str:
     """What to tell the customer, given whether the notification went out or is waiting.
 
     Two sentences in the stashed case, and the order matters: the canned line FIRST, so they
     know their request landed, then the ask, so it reads as the reason we need the detail
     rather than a toll gate in front of the answer.
+
+    ``with_listings``: the search already handed over trailers this turn. Live, "Say TWO
+    things ... ask for nothing else" was read as the whole reply: the six trailers they asked
+    about were dropped, and the reply said "the listings I found don't confirm..." with none
+    on the screen. The cards come first; this goes after them.
     """
     from src.tools import team_notify
 
+    once = (
+        " Say it ONCE: this replaces any line of your own about passing it on"
+        + (", and never say it has been passed on - it has not been yet." if status == "stashed" else ".")
+    )
+    lead = (
+        "The trailers you were given are STILL the reply: show every card as usual, then say "
+        "this AFTER the last card, in place of the usual closing question. Before the first "
+        "card: only the usual one line about the trailers - nothing about the team, prices "
+        "or the phone number, which come once, after the cards. "
+        if with_listings else
+        # Called before any search: the model may still search next and show trailers.
+        "If you also show trailers this turn, all of this goes AFTER the last card, and "
+        "nothing about it before the first. "
+    )
     if status == "stashed":
-        return (
+        return lead + (
             f'RECORDED, but we cannot send it to the team until we can reach them. Say TWO '
             f'things, in this order, in your own words but keeping the meaning and the phone '
             f'number: (1) "{answer}" (2) "{team_notify.ask_for_missing(state)}" '
-            "Ask for nothing else and ask no qualification question."
+            "Ask for nothing else and ask no qualification question." + once
         )
     if status == "dropped":
-        return (
+        return lead + (
             f'They declined to share contact details, so nothing was sent and we do not ask '
             f'again. Answer them helpfully and give them the number: "{answer}" Do NOT ask '
-            "for their details and do not imply anyone will call them back."
+            "for their details and do not imply anyone will call them back." + once
         )
-    return (
+    return lead + (
         f'PASSED TO THE TEAM. Tell them this, in your own words but keeping the meaning and '
-        f'the phone number: "{answer}" Ask no qualification question.'
+        f'the phone number: "{answer}" Ask no qualification question.' + once
     )
 
 
@@ -512,7 +531,7 @@ class ToolRunner:
             # trailer - and the customer is told the same thing either way.
             self.ran.append("escalate")
             answer = canned_responses.escalation_answer(canned_key, already["status"])
-            return _reply_instruction(self.state, answer, already["status"])
+            return _reply_instruction(self.state, answer, already["status"], bool(self.served_listings))
 
         if canned_key == "listing_interest":
             # The agent raises this itself when the analysis pass did not read the turn as
@@ -542,7 +561,7 @@ class ToolRunner:
         # only true when it went out, and it is the wrong thing to say either to someone we
         # are still waiting on details from or to someone who refused to give them.
         answer = canned_responses.escalation_answer(canned_key, status)
-        return _reply_instruction(self.state, answer, status)
+        return _reply_instruction(self.state, answer, status, bool(self.served_listings))
 
     # -- dispatch --------------------------------------------------------------------
     def call(self, name: str, arguments: str) -> str:
