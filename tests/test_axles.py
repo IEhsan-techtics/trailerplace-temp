@@ -51,7 +51,7 @@ def test_the_reply_to_the_basis_question_is_read_from_their_words():
 
 
 # ------------------------------------------------------------- 1. per axle or total?
-def test_an_unclear_capacity_is_held_and_asked_about_not_stored(fake_llm):
+def test_an_unclear_capacity_is_held_and_asked_about_not_stored(fake_llm, no_rewrite):
     dump_trailer(fake_llm)
     result = say(fake_llm, "I need 14,000 lbs of axle capacity",
                  extracted={"axle_capacity": 14000.0, "axle_capacity_basis": "total"})
@@ -84,7 +84,7 @@ def test_total_files_it_as_the_total(fake_llm):
     assert "axle_capacity" not in state["slots"]
 
 
-def test_two_unclear_replies_drop_the_number_and_it_is_never_asked_again(fake_llm):
+def test_two_unclear_replies_drop_the_number_and_it_is_never_asked_again(fake_llm, no_rewrite):
     dump_trailer(fake_llm)
     say(fake_llm, "I need 14,000 lbs of axle capacity", extracted={"axle_capacity": 14000.0})
     second = say(fake_llm, "hmm")
@@ -98,7 +98,7 @@ def test_two_unclear_replies_drop_the_number_and_it_is_never_asked_again(fake_ll
 
 
 # ----------------------------------------------------------------- 2. how many axles?
-def test_a_per_axle_rating_is_stored_at_once_then_the_count_is_asked(fake_llm):
+def test_a_per_axle_rating_is_stored_at_once_then_the_count_is_asked(fake_llm, no_rewrite):
     dump_trailer(fake_llm)
     result = say(fake_llm, "I want 7,000 lb axles",
                  extracted={"axle_capacity": 7000.0, "axle_capacity_basis": "per_axle"})

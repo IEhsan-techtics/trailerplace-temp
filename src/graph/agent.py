@@ -151,11 +151,14 @@ def build_model(tools: list):
     """The ONE model instance every iteration uses, with the tools bound to it."""
     from langchain_openai import ChatOpenAI
 
+    from src.llm.client import MAX_RETRIES
+
     kwargs: dict[str, Any] = {
         "model": settings.chat_model,
         "api_key": settings.openai_api_key,
         "timeout": settings.chat_timeout_seconds,
         "use_responses_api": True,
+        "max_retries": MAX_RETRIES,
     }
     if settings.chat_reasoning_effort:
         kwargs["reasoning"] = {"effort": settings.chat_reasoning_effort}

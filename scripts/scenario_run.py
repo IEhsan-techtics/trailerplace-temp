@@ -1,6 +1,6 @@
 """Live scenario run: three scripted customers per stocked category, against a running backend.
 
-    python scripts/scenario_run.py [--base-url http://127.0.0.1:8801] [--workers 6] [--only Dump,Utility]
+    python scripts/scenario_run.py [--base-url http://127.0.0.1:8801] [--workers 3] [--only Dump,Utility]
 
 Real model, real database - every turn goes through POST /chat exactly as the frontend
 sends it, and the session state is read back from Postgres after each turn to see what
@@ -134,6 +134,7 @@ class Turn:
     note: str = ""
     usage: dict[str, Any] = field(default_factory=dict)
     listings: list[str] = field(default_factory=list)   # URLs shown this turn, in order
+    category: str | None = None                         # the category after this turn
 
 
 @dataclass
@@ -154,6 +155,23 @@ class Result:
 def _state(session_id: str) -> dict[str, Any]:
     snapshot, _conversation, _lead = load_session(session_id)
     return from_snapshot(session_id, snapshot)
+
+
+def _state_after(session_id: str, turns_sent: int, wait: float = 30.0) -> dict[str, Any]:
+    """The state once the backend has saved the turn that was just answered.
+
+    The backend commits a turn in the background, after the reply has gone out
+    (src/turn_saver.py), so reading straight away returned the turn before - or nothing on
+    the first one - and a run of 126 conversations failed 37 of them on state it had read too
+    early. Each turn adds the customer's message and the reply, so the save has landed once
+    the conversation holds two messages per turn sent.
+    """
+    deadline = time.time() + wait
+    while True:
+        snapshot, conversation, _lead = load_session(session_id)
+        if len(conversation or []) >= 2 * turns_sent or time.time() > deadline:
+            return from_snapshot(session_id, snapshot)
+        time.sleep(0.5)
 
 
 class Customer:
@@ -217,12 +235,13 @@ def run_one(base_url: str, category: str, scenario: str, index: int, log_lock: t
         response.raise_for_status()
         seconds = time.time() - started  # the /chat call only, not the state read below
         body = response.json()
-        state = _state(session_id)
+        state = _state_after(session_id, len(result.turns) + 1)
         result.turns.append(
             Turn(text, body.get("assistant_text") or "", seconds,
                  state.get("pending_slot"), dict(state.get("slots") or {}), note,
                  body.get("usage") or {},
-                 [str(item.get("url") or "") for item in body.get("listings") or [] if isinstance(item, dict)])
+                 [str(item.get("url") or "") for item in body.get("listings") or [] if isinstance(item, dict)],
+                 state.get("category"))
         )
         return state
 
@@ -373,6 +392,11 @@ class Script:
     cards_at: tuple[tuple[int, str], ...] = ()     # (turn, text) a card shown on that turn has in its URL
     no_cards_at: tuple[int, ...] = ()              # turns that must show no cards
     email_has: tuple[str, ...] = ()                # text some team email body must contain
+    no_category_at: tuple[int, ...] = ()           # turns after which no category is set yet
+    after_cards: tuple[tuple[int, str], ...] = ()  # (turn, text) that must come after the last card
+    at_most_once: tuple[tuple[int, str], ...] = () # (turn, text) said no more than once
+    top_color: str | None = None                   # the first listing shown must be this colour
+    state_equal: dict[str, Any] = field(default_factory=dict)  # state key -> value it must end with
 
 
 def _bump(cargo: str) -> dict[str, str]:
@@ -500,9 +524,32 @@ SCRIPTS: list[Script] = [
            [OPENING, "I'm starting a mobile coffee business and need a concession trailer", QUALIFY],
            no_features=True, not_features=("coffee", "business"), rerank=False,
            category="Concession"),
-    Script("features", "size, colour, hitch and axles are not features",
+    # Colour has no field or filter of its own, so a wanted colour is a feature the reranker
+    # judges against each listing's colour; the size, the hitch and the axle count and rating
+    # still have fields and never become features.
+    Script("features", "size, hitch and axles are not features; the colour is",
            [OPENING, "I need a black 20 ft gooseneck flatbed with tandem 7000 lb axles", QUALIFY],
-           answers=_bump("lumber"), no_features=True, rerank=False, category="Flatbed"),
+           answers=_bump("lumber"), features=("black",),
+           not_features=("20", "gooseneck", "tandem", "7000"), rerank=True, category="Flatbed"),
+    Script("features", "8 lug axles, 14 ply tires and blue all kept",
+           [OPENING, "I need a dump trailer for gravel, about 6000 lbs per load, 7x14 with 8 lug "
+                     "axles and upgraded 14 ply tires, in blue if possible", QUALIFY],
+           answers=_bump("gravel"), features=("lug", "ply", "blue"), rerank=True, category="Dump"),
+    Script("features", "blue enclosed -> a blue trailer first",
+           [OPENING, "enclosed trailer for my tools, about 2000 lbs, around 12 ft, in blue if possible",
+            QUALIFY],
+           answers=_bump("tools"), features=("blue",), rerank=True, top_color="blue",
+           category="Enclosed"),
+    Script("features", "axles with electric brakes -> brakes kept, rating to the axle fields",
+           [OPENING, "equipment trailer for my skid steer, 20 ft, tandem 7000 lb axles with "
+                     "electric brakes", QUALIFY],
+           answers=_bump("a skid steer"), features=("electric brakes",),
+           not_features=("tandem", "7000"), slots_equal={"axle_capacity": 7000.0, "axle_count": 2},
+           rerank=True, category="Equipment"),
+    Script("features", "heavy duty axles is vague, red is kept",
+           [OPENING, "utility trailer for my mower, 6x12, heavy duty axles, red", QUALIFY],
+           answers=_bump("a riding mower"), features=("red",), not_features=("heavy", "axle"),
+           rerank=True, category="Utility"),
 
     # --- axle capacity: per axle or total, how many, and what it is not -------------
     # The axle answers are scripted rather than left to QUALIFY: the auto-customer answers
@@ -511,7 +558,7 @@ SCRIPTS: list[Script] = [
            [OPENING, "I need a dump trailer for gravel with 14,000 lbs of axle capacity",
             "per axle", "tandem", QUALIFY],
            slots_equal={"axle_capacity": 14000.0, "axle_count": 2}, absent=("total_axle_capacity_lbs",),
-           not_asked=("payload_capacity",), reply_has=((1, "per axle, or the total"),
+           not_asked=("payload_capacity",), reply_has=((1, "or the total"),
                                                         (2, "how many axles")),
            category="Dump"),
     Script("axles", "unclear capacity -> total, no count question",
@@ -519,21 +566,21 @@ SCRIPTS: list[Script] = [
             "that's the total across both", QUALIFY],
            answers=_bump("lumber"), slots_equal={"total_axle_capacity_lbs": 14000.0},
            absent=("axle_capacity",), not_asked=("payload_capacity",),
-           reply_has=((1, "per axle, or the total"),), reply_lacks=((2, "how many axles"),),
+           reply_has=((1, "or the total"),), reply_lacks=((2, "how many axles"),),
            category="Flatbed"),
     Script("axles", "unclear twice -> dropped, never asked again",
            [OPENING, "I need a utility trailer with 10,000 lbs of axle capacity",
             "hmm, I'm not sure", "no idea honestly", QUALIFY],
            answers=_bump("furniture and boxes"),
            absent=("axle_capacity", "total_axle_capacity_lbs"),
-           reply_has=((1, "per axle, or the total"), (2, "per axle, or the total")),
-           reply_lacks=((3, "per axle, or the total"),), category="Utility"),
+           reply_has=((1, "or the total"), (2, "or the total")),
+           reply_lacks=((3, "or the total"),), category="Utility"),
     Script("axles", "7,000 lb axles -> per axle at once, bare 'Tandem.'",
            [OPENING, "I want a tilt trailer with 7,000 lb axles", "Tandem.", QUALIFY],
            answers=_bump("a small tractor"),
            slots_equal={"axle_capacity": 7000.0, "axle_count": 2},
            not_asked=("payload_capacity",), reply_has=((1, "how many axles"),),
-           reply_lacks=((1, "per axle, or the total"),), category="Tilt"),
+           reply_lacks=((1, "or the total"),), category="Tilt"),
     Script("axles", "5 axles -> one to four, asked again",
            [OPENING, "I need a dump trailer with 7000 lb axles", "5 axles", "two", QUALIFY],
            answers=_bump("gravel"), slots_equal={"axle_capacity": 7000.0, "axle_count": 2},
@@ -559,7 +606,7 @@ SCRIPTS: list[Script] = [
            [OPENING, "I need a dump trailer for gravel with 5k axles", "tandem", QUALIFY],
            slots_equal={"axle_capacity": 5000.0, "axle_count": 2}, absent=("total_axle_capacity_lbs",),
            not_asked=("payload_capacity",), reply_has=((1, "how many axles"),),
-           reply_lacks=((1, "per axle, or the total"),), category="Dump"),
+           reply_lacks=((1, "or the total"),), category="Dump"),
     Script("axles", "'5k axles' as the load weight -> not a load",
            [OPENING, "I need a dump trailer", "gravel", "5k axles", QUALIFY],
            absent=("payload_capacity",), slots_equal={"axle_capacity": 5000.0},
@@ -589,12 +636,86 @@ SCRIPTS: list[Script] = [
             "Actually, make it a flatbed", "That's 14,000 per axle", QUALIFY],
            answers=_bump("lumber"), category="Flatbed",
            slots_equal={"axle_capacity": 14000.0}, absent=("total_axle_capacity_lbs",),
-           reply_has=((1, "per axle, or the total"),)),
+           reply_has=((1, "or the total"),)),
+
+    # --- fixes of 2026-09-28: each one replays something that went wrong live ----------
+    # None of these give contact details, so nothing reaches the team's inbox.
+    Script("fixes", "specs, no type -> type asked, specs kept, then dump",
+           ["looking for a 7x14x4 foot walls, 8 lug axles, upgraded 14 ply tires, and in blue if "
+            "possible. how much?", "a dump trailer", QUALIFY],
+           answers=_bump("gravel"), no_category_at=(0,), no_listings_at=(0,),
+           reply_has=((0, "?"),), reply_lacks=((0, "trailerplace.com"),),
+           slots_equal={"width": 7.0, "length": 14.0, "height": 4.0},
+           features=("lug", "ply", "blue"), category="Dump"),
+    Script("fixes", "6x12 with a ramp gate, no type -> type asked, then enclosed",
+           [OPENING, "I need something 6x12 with a ramp gate and tandem axles", "enclosed", QUALIFY],
+           answers={"haul_item": "furniture and boxes", "cargo_size": "about 10 ft by 5 ft"},
+           no_category_at=(1,), no_listings_at=(1,), reply_has=((1, "?"),),
+           slots_equal={"width": 6.0, "length": 12.0, "axle_count": 2}, features=("ramp",),
+           absent=("base_category",), category="Enclosed"),
+    Script("fixes", "which types -> all of them with their use, no website",
+           [OPENING, "which trailer types do you guys have?"],
+           reply_has=((1, "Livestock"), (1, "Concession"), (1, "Roll Off"), (1, "Fiber"),
+                      (1, "Race Trailer"), (1, "Tilt"), (1, "Aluminum")),
+           reply_lacks=((1, "trailerplace.com"), (1, "many more")), no_cards_at=(1,)),
+    Script("fixes", "mid-flow: what other kinds do you have?",
+           [OPENING, "I need a dump trailer", "what other kinds of trailers do you have?"],
+           reply_has=((2, "Livestock"), (2, "Concession"), (2, "Car Hauler")),
+           reply_lacks=((2, "trailerplace.com"),), category="Dump"),
+    Script("fixes", "show me everything, no type -> the types and a question, no website",
+           [OPENING, "just show me everything you have"],
+           reply_has=((1, "Dump"), (1, "?")), reply_lacks=((1, "trailerplace.com"),),
+           no_cards_at=(1,), no_category_at=(1,)),
+    Script("fixes", "cargo recommendation still names only a few types",
+           [OPENING, "I have a zero turn mower to haul, what would you recommend?"],
+           reply_lacks=((1, "Concession"), (1, "Fiber"), (1, "Livestock"))),
+    Script("fixes", "price + delivery with trailers -> cards first, team line once after them",
+           ["I need a dump trailer for gravel, about 6000 lbs per load, 7x14. How much are they, "
+            "and can you deliver to Houston?"],
+           cards_at=((0, "inventory"),), after_cards=((0, "979-532-1486"),),
+           at_most_once=((0, "noted"), (0, "979-532-1486")),
+           reply_lacks=((0, "passed it"), (0, "passed your"), (0, "shared your")),
+           stash_at=0, category="Dump"),
+    Script("fixes", "quote + callback with trailers -> cards first, team line once after them",
+           ["I need an enclosed trailer 7x14 for my tools and equipment, about 3000 lbs. Can "
+            "someone call me about financing and a quote?"],
+           cards_at=((0, "inventory"),), after_cards=((0, "979-532-1486"),),
+           at_most_once=((0, "noted"),), stash_at=0, category="Enclosed"),
+    Script("fixes", "'Gooseneck trailer' answers the question -> the brand",
+           [OPENING, "I need a livestock trailer", "I want the gooseneck trailer", "Gooseneck trailer",
+            QUALIFY],
+           answers=_bump("cattle"), state_equal={"brand_preference": "Gooseneck",
+                                                 "pending_gooseneck_clarification": None},
+           category="Livestock"),
+    Script("fixes", "'the one that hooks up in my truck bed' -> the hitch",
+           [OPENING, "I need a livestock trailer", "I want the gooseneck trailer",
+            "the one that hooks up in my truck bed", QUALIFY],
+           answers=_bump("cattle"), slots_equal={"hitch_type": ["Gooseneck"]},
+           state_equal={"pending_gooseneck_clarification": None}, category="Livestock"),
+    Script("fixes", "gooseneck question ignored twice -> the hitch, never a third ask",
+           [OPENING, "I need a livestock trailer", "I want the gooseneck trailer",
+            "My daughter lives in Wharton", "is it hot down there today?", QUALIFY],
+           answers=_bump("cattle"), slots_equal={"hitch_type": ["Gooseneck"]},
+           state_equal={"pending_gooseneck_clarification": None}, category="Livestock"),
+    Script("fixes", "switch question ignored twice -> stays on Dump",
+           [OPENING, "I need a dump trailer", "I'll be hauling my skid steer and a mini excavator",
+            "my daughter lives in Wharton", "is it hot down there today?"],
+           state_equal={"pending_category_switch": None}, category="Dump"),
+    Script("fixes", "'ok' to our question -> no question back",
+           [OPENING, "I need a dump trailer", "gravel", "ok"],
+           reply_lacks=((3, "?"),), category="Dump"),
+    Script("fixes", "more pictures -> the website and the phone number",
+           [OPENING, "I need a dump trailer", "do you have more pictures of your trailers?"],
+           reply_has=((2, "trailerplace.com"), (2, "979-532-1486")), category="Dump"),
+    Script("fixes", "open on Sunday? -> Monday to Saturday",
+           [OPENING, "are you open on sunday?"], reply_has=((1, "Saturday"),)),
 
     # --- one specific trailer: stock number, year + make, make + model, or a link ------
-    Script("lookup", "first message: is stock 13779 available?",
-           ["Hi, is stock number 13779 still available?"],
-           cards_at=((0, "13779"),), reply_has=((0, "14,350"),)),
+    # 13779 has since sold; 11710 is on the lot (2026-09-28). Swap it for another in-stock
+    # number when this fails with "no cards".
+    Script("lookup", "first message: is stock 11710 available?",
+           ["Hi, is stock number 11710 still available?"],
+           cards_at=((0, "11710"),), reply_has=((0, "11710"),)),
     Script("lookup", "first message: price of a make + model",
            ["How much is the Aluma 8220H XL tilt?"], cards_at=((0, "14493"),)),
     Script("lookup", "mid-questions: any 2026 Galyeans?, then back to the questions",
@@ -643,7 +764,7 @@ SCRIPTS: list[Script] = [
            [TESTER, "Can you deliver a trailer to Houston? I'd like a quote including delivery."],
            emails=("team_request",)),
     Script("email", "unavailable - boat trailer", [TESTER, "Do you sell boat trailers?"],
-           emails=("trailer_type_not_in_stock",), reply_has=((1, "don't currently have"),)),
+           emails=("trailer_type_not_in_stock",), reply_has=((1, "don't"), (1, "boat"))),
     Script("email", "unavailable - camper", [TESTER, "I'm looking for a camper for my family."],
            emails=("trailer_type_not_in_stock",)),
     Script("email", "listing interest after results",
@@ -700,12 +821,13 @@ def run_script(base_url: str, script: Script, log_lock: threading.Lock) -> Resul
         response.raise_for_status()
         seconds = time.time() - started  # the /chat call only, not the state read below
         body = response.json()
-        state = _state(session_id)
+        state = _state_after(session_id, len(result.turns) + 1)
         result.turns.append(
             Turn(text, body.get("assistant_text") or "", seconds,
                  state.get("pending_slot"), dict(state.get("slots") or {}), note,
                  body.get("usage") or {},
-                 [str(item.get("url") or "") for item in body.get("listings") or [] if isinstance(item, dict)])
+                 [str(item.get("url") or "") for item in body.get("listings") or [] if isinstance(item, dict)],
+                 state.get("category"))
         )
         return state
 
@@ -746,6 +868,16 @@ def _listing_text(url: str) -> str:
         return ""
     features = row.features if isinstance(row.features, list) else [row.features or ""]
     return " | ".join([str(row.title or ""), *map(str, features), str(row.match_evidence_text or "")]).lower()
+
+
+def _listing_color(url: str) -> str:
+    """The colour the catalogue records for a listing, for the colour-ranking checks."""
+    from src import db
+    from src.db_models import TrailerListingRow
+
+    with db.get_session_factory()() as sql:
+        row = sql.query(TrailerListingRow).filter(TrailerListingRow.url == url).first()
+    return str(getattr(row, "color", "") or "")
 
 
 def _check_features(result: Result, script: Script, state: dict[str, Any]) -> None:
@@ -838,6 +970,30 @@ def _check_script(result: Result, script: Script, state: dict[str, Any], repeats
     for step, text in script.reply_has:
         reply = result.turns[step].bot if -len(result.turns) <= step < len(result.turns) else ""
         add((f"reply {step + 1} says '{text}'", text.lower() in reply.lower().replace("’", "'"), ""))
+
+    for turn_no in script.no_category_at:
+        got = result.turns[turn_no].category if turn_no < len(result.turns) else "(no such turn)"
+        add((f"no category guessed after reply {turn_no + 1}", got is None, f"got {got!r}"))
+    for turn_no, text in script.after_cards:
+        reply = result.turns[turn_no].bot if turn_no < len(result.turns) else ""
+        lines = reply.splitlines()
+        last_card = max((i for i, line in enumerate(lines) if re.match(r"^\s*(\d+\.\s*\[|-\s)", line)),
+                        default=-1)
+        tail = "\n".join(lines[last_card + 1:])
+        add((f"reply {turn_no + 1} says '{text}' after the last card",
+             last_card >= 0 and text.lower() in tail.lower(),
+             "no cards" if last_card < 0 else tail[:160]))
+    for turn_no, text in script.at_most_once:
+        reply = result.turns[turn_no].bot if turn_no < len(result.turns) else ""
+        count = reply.lower().replace("’", "'").count(text.lower())
+        add((f"reply {turn_no + 1} says '{text}' at most once", count <= 1, f"said {count}x"))
+    for key, value in script.state_equal.items():
+        add((f"{key} = {value!r}", state.get(key) == value, f"got {state.get(key)!r}"))
+    if script.top_color:
+        shown = next((t.listings for t in result.turns if t.listings), [])
+        colors = [_listing_color(url) for url in shown]
+        add((f"first listing is {script.top_color}",
+             bool(colors) and script.top_color in colors[0].lower(), f"colours shown: {colors}"))
 
     if script.features or script.not_features or script.no_features or script.rerank is not None:
         _check_features(result, script, state)
@@ -957,7 +1113,7 @@ def _write_log(results: list[Result], path: Path, started: datetime, seconds: fl
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--base-url", default=os.getenv("CHATBOT_API_URL", "http://127.0.0.1:8801"))
-    parser.add_argument("--workers", type=int, default=6)
+    parser.add_argument("--workers", type=int, default=3)
     parser.add_argument("--only", default="", help="comma-separated categories")
     parser.add_argument("--scenarios", default="happy,units,vague",
                         help="per-category scenarios; pass an empty string for none")
@@ -975,7 +1131,7 @@ def main() -> int:
     categories = [c for c in CATEGORIES if not args.only or c in args.only.split(",")]
     scenarios = [s for s in args.scenarios.split(",") if s]
     jobs: list[Any] = [(c, s, i) for i, c in enumerate(categories) for s in scenarios]
-    groups = {"rules", "category", "email", "flow", "features", "axles", "switch", "lookup"} if args.scripted == "all" else set(filter(None, args.scripted.split(",")))
+    groups = {"rules", "category", "email", "flow", "features", "axles", "switch", "lookup", "fixes"} if args.scripted == "all" else set(filter(None, args.scripted.split(",")))
     words = [w.strip().lower() for w in args.match.split(",") if w.strip()]
     jobs += [script for script in SCRIPTS if script.group in groups
              and (not words or any(w in script.name.lower() for w in words))]

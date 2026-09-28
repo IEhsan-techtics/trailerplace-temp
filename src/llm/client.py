@@ -34,15 +34,23 @@ logger = logging.getLogger(__name__)
 ANALYSIS_CACHE_KEY = "luna-analysis"
 
 
+# Retries for every OpenAI call - this one, the reply pass (src/graph/agent.py) and the feature
+# ranker. gpt-6-luna's limit on this account is 200k tokens a minute and a turn sends ~10-16k,
+# so a handful of customers at once reaches it. The SDK waits as the 429 says (about 2s) and
+# backs off up to 8s between tries; four tries were live not enough: 110 of 727 turns in one
+# scenario run failed on a 429 and got the fixed fallback reply, one losing the customer's
+# answer. Six ride out a spike of about 25 seconds.
+MAX_RETRIES = 6
+
+
 @lru_cache(maxsize=1)
 def get_client():
     """The OpenAI client. Cached - building one per turn leaks connection pools."""
     from openai import OpenAI
 
-    # Four retries rather than the SDK's two. gpt-6-luna's limit on this account is 200k
-    # tokens a minute and a turn sends ~16k, so a handful of customers at once reaches it; the
-    # 429 says to wait about a second, and two quick retries were live not always enough.
-    return OpenAI(api_key=settings.openai_api_key, timeout=settings.chat_timeout_seconds, max_retries=4)
+    return OpenAI(
+        api_key=settings.openai_api_key, timeout=settings.chat_timeout_seconds, max_retries=MAX_RETRIES
+    )
 
 
 def empty_output(reason: str = "") -> ChatbotTurnOutput:
