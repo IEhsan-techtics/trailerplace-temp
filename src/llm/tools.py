@@ -266,7 +266,7 @@ class ToolRunner:
         """
         from src.graph.nodes import greeting
 
-        if not self.state.get("category"):
+        if not self.state.get("category") and not (self.state.get("turn_outcome") or {}).get("all_types"):
             return (
                 "NO SEARCH RAN: no trailer category has been chosen yet, so there is nothing to "
                 "search. This says NOTHING about our stock. Ask which type of trailer they want."
@@ -328,7 +328,27 @@ class ToolRunner:
             )
         self._remember(fresh)
         return "\n".join(
-            part for part in (self._match_quality(outcome, fresh), listing_block(fresh)) if part
+            part for part in (
+                self._match_quality(outcome, fresh), listing_block(fresh), self._all_types_note(fresh),
+            ) if part
+        )
+
+    def _all_types_note(self, listings: list[Any]) -> str:
+        """No type was ever chosen, so these came from every type (idle_timer.ALL_TYPES).
+
+        Travels with the results: said only in the state block, the model ended the reply on
+        the cards in one live run and listed the types without asking anything in another.
+        """
+        if not listings or not (self.state.get("turn_outcome") or {}).get("all_types"):
+            return ""
+        return (
+            "ALL TYPES: they never said which type of trailer they want, so these are from every "
+            "type we carry, ranked on the specs they gave. The line before the first card says so. "
+            "A card whose line above has no Price gets no Price bullet. After the last card, in "
+            "place of the usual closing question: name the types we carry from OUR CATEGORIES, "
+            "each with a few words on what it is for, then END with ONE question - does any of "
+            "these types interest them, or do they have a certain type in mind? Do not call "
+            "escalate: they have said nothing new."
         )
 
     def _match_quality(self, outcome: dict, listings: list[Any]) -> str:
@@ -474,6 +494,12 @@ class ToolRunner:
         """
         from src.domain import canned_responses
         from src.tools import team_notify
+
+        if (self.state.get("turn_outcome") or {}).get("idle_results"):
+            # The 5-minute turn: they have said nothing, so there is nothing new to raise.
+            # Live, "how much?" from their last message was escalated a second time here.
+            logger.info("TOOL escalate refused on the idle turn: session=%s", self.state.get("session_id"))
+            return "NOT SENT: they have said nothing since their last message. Do not mention the team."
 
         key = str(reason or "other").strip().lower()
         reason_line, canned_key = self._ESCALATION_REASONS.get(key, self._ESCALATION_REASONS["other"])

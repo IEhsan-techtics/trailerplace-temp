@@ -123,6 +123,11 @@ def set_trailer_category(state: dict, category: str) -> dict[str, Any]:
 
     if changed:
         _prune_for_new_category(state)
+    elif not previous and state.get("results_shown"):
+        # Trailers of every type went out before they chose one (idle_timer.ALL_TYPES). None
+        # were shown for THIS category, so its questions and its search come as usual.
+        state["results_shown"] = False
+        state["shown_urls"] = []
 
     logger.info(
         "TOOL set_trailer_category: session=%s category=%s required=%s",

@@ -445,6 +445,11 @@ def run_idle_turn(session_id: str, category: str, *, turn_id: Any, channel_id: s
                     "pending_axle_basis", "pending_axle_count", "invalid_retry_slot"):
             state[key] = None
         state["gooseneck_asks"] = 0
+        if category == idle_timer.ALL_TYPES and not state.get("category"):
+            # They gave specs but never said which type: every type is searched, ranked on
+            # those specs, and the reply asks which type suits them.
+            state["pending_type_question"] = False
+            state["turn_outcome"]["all_types"] = True
 
         reply = respond_with_tools(state, output, IDLE_MESSAGE, prefetch_search=True)
         if reply is not None:

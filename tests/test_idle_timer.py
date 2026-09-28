@@ -295,3 +295,44 @@ def test_the_clock_stays_off_without_the_rule(monkeypatch):
 
     monkeypatch.setattr(config, "settings", replace(config.settings, llm_writes_reply=False))
     assert idle_clock.start() is False
+
+
+# ---- specs but no type: the timer searches every type ----
+
+
+def test_the_type_question_waiting_arms_it_for_every_type():
+    state = _state(category=None, pending_slot=None, pending_type_question=True)
+    assert idle_timer.plan(state, None, NOW)["category"] == idle_timer.ALL_TYPES
+
+
+def test_every_type_shown_once_never_arms_again():
+    state = _state(category=None, pending_slot=None, pending_type_question=True)
+    idle_timer.note_results_shown(state)
+    assert idle_timer.plan(state, None, NOW) is None
+
+
+def test_a_quiet_customer_with_specs_and_no_type_is_shown_every_type(new_path, no_search):
+    from src import conversation_store, idle_sweep
+    from src.graph.build import run_turn
+    from src.graph.state import from_snapshot
+    from tests.factories import turn_output
+
+    new_path.push(turn_output(intent="feature_request_no_category", extracted={"length": 14.0, "width": 7.0}))
+    run_turn("s-any", "7x14, 4 ft walls, 14 ply tires. how much?")
+    assert conversation_store.armed_timer("s-any")["category"] == idle_timer.ALL_TYPES
+
+    results = idle_sweep.sweep(now=_later())
+
+    assert [r["status"] for r in results] == ["fired"]
+    assert no_search[-1]["category"] is None
+    state = from_snapshot("s-any", conversation_store.load_session("s-any")[0])
+    assert state["pending_type_question"] is False and state["category"] is None
+    assert conversation_store.armed_timer("s-any") is None
+
+
+def test_choosing_a_type_after_every_type_was_shown_starts_that_type_fresh():
+    from src.tools.category import set_trailer_category
+
+    state = {"category": None, "results_shown": True, "shown_urls": ["u1"], "slots": {}}
+    set_trailer_category(state, "Dump")
+    assert state["results_shown"] is False and state["shown_urls"] == []

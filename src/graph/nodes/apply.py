@@ -96,6 +96,12 @@ def apply_node(state: dict, output: Any, user_message: str = "") -> dict:
         not state.get("category")
         and getattr(output, "intent", "") == "feature_request_no_category"
     )
+    # Kept until they choose a type: while it is open, a quiet customer is shown trailers of
+    # every type after five minutes, ranked on the specs they gave (src/idle_timer.py).
+    if outcome["type_owed"]:
+        state["pending_type_question"] = True
+    elif state.get("category"):
+        state["pending_type_question"] = False
     _apply_brand(state, output, user_message)
 
     result = apply_extracted_fields(state, output, user_message)

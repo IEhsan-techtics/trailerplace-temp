@@ -78,6 +78,9 @@ class SessionState(TypedDict, total=False):
     pending_gooseneck_clarification: str | None
     # Times that question has gone out since it was opened. Capped: after two we take the hitch.
     gooseneck_asks: int
+    # We asked which type of trailer they want, after specs with no type. Arms the 5-minute
+    # timer for a search across every type (src/idle_timer.py ALL_TYPES).
+    pending_type_question: bool
     # An axle capacity whose wording says neither per-axle nor total ("14,000 lbs of axle
     # capacity"): {"value": 14000.0, "asks": 1}. Held here, stored nowhere, until they say.
     pending_axle_basis: dict | None
@@ -158,6 +161,7 @@ def new_state(session_id: str) -> SessionState:
         unavailable_requests=[],
         pending_gooseneck_clarification=None,
         gooseneck_asks=0,
+        pending_type_question=False,
         pending_axle_basis=None,
         pending_axle_count=None,
         contact={

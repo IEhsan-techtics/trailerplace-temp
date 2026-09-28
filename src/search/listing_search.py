@@ -1263,6 +1263,11 @@ def fetch_listings(filters: list[tuple[str, str, Any]]) -> list[TrailerListingRo
         return list(session.execute(statement).scalars())
 
 
+# How many trailers a search across every type (no category chosen) sends to the feature
+# ranker, after ordering the lot by how closely each fits the sizes they gave.
+NO_CATEGORY_POOL = 40
+
+
 def search_listing_result(
     *,
     category: str | None,
@@ -1307,6 +1312,27 @@ def search_listing_result(
         if item["url"] and item["url"] in shown:
             continue
         listings.append(item)
+
+    if not category and requested_features and len(listings) > NO_CATEGORY_POOL:
+        # Every type at once is most of the lot (187 trailers at 14 ft and up), and each one
+        # would go through the feature ranker. The closest fits on size go instead.
+        listings, _ = _rerank_listings_by_fit(
+            listings,
+            required_length_ft=_required_length_ft_from_filters(slots, metadata_filters),
+            required_payload_lbs=_required_payload_lbs_from_filters(slots, metadata_filters),
+            required_width_ft=_required_width_ft_from_filters(slots, metadata_filters),
+            required_height_ft=_required_height_ft_from_filters(slots, metadata_filters),
+            required_axle_capacity_lbs=_required_axle_capacity_lbs_from_filters(slots, metadata_filters),
+            required_total_axle_capacity_lbs=_required_total_axle_capacity_lbs_from_filters(slots, metadata_filters),
+            required_axle_count=_required_axle_count_from_filters(slots, metadata_filters),
+            warn_ratio=RERANK_WARN_RATIO,
+            extreme_ratio=RERANK_EXTREME_RATIO,
+            length_weight=RERANK_LENGTH_WEIGHT,
+            missing_dim_penalty=RERANK_MISSING_DIM_PENALTY,
+            retain_all=True,
+        )
+        logger.info("listing_search | no category: kept the %d closest fits of %d", NO_CATEGORY_POOL, len(listings))
+        listings = listings[:NO_CATEGORY_POOL]
 
     rerank_debug: dict[str, Any] = {"applied": False, "reason": "disabled"}
     make_debug: dict[str, Any]

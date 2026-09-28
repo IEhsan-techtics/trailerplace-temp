@@ -22,6 +22,7 @@ on.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from src.domain import brands, categories, company
@@ -194,6 +195,16 @@ def _state_line(state: dict, turn: Any) -> str:
             "the line before the first card, in your own words. Do not ask the question they "
             "left unanswered, and do not mention that they went quiet. If you ask for their details, "
             "use the line for the trailers we sent because they went quiet."
+        )
+    if (state.get("turn_outcome") or {}).get("all_types"):
+        # No type was ever chosen, so the search ran across every type we carry.
+        lines.append(
+            "- They never said which TYPE of trailer they want, so these trailers are from ALL our "
+            "types, ranked on the specs they gave. Say that in the line before the first card, in "
+            "your own words. After the last card, instead of the usual closing question: name the "
+            "types we carry, from OUR CATEGORIES, each with a few words on what it is for, then "
+            "ask whether any of these types interests them or whether they have a certain type "
+            "in mind. That is the one question."
         )
     idle = bool((state.get("turn_outcome") or {}).get("idle_results"))
     # Not on the idle turn: it follows their first message without one of its own, and live it
@@ -393,6 +404,43 @@ def _prefetched_search(runner: ToolRunner) -> list:
     ]
 
 
+_CARD_LINE = re.compile(r"^\s*(\d+\.\s*\[|-\s)")
+
+
+def _asks_after_the_cards(text: str) -> bool:
+    """Is there a question after the last card?"""
+    lines = str(text or "").splitlines()
+    last_card = max((i for i, line in enumerate(lines) if _CARD_LINE.match(line)), default=-1)
+    return "?" in " ".join(lines[last_card + 1:])
+
+
+def _with_the_types_closing(runner: ToolRunner, system_prompt: str, messages: list, text: str,
+                            state: dict) -> str:
+    """The all-types reply ended on the cards: the model writes the closing it left out.
+
+    Live, two runs in four stopped after the sixth card, with the note that asks for the
+    types and the question sitting right there in the tool result. Still the model's words -
+    one more call, told what is missing - never a fixed line.
+    """
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    from src.graph.agent import run_agent
+
+    ask = HumanMessage(content=(
+        "(Not from the customer.) Your reply stopped after the cards. Write ONLY what comes "
+        "after them - no cards, no greeting: one line offering our sales team at 979-532-1486, "
+        "then the types we carry from OUR CATEGORIES, each with a few words on what it is for, "
+        "then ONE question: does any of these types interest them, or do they have a certain "
+        "type in mind?"
+    ))
+    closing = run_agent(runner, system_prompt, [*messages, AIMessage(content=text), ask])
+    if not closing or not _asks_after_the_cards(closing):
+        logger.warning("REPLY all-types closing still missing: session=%s", state.get("session_id"))
+        return text
+    logger.info("REPLY added the all-types closing: session=%s", state.get("session_id"))
+    return text.rstrip() + _GAP + closing.strip()
+
+
 # What goes in front of the cards when the model opened straight onto "1.". Deliberately
 # plain and deliberately vague about WHAT was found: this is the backstop, written without
 # knowing what the customer asked for, so it must be true of any result set. The model's own
@@ -442,11 +490,15 @@ def respond_with_tools(
     messages = _messages(state, user_message)
     if prefetch_search:
         messages += _prefetched_search(runner)
-    text = run_agent(runner, build_system_prompt(state, turn), messages)
+    system_prompt = build_system_prompt(state, turn)
+    text = run_agent(runner, system_prompt, messages)
 
     if not text:
         logger.error("Reply pass returned nothing usable: session=%s", state.get("session_id"))
         return None
+
+    if (state.get("turn_outcome") or {}).get("all_types") and not _asks_after_the_cards(text):
+        text = _with_the_types_closing(runner, system_prompt, messages, text, state)
 
     text = _with_a_lead_in(text)
     cited = _cited_urls(runner.served_listings, text)
