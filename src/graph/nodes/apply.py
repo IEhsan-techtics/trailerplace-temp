@@ -92,9 +92,10 @@ def apply_node(state: dict, output: Any, user_message: str = "") -> dict:
     # Specs with no type ("7x14, 4 ft walls, 14 ply tires") fit several categories, so the
     # model asks which one they want instead of guessing. Read by reply_check, which holds
     # the reply to asking it.
-    outcome["type_owed"] = (
-        not state.get("category")
-        and getattr(output, "intent", "") == "feature_request_no_category"
+    # "Show me what you have" with no type is the same: there is nothing to search yet, so the
+    # types are named and they are asked which one - never sent to the website.
+    outcome["type_owed"] = not state.get("category") and getattr(output, "intent", "") in (
+        {"feature_request_no_category"} | _SHOW_RESULTS_INTENTS
     )
     # Kept until they choose a type: while it is open, a quiet customer is shown trailers of
     # every type after five minutes, ranked on the specs they gave (src/idle_timer.py).

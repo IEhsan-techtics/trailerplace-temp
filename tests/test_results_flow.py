@@ -88,18 +88,6 @@ def test_everything_in_one_message_still_searches_at_once(fake_llm, no_search):
 
 
 # ------------------------------------------------------ explicit request WITHOUT a category
-def test_show_me_with_no_category_sends_them_to_the_website_and_does_not_search(
-    fake_llm, no_search
-):
-    complete_welcome(fake_llm)
-    fake_llm.push(turn_output(intent="skip_all_show_results"))
-    result = run_turn("s1", "just show me everything you have")
-
-    assert no_search == [], "no search without a category"
-    assert result["listings"] == []
-    assert "trailerplace.com" in result["assistant_text"]
-
-
 # ------------------------------------------------------------- completion opens the gate
 def test_answering_every_required_question_shows_results(fake_llm, no_search):
     complete_welcome(fake_llm)
@@ -483,7 +471,7 @@ def test_a_friendly_but_non_standard_welcome_does_not_replace_the_opening(fake_l
     assert "Thank you for contacting TrailerPlace, Ibrahim!" in result["assistant_text"]
 
 
-def test_asking_what_types_exist_is_answered_not_redirected(fake_llm, no_search):
+def test_asking_what_types_exist_is_answered_not_redirected(fake_llm, no_search, no_rewrite):
     """A customer asking what you sell is exploring, not asking to be sent to the website.
 
     The model reads it as a results request, so the reply used to carry the answer, the
@@ -507,14 +495,16 @@ def test_asking_what_types_exist_is_answered_not_redirected(fake_llm, no_search)
     assert text.count("https://www.trailerplace.com") == 0
 
 
-def test_show_me_trailers_with_no_category_still_goes_to_the_website(fake_llm, no_search):
-    """The rule the fix above must not break (S25)."""
+def test_show_me_trailers_with_no_category_asks_which_type(fake_llm, no_search, no_rewrite):
+    """No type chosen, so nothing to search - and no longer the website either: they are
+    asked which type they want."""
     complete_welcome(fake_llm)
     fake_llm.push(turn_output(intent="skip_all_show_results"))
     result = run_turn("s1", "just show me everything you have")
 
     assert no_search == []
-    assert "trailerplace.com" in result["assistant_text"]
+    assert "trailerplace.com" not in result["assistant_text"]
+    assert "?" in result["assistant_text"]
 
 
 def test_the_models_type_question_is_used(fake_llm):

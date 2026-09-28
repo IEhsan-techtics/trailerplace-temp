@@ -1012,17 +1012,18 @@ def _closing_part(state: dict, output: Any) -> tuple[str, str | None]:
     if outcome.get("search_ran"):
         return _render_listings(state, outcome), None
 
-    # 2. They asked to see trailers with no category chosen: no search, the website (S25).
+    # 2. They asked to see trailers with no category chosen: no search, ask which type.
     #
     # Unless we just answered them. "Show me all your trailer types" reads to the model as a
     # results request, and the customer then got the answer, the whole category list and the
     # website line in one breath - three ways of saying the same thing. If a question was
     # answered this turn, the right next move is to ask which type fits, not to send them
     # away.
+    #
+    # Nor are they sent to the website when we have NOT answered them: with no type chosen
+    # there is nothing to search, and the next step is which type they want.
     if outcome.get("wants_results") and not state.get("category"):
-        if (getattr(output, "answer_to_customer_question", None) or "").strip():
-            return greeting.orientation_question(state), None
-        return company.website_redirect_line(), None
+        return greeting.orientation_question(state), None
 
     # 3. A pending confirmation outranks a new question - it is about what they just said.
     ours = python_question(state)

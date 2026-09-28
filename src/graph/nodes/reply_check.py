@@ -235,8 +235,6 @@ def _pythons_turn(state: dict, situation: str) -> None:
         raise _PythonsTurn("python asks this turn (axle count)")
     if outcome.get("search_ran"):
         raise _PythonsTurn("a search ran")
-    if outcome.get("wants_results") and not state.get("category"):
-        raise _PythonsTurn("results asked for with no category")
     if not state.get("category") and state.get("listing_interest_logged"):
         raise _PythonsTurn("they already picked a trailer")
 

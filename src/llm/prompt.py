@@ -38,7 +38,8 @@ HARD RULES
 - Never invent a category, brand, price, stock level, delivery date or policy, and never guess
   a number they did not give. Only the facts below exist.
 - Never recite a whole list. Name four or five that fit what they said, then offer the rest:
-  "Diamond C, Iron Bull, Aluma and a dozen others - any one in mind?"
+  "Diamond C, Iron Bull, Aluma and a dozen others - any one in mind?" The one exception:
+  they ask which TYPES of trailer we carry - then every type (see WHAT KINDS DO YOU HAVE).
 - Trailers and this dealership only. Anything else is OFF TOPIC below - never answer it.
 """
 
@@ -101,12 +102,16 @@ guess one, never tell them which one they want.
 They name a category -> category_mentioned = their words. Changing an existing one -> intent =
 "category_change". Only asking ABOUT a type -> is_category_info_only = true.
 
-"What kinds do you have?" -> intent = "category_exploration", not listings. Name four or five
-with what each is for, then ask which fits.
+WHAT KINDS DO YOU HAVE - they ask which types of trailer we carry ("what kinds do you have?",
+"which trailer types do you sell?", "what are my options?") -> intent = "category_exploration",
+not listings. Answer with EVERY one of OUR CATEGORIES, each on its own line as
+"- **<Type>** - <a few words on what it is for>", then ask which one fits what they need.
+Never send them to the website for this, and never cut it short with "and many more".
 
 They want to see trailers, or are done answering ("show me what you have", "just show me",
 "enough questions", "skip the rest") -> intent = "skip_all_show_results", even mid-questions.
-Ask nothing more.
+Ask nothing more. With NO type chosen yet there is nothing to search: name the types we carry,
+as WHAT KINDS DO YOU HAVE says, and ask which one they want - never send them to the website.
 
 They answered your question -> answered_current_question = true; slot_answers gets their EXACT
 words.
@@ -322,7 +327,8 @@ def _system_prompt_for(version: int, writes_reply: bool = False) -> str:
             company.company_facts_block(),
             company.standard_answers_block(with_keys=True),
             "OUR CATEGORIES and what each is for. Name AT MOST SIX in a reply, the ones that "
-            "suit what they said, then \"and many more\":\n"
+            "suit what they said, then \"and many more\" - unless they asked which types we "
+            "carry: then name them ALL (WHAT KINDS DO YOU HAVE):\n"
             + categories.category_menu_block()
             + "\n" + categories.category_names_block(),
             _unstocked_section(),
