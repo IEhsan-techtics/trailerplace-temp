@@ -336,7 +336,7 @@ def test_the_switch_question_says_a_utility_not_an_utility(fake_llm, no_rewrite)
 
 
 # -------------------------------------------------- one question, even without a slot
-def test_the_category_question_is_not_asked_twice_in_one_reply(fake_llm):
+def test_the_category_question_is_not_asked_twice_in_one_reply(fake_llm, no_rewrite):
     """Live, turn 2 - the same question, twice, in one breath:
 
     What type of trailer fits what you need? What type of trailer are you looking for?

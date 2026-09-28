@@ -89,9 +89,21 @@ def apply_node(state: dict, output: Any, user_message: str = "") -> dict:
     _apply_gooseneck(state, output, user_message)
     if not handled:
         _apply_category(state, output, user_message)
+    # Specs with no type ("7x14, 4 ft walls, 14 ply tires") fit several categories, so the
+    # model asks which one they want instead of guessing. Read by reply_check, which holds
+    # the reply to asking it.
+    outcome["type_owed"] = (
+        not state.get("category")
+        and getattr(output, "intent", "") == "feature_request_no_category"
+    )
     _apply_brand(state, output, user_message)
 
     result = apply_extracted_fields(state, output, user_message)
+    if state.get("category") != ALUMINUM and (state.get("slots") or {}).pop("base_category", None):
+        # Aluminum's "which type in aluminum" only. Answering the type question with
+        # "enclosed" also came back as a base_category answer, and it rides into the search
+        # as a hard subcategory filter.
+        logger.info("FILTER dropped base_category off Aluminum: session=%s", state.get("session_id"))
     if result.invalid_slot:
         state["invalid_retry_slot"] = result.invalid_slot
         state["invalid_retry_reason"] = result.invalid_reason

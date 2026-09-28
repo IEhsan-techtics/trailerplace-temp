@@ -166,7 +166,10 @@ class ChatbotTurnOutput(StrictBaseModel):
         "inventory_lookup", "contact_info_provided", "contact_declined", "smalltalk_other",
     ] = Field(description="Their main intent.")
     category_mentioned: str | None = Field(
-        description="The category they named or implied, in their words; null for none or 'not sure'."
+        description=(
+            "The category they named, or that their cargo or job clearly implies, in their words. "
+            "Null for none, 'not sure', or specs alone (sizes, walls, axles, tires, colour)."
+        )
     )
     is_category_info_only: bool = Field(description="True when asking ABOUT a category, not choosing it.")
     unavailable_type_requested: str | None = Field(

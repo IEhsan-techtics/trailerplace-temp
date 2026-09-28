@@ -26,6 +26,7 @@ The rules:
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -211,9 +212,17 @@ def _opening_problem(state: dict, reply: _Reply) -> str | None:
     they gave their name - the dealership's opening. The rest of it is the model's own."""
     if not greeting.is_first_turn(state):
         return None
-    if "thanked_for_contacting" not in reply.covers:
+    # The tags, or the words themselves: live, "Hi Bret, thanks for contacting TrailerPlace!"
+    # was rewritten because the model left greeted_by_name out of its tags.
+    text = reply.text.lower()
+    if "thanked_for_contacting" not in reply.covers and not re.search(
+        r"\b(thanks|thank you) for (contacting|reaching out to) trailerplace\b", text
+    ):
         return 'it is their first message and it does not say "Thanks for contacting TrailerPlace"'
-    if greeting.has_name(state.get("contact") or {}) and "greeted_by_name" not in reply.covers:
+    first = str((state.get("contact") or {}).get("name") or "").split(" ")[0].lower()
+    if greeting.has_name(state.get("contact") or {}) and "greeted_by_name" not in reply.covers and not (
+        first and re.match(rf"\s*(hi|hello|hey)\s+{re.escape(first)}\b", text)
+    ):
         return 'they gave their name and the reply does not open with "Hi <their name>"'
     return None
 
@@ -256,6 +265,9 @@ def _flow_problem(state: dict, reply: _Reply, due: bool) -> str | None:
             return f"it re-asks {retry} without saying what looked wrong"
         if "thanked_them" in reply.covers:
             return "it thanks them for, or notes, a value that was turned down"
+
+    if outcome.get("type_owed") and not reply.question_count and not (reply.asked_for_contact and due):
+        return "they gave specs but no trailer type, and it does not ask which type they are looking for"
 
     remaining = required_remaining(state) if state.get("category") else []
     if reply.asked:
@@ -414,6 +426,10 @@ def _needs(state: dict, situation: str, due: bool) -> str:
         return " ".join(needs)
 
     needs.append("At most one question.")
+    if outcome.get("type_owed"):
+        needs.append("They gave specs but no trailer type: keep every spec they gave, and ask which "
+                     "type of trailer they are looking for, naming the few of OUR CATEGORIES their "
+                     "specs suit. That is the one question; leave asked_slots empty.")
     retry = _open_retry(state)
     remaining = required_remaining(state) if state.get("category") else []
     if retry:

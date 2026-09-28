@@ -137,6 +137,10 @@ def compose_node(state: dict, output: Any) -> dict:
         # said, so if the model's words do not carry it, ours do.
         opening = _opening_text(state, acknowledgement)
         parts.append(opening)
+        # The model sometimes opens its answer with the welcome as well, and the two went out
+        # back to back: "Thank you for contacting TrailerPlace, Bret Barnard! ... Thanks for
+        # contacting TrailerPlace! Pricing comes with the trailers we show you."
+        answer = _LEADING_WELCOME_RE.sub("", answer).strip()
         # The welcome is mandatory, so here it is the ANSWER that goes if they say the same
         # thing: "Great to have your contact info, Ibrahim! Thanks, Ibrahim - I've got your
         # contact information."
@@ -894,6 +898,13 @@ def _opening_text(state: dict, acknowledgement: str) -> str:
     )
     return fallback
 
+
+# "Hi Bret, thanks for contacting TrailerPlace!" at the front of the model's answer.
+_LEADING_WELCOME_RE = re.compile(
+    r"^\s*(?:(?:hi|hello|hey)\b[^.!?]{0,40}?[,!.]\s*)?"
+    r"(?:thanks|thank you)\s+for\s+(?:contacting|reaching out to)\s+trailerplace[^.!?]*[.!?]\s*",
+    re.IGNORECASE,
+)
 
 # A later-turn line that already does the fixed welcome's job: it thanks them, or it names
 # the details they just gave.

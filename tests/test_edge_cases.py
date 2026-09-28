@@ -304,3 +304,32 @@ def test_a_category_the_model_invents_never_reaches_the_state(fake_llm):
     fake_llm.push(turn_output(category_mentioned="Hovercraft", intent="category_selection"))
     run_turn("s1", "a hovercraft trailer")
     assert state_after()["category"] is None
+
+
+# ------------------------------------------------ specs alone never choose a category
+def test_specs_with_no_type_keep_the_specs_and_owe_the_type_question(fake_llm):
+    """Live: "7x14x4 foot walls, 8 lug axles, 14 ply tires" was read as an Enclosed trailer.
+    The model now leaves the category empty; Python keeps every spec and owes the question."""
+    fake_llm.push(turn_output(
+        intent="feature_request_no_category",
+        extracted={"length": 14.0, "width": 7.0, "height": 4.0},
+    ))
+    run_turn("s1", "looking for a 7x14x4 foot walls, 8 lug axles, 14 ply tires. how much?")
+    state = from_snapshot("s1", load_session("s1")[0])
+
+    assert state["category"] is None
+    assert state["slots"]["length"] == 14.0 and state["slots"]["width"] == 7.0
+
+
+def test_a_base_category_off_aluminum_is_dropped(fake_llm):
+    """Answering the type question with "enclosed" also came back as a base_category answer,
+    which rides into the search as a hard subcategory filter."""
+    fake_llm.push(turn_output(
+        intent="category_selection", category_mentioned="Enclosed",
+        slots={"base_category": "Enclosed"},
+    ))
+    run_turn("s1", "enclosed")
+    state = from_snapshot("s1", load_session("s1")[0])
+
+    assert state["category"] == "Enclosed"
+    assert "base_category" not in state["slots"]

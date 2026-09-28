@@ -612,3 +612,32 @@ def test_apply_keeps_the_question_open_on_ok_thanks(monkeypatch):
     assert state["pending_slot"] == "haul_item"
     assert "haul_item" not in state["declined_slots"]
     assert state["turn_outcome"]["holding"] == "haul_item"
+
+
+def test_the_opening_is_read_from_the_words_when_the_tags_are_missing():
+    """Live: "Hi Bret, thanks for contacting TrailerPlace!" was rewritten because the model
+    left greeted_by_name out of its own tags."""
+    reply = "Hi Tony, thanks for contacting TrailerPlace! Which type of trailer fits what you need?"
+    assert _sent_as_written(_first_turn_with_contact(), _output(reply, [], questions=1))
+
+
+# ---- specs with no trailer type: ask which type ----
+
+
+def _specs_no_type(**overrides):
+    state = _state(category=None, required_slots=[], slots={"width": 7.0, "length": 14.0, "height": 4.0})
+    state["turn_outcome"]["type_owed"] = True
+    state.update(overrides)
+    return state
+
+
+def test_specs_with_no_type_must_ask_which_type(rewrites):
+    output = _output("The price comes with the trailers I show you.", [], questions=0)
+    assert _turned_down(_specs_no_type(), output, rewrites)
+    assert "which type" in rewrites.calls[0]["problem"]
+    assert "which type of trailer" in rewrites.calls[0]["needs"]
+
+
+def test_specs_with_no_type_and_the_type_asked_goes_out():
+    reply = "The price comes with the trailers I show you. Which type are you after - Dump, Utility or Enclosed?"
+    assert _sent_as_written(_specs_no_type(), _output(reply, [], questions=1, offered=["Dump", "Utility", "Enclosed"]))
