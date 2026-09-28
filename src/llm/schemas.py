@@ -56,7 +56,7 @@ class ExtractedFields(StrictBaseModel):
     haul_item: str | None = Field(description="What they will haul, in their words.")
     brand_preference: str | None = Field(description="A make from MAKES WE STOCK, or an unknown one verbatim.")
     non_metadata_features: list[str] = Field(
-        description="Equipment on the trailer with no field of its own (see OTHER FIELDS). Never cargo, a use, a make, category or subcategory, a model word, hitch, size, weight, axle count or rating, colour or price."
+        description="Equipment on the trailer with no field of its own, and a colour they want (see OTHER FIELDS). Never cargo, a use, a make, category or subcategory, a model word, hitch, size, weight, axle count or rating, or price."
     )
     numeric_no_preference: list[str] = Field(description="Slots they answered with no preference.")
     quantities: list["Quantity"] = Field(description="Every amount they stated (see AMOUNTS). Overrides the numbers above.")

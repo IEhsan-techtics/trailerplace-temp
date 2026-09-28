@@ -128,6 +128,32 @@ def test_the_axle_type_is_a_feature():
     assert kept == ["torsion axles"]
 
 
+def test_an_axle_detail_no_field_holds_is_a_feature():
+    """Live: "8 lug axles" was dropped because it named an axle, and nothing else held it.
+    Only a count, a capacity or a vague quality is dropped now."""
+    kept, _ = sanitize_non_metadata_features(
+        ["8 lug axles", "Dexter axles", "two 7k axles with electric brakes", "heavy duty axles",
+         "2-7,000# axles", "5.2k axles"]
+    )
+    assert kept == ["8 lug axles", "Dexter axles", "two 7k axles electric brakes"]
+
+
+def test_a_wanted_colour_is_a_feature():
+    """Live: "in blue if possible" reached nothing - there is no colour field, and colour
+    words were stripped out of the feature list."""
+    kept, _ = sanitize_non_metadata_features(["in blue if possible", "black LED lights"])
+    assert kept == ["blue", "black LED lights"]
+
+
+def test_the_ranker_sees_the_listings_colour():
+    from src.search.feature_ranker import _candidate_evidence
+
+    assert "Color: Pepsi Blue" in _candidate_evidence(
+        {"title": "2026 X Dump", "features": [], "color": "Pepsi Blue"})
+    assert "Color" not in _candidate_evidence(
+        {"title": "2026 X Dump", "features": [], "color": "Unknown"})
+
+
 def test_bare_sizes_and_prices_are_not_features():
     kept, _ = sanitize_non_metadata_features(["20 ft", "under $9,000", "winch"])
     assert kept == ["winch"]

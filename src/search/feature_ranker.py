@@ -100,7 +100,9 @@ class FeatureRerankValidationError(ValueError):
 
 @lru_cache(maxsize=1)
 def _openai_client() -> OpenAI:
-    return OpenAI(api_key=config.settings.openai_api_key or None)
+    from src.llm.client import MAX_RETRIES
+
+    return OpenAI(api_key=config.settings.openai_api_key or None, max_retries=MAX_RETRIES)
 
 
 def _candidate_id(position: int) -> str:
@@ -119,9 +121,11 @@ def _grounding_text(value: Any) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+# Colour is NOT here: it has no field or filter of its own, so a wanted colour ("in blue if
+# possible") is a requested feature, and the listing's colour is what it is judged against.
 _IRRELEVANT_EVIDENCE_LABELS = {
     "make", "year", "condition", "category", "subcategory", "hitch type",
-    "color", "length", "width", "height", "gvwr", "axles", "axle capacity",
+    "length", "width", "height", "gvwr", "axles", "axle capacity",
     "payload capacity", "dry weight", "material", "price", "stock number", "url",
 }
 
@@ -152,6 +156,9 @@ def _candidate_evidence(listing: dict[str, Any]) -> str:
         add(value, label=label)
     for feature in listing.get("features") or []:
         add(feature, label="Feature")
+    color = str(listing.get("color") or "").strip()
+    if color and color.casefold() != "unknown":
+        add(color, label="Color")
 
     # Retain arbitrary feature/specification values (for example Rear Door:
     # Butterfly Gates) while removing dimensions, price, URL and other metadata.

@@ -178,11 +178,12 @@ OTHER FIELDS
 - haul_item is their own words, even vague ("just random stuff").
 - non_metadata_features: equipment ON the trailer that has no field of its own, in their words:
   a ramp or ramp door, winch, tarp, LED lights, sliding or butterfly gates, side door,
-  insulation, spare tire, toolbox, D-rings, torsion axles, electric brakes. Each one ranks the
-  results, so add only real equipment.
+  insulation, spare tire, toolbox, D-rings, torsion axles, 8 lug axles, electric brakes, a
+  tire rating ("14 ply tires"), and a COLOUR they want ("blue"). Each one ranks the results,
+  so add only real equipment and colours.
   NEVER a feature: the cargo ("a scissor lift", "my Bobcat") or the business or use ("food
   truck", "mobile coffee business") - those are haul_item; nor a make, type, hitch, size,
-  weight, axle count or rating, colour or price - those have their own fields.
+  weight, axle count or rating, or price - those have their own fields.
 
 ONE SPECIFIC TRAILER -> inventory_lookup
 Fill it whenever they point at particular stock, however they phrase it and even mid-questions

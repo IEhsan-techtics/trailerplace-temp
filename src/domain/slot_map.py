@@ -147,14 +147,11 @@ _NON_FEATURE_IDENTITY_PHRASES = (
     "enclosed", "equipment", "utility", "fiber", "livestock", "tilt", "dump",
     "aluminum", "subcategory", "category", "trailer", "trailers",
 )
-_NON_FEATURE_COLOURS = (
-    "black", "white", "gray", "grey", "silver", "red", "blue", "green",
-    "yellow", "orange", "brown", "tan", "beige", "charcoal", "bronze",
-    "gold", "maroon", "burgundy", "purple",
-)
+# Colours are NOT removed: a wanted colour ("in blue if possible") has no field of its own, so
+# it is a requested feature, and the feature ranker judges it against each listing's colour.
 _FEATURE_FILLER_RE = re.compile(
     r"\b(?:a|an|the|with|and|or|in|on|of|by|from|made|year|model|stock|number|"
-    r"hitch|only|preferred|preference|please)\b",
+    r"hitch|only|preferred|preference|please|if|possible|ideally|preferably)\b",
     re.IGNORECASE,
 )
 _FEATURE_DIMENSION_RE = re.compile(
@@ -181,7 +178,7 @@ def _clean_feature_only_value(value: Any) -> str:
     from src.domain.brands import known_makes
 
     removable = sorted(
-        (*known_makes(), *_NON_FEATURE_IDENTITY_PHRASES, *_NON_FEATURE_COLOURS),
+        (*known_makes(), *_NON_FEATURE_IDENTITY_PHRASES),
         key=len,
         reverse=True,
     )
@@ -208,30 +205,40 @@ def mentions_an_axle(value: Any) -> bool:
     return bool(_AXLE_FEATURE_RE.search(str(value or "")))
 
 
-# An axle phrase is junk-as-a-feature UNLESS it names the axle's TYPE or construction.
-# Counts and capacities have fields of their own (axle_count, axle_capacity) and a
+# An axle phrase is dropped as a feature only when it says NOTHING beyond what the axle fields
+# hold. Counts and capacities have fields of their own (axle_count, axle_capacity), and a
 # duplicate feature string can only score 0 in the ranker - feature_ranker strips the Axle
-# Capacity label from the evidence it shows the model. But the axle's TYPE has no field
-# anywhere, so "torsion axles" is a real requirement and the feature list is the only place
-# it can do any work; the old guard dropped every phrase containing "axle" and lost it.
-# A whitelist, not "anything without a number": "heavy duty axles" is a vague quality that
-# matches almost any tandem trailer and scores 0 just like a bare count would.
-_AXLE_TYPE_WORD_RE = re.compile(
-    r"\b(torsion|spring|leaf|drop|straight|lift|idler|greaseable|oil[- ]?bath|rubber(?:[- ]ride)?|electric|hydraulic|disc|drum|self[- ]adjusting)\b",
+# Capacity label from the evidence it shows the model. So "tandem axles", "10k axles" and
+# "two 7,000 lb axles" go.
+#
+# Everything else stays. This used to be a whitelist of axle TYPES (torsion, spring,
+# electric...) with every other axle phrase dropped, and live "8 lug axles" - a real
+# requirement no field holds - was thrown away with nothing else to carry it. Reading what is
+# LEFT once the count, the capacity and the vague words are gone keeps any detail the
+# customer gave, however they word it: lugs, hubs, a brand of axle, brakes, torsion.
+_AXLE_NUMBER_RE = re.compile(r"\d[\d,.]*\s*(?:k\b|lbs?\b|#|pounds?\b)?", re.IGNORECASE)
+_AXLE_COVERED_WORDS_RE = re.compile(
+    r"\b(axles?|axels?|single|tandem|triple|tri|dual|double|one|two|three|four|"
+    r"lbs?|pounds?|k|capacity|rated|rating|each|per|total|combined|of|with|and|a|an|the|"
+    # Vague qualities: they match almost any tandem trailer and score like a bare count.
+    r"heavy|duty|heavier|good|strong|stronger|big|bigger|upgraded|quality|nice)\b",
     re.IGNORECASE,
 )
 
 
 def axle_phrase_is_count_or_capacity(value: Any) -> bool:
-    """True for an axle phrase we must NOT keep as a feature.
+    """True for an axle phrase we must NOT keep as a feature: it holds only a count, a
+    capacity or a vague quality ("tandem 7k axles", "heavy duty axles").
 
-    False only when the phrase names the axle's type or construction ("torsion axles",
-    "spring axles with electric brakes") - that is a requirement we hold no metadata for.
+    False when anything else is left - "8 lug axles", "torsion axles", "axles with electric
+    brakes", "Dexter axles" - a requirement we hold no metadata for.
     """
     text = str(value or "")
     if not mentions_an_axle(text):
         return False
-    return not _AXLE_TYPE_WORD_RE.search(text)
+    rest = _AXLE_NUMBER_RE.sub(" ", text)
+    rest = _AXLE_COVERED_WORDS_RE.sub(" ", rest)
+    return not re.search(r"[a-z]", rest, re.IGNORECASE)
 
 
 def _is_only_a_measurement_or_price(feature: str) -> bool:
