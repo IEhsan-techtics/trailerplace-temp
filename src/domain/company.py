@@ -18,10 +18,9 @@ NAME = "TrailerPlace"
 # and hours without ever hearing the answer, because the bot was never told there is no other.
 LOCATION = "Wharton, TX"
 PHONE = "979-532-1486"
-# Stated to customers, so it is a fact and not a guess. Days are deliberately not asserted:
-# we were given the times and nothing else, and inventing "Mon-Sat" would be exactly the kind
-# of plausible detail that gets a customer driving to a closed lot.
-HOURS = "8:00 AM to 6:00 PM"
+# Stated to customers, so it is a fact and not a guess: the days and times the dealership gave
+# us. Sunday is not a work day, so we are closed then.
+HOURS = "Monday to Saturday, 8:00 AM to 6:00 PM"
 
 SERVICES = (
     "trailer sales",
@@ -50,8 +49,7 @@ def company_facts_block() -> str:
             f"- {LOCATION} is our ONLY location. Asked about another city -> say so first: \"We "
             f"don't have a location in San Antonio - we're only in {LOCATION}.\" Then the details, "
             "and that we deliver.",
-            f"- Open {HOURS}. State the times only - we were not told which days, so never "
-            "name days of the week.",
+            f"- Open {HOURS}. Closed on Sunday.",
             f"- Services: {', '.join(SERVICES)}. Financing, trade-ins, service and parts are "
             "handled by people: give the phone number, not details.",
             "- Never state a price, delivery date, restock date or stock level that is not in "

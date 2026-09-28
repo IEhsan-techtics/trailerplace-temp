@@ -593,7 +593,7 @@ def test_the_written_request_is_only_a_backstop(fake_llm):
 
     fake_llm.push(turn_output(
         intent="general_question",
-        answer_to_customer_question="We're open Monday to Friday.",
+        answer_to_customer_question="We're open Monday to Saturday.",
         next_question_text="And who am I speaking with, and what's the best number for you?",
     ))
     text = run_turn("s1", "when are you open?")["assistant_text"]

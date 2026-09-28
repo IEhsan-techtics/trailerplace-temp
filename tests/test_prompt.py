@@ -295,13 +295,11 @@ def test_it_states_the_opening_hours_it_was_given():
     assert "8:00 AM to 6:00 PM" in prompt
 
 
-def test_it_refuses_to_invent_which_days_we_open():
-    """We were given the times and nothing else. "Mon-Sat" is exactly the kind of plausible
-    detail that gets a customer driving to a closed lot."""
+def test_it_states_which_days_we_open():
+    """The dealership gave us the days too: Monday to Saturday, closed on Sunday."""
     prompt = system_prompt()
-    assert "never name days" in prompt.lower()
-    for day in ("Monday", "Saturday", "Sunday", "weekday"):
-        assert day not in prompt
+    assert "Monday to Saturday, 8:00 AM to 6:00 PM" in prompt
+    assert "Closed on Sunday" in prompt
 
 
 
