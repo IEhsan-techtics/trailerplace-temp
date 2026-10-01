@@ -197,8 +197,9 @@ def test_contact_given_after_results_is_still_captured(fake_llm, no_search):
     assert state["contact"]["phone"] == "03304388550"
 
     lead = load_lead("s1")
-    assert lead["lead_type"] == "hard"
     assert lead["contact_status"] == "complete"
+    # Not hard yet: that takes an email to the team as well (tests/test_contact.py).
+    assert lead["lead_type"] == "soft"
 
 
 def test_details_volunteered_mid_qualification_do_not_interrupt_the_flow(fake_llm):

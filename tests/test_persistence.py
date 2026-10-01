@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from src import conversation_store
-from src.conversation_store import describe_interest, load_session
+from src.conversation_store import load_session
 from src.graph.build import run_turn
 from src.graph.state import from_snapshot, new_state, to_snapshot
 
@@ -127,20 +127,6 @@ def test_the_version_counter_advances_with_each_turn(fake_llm):
     fake_llm.push(turn_output(intent="smalltalk_other"))
     run_turn("s1", "hello again")
     assert conversation_store._MEMORY["s1"]["state_version"] == first + 1
-
-
-# ------------------------------------------------------------------------- interest summary
-def test_the_interest_summary_describes_the_search():
-    state = new_state("s1")
-    state["category"] = "Dump"
-    state["slots"] = {"haul_item": "gravel", "length": 20.0}
-    summary = describe_interest(state)
-    assert "Dump" in summary and "gravel" in summary
-    assert "20.0" not in summary, "rendered as a plain number"
-
-
-def test_the_interest_summary_is_never_empty():
-    assert describe_interest(new_state("s1")) == "Unspecified"
 
 
 def test_round_tripping_an_empty_session_is_stable():

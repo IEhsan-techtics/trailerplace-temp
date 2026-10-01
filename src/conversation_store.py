@@ -29,6 +29,9 @@ logger = logging.getLogger(__name__)
 # tests and for a developer running without Postgres.
 _MEMORY: dict[str, dict[str, Any]] = {}
 
+# What every new lead row's item_of_interest holds, and keeps: the column is NOT NULL, but
+# nothing writes it any more. Left in the table rather than dropped, because the database is
+# shared with the deployed bot and its inserts still name the column.
 _PLACEHOLDER_ITEM = "Unspecified"
 
 
@@ -202,7 +205,6 @@ def save_turn(
     request_message: str,
     response: dict[str, Any],
     contact: dict[str, Any] | None = None,
-    item_of_interest: str | None = None,
     outbox_events: list[dict[str, Any]] | None = None,
     turn_id: Any = None,
     channel_id: str | None = None,
@@ -234,8 +236,11 @@ def save_turn(
         )
         if contact:
             record["contact"] = dict(contact)
-        if item_of_interest:
-            record["item_of_interest"] = item_of_interest
+        held = record.get("contact") or {}
+        record["lead_type"] = _lead_type(
+            record.get("lead_type"), email=held.get("email"), phone=held.get("phone"),
+            emailed=bool(outbox_events),
+        )
         if channel_id and not record.get("psid"):
             record["psid"] = str(channel_id)
         _MEMORY_TIMERS[session_id] = _timer_row(session_id, idle_timer)
@@ -282,8 +287,10 @@ def save_turn(
                 )
             )
 
-        if contact or item_of_interest or channel_id:
-            _update_lead(sql, row.lead_id, contact or {}, item_of_interest, channel_id)
+        if contact or channel_id or outbox_events:
+            _update_lead(
+                sql, row.lead_id, contact or {}, channel_id, emailed=bool(outbox_events)
+            )
 
         # With the turn, so the timer can never disagree with the conversation it belongs to.
         _write_timer(sql, session_uuid, idle_timer)
@@ -675,19 +682,31 @@ def enqueue_save_user_feedback(
     _FEEDBACK_POOL.submit(save_user_feedback, session_id, turn_idx, text, timestamp_iso, rating=rating)
 
 
+def _lead_type(current: str | None, *, email: Any, phone: Any, emailed: bool) -> str:
+    """'hard' once the team has been emailed about someone we can reach; 'soft' until then.
+
+    A way to reach them is an email or a phone number - a name is welcome but not required,
+    the same test team_notify uses before it sends anything. And details alone are not
+    enough: a lead is hard when the team has actually heard about it, which is at least one
+    team email from this conversation (a request, a trailer they liked, or the trailers they
+    were shown). Once hard it stays hard.
+    """
+    if current == "hard" or (emailed and (email or phone)):
+        return "hard"
+    return "soft"
+
+
 def _update_lead(
     sql,
     lead_id,
     contact: dict[str, Any],
-    item_of_interest: str | None,
     channel_id: str | None = None,
+    *,
+    emailed: bool = False,
 ) -> None:
-    """Fill in what we have learned about who this is.
+    """Fill in what we have learned about who this is, and whether it is a hard lead yet.
 
-    A lead becomes 'hard' the moment we hold a name AND either an email or a phone number -
-    the minimum the dealership treats as a real lead. Below that it stays 'soft', and a
-    declined contact simply stays soft forever; we do not keep asking and we do not record
-    a half-lead as though it were a whole one.
+    ``emailed`` is whether this turn queued a team email - see ``_lead_type``.
     """
     lead = sql.get(ChatbotLead, lead_id)
     if lead is None:
@@ -709,44 +728,13 @@ def _update_lead(
     if contact.get("phone") and not lead.phone_number:
         lead.phone_number = str(contact["phone"])[:64]
 
-    if item_of_interest:
-        lead.item_of_interest = item_of_interest[:2000]
-
+    lead.lead_type = _lead_type(
+        lead.lead_type, email=lead.email, phone=lead.phone_number, emailed=emailed
+    )
     if lead.name and (lead.email or lead.phone_number):
-        lead.lead_type = "hard"
         lead.contact_status = "complete"
     elif lead.name or lead.email or lead.phone_number:
         lead.contact_status = "partial"
-
-
-def describe_interest(state: dict) -> str:
-    """A one-line summary of what they are shopping for, for ``item_of_interest``.
-
-    That column is NOT NULL, so it always has to resolve to something.
-    """
-    # The trailer they actually said they want beats anything we inferred from the
-    # questions: it IS the thing they are interested in, and it is what the team opens the
-    # lead to see.
-    picked = str(state.get("interest_listing") or "").strip()
-    if picked:
-        return picked
-
-    category = state.get("category")
-    slots = state.get("slots") or {}
-    if not category and not slots:
-        return _PLACEHOLDER_ITEM
-
-    parts: list[str] = [str(category)] if category else []
-    for slot in ("haul_item", "length", "payload_capacity", "hitch_type"):
-        value = slots.get(slot)
-        if value is None or value == [] or value == "":
-            continue
-        if isinstance(value, list):
-            value = ", ".join(str(item) for item in value)
-        if isinstance(value, float) and value.is_integer():
-            value = int(value)
-        parts.append(f"{slot}={value}")
-    return " | ".join(parts) or _PLACEHOLDER_ITEM
 
 
 def load_lead(session_id: str) -> dict[str, Any] | None:
@@ -763,10 +751,9 @@ def load_lead(session_id: str) -> dict[str, Any] | None:
             "name": name,
             "email": email,
             "phone_number": phone,
-            "lead_type": "hard" if complete else "soft",
+            "lead_type": record.get("lead_type") or "soft",
             "contact_status": "complete" if complete
             else ("partial" if (name or email or phone) else "missing_contact"),
-            "item_of_interest": record.get("item_of_interest") or _PLACEHOLDER_ITEM,
             "psid": record.get("psid"),
         }
 
@@ -784,6 +771,5 @@ def load_lead(session_id: str) -> dict[str, Any] | None:
             "phone_number": lead.phone_number,
             "lead_type": lead.lead_type,
             "contact_status": lead.contact_status,
-            "item_of_interest": lead.item_of_interest,
             "psid": lead.psid,
         }

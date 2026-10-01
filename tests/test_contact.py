@@ -28,30 +28,25 @@ def capture(fake_llm):
 
 
 # ------------------------------------------------------------------------ storing the lead
-def test_name_and_email_make_a_hard_lead(capture):
-    """The dealership's minimum for a real lead: a name plus one way to reach them."""
-    lead = capture(name="Dave", email="dave@example.com")
+def test_details_are_stored_on_the_lead(capture):
+    lead = capture(name="Dave", email="dave@example.com", phone="979-555-0100")
     assert lead["name"] == "Dave"
     assert lead["email"] == "dave@example.com"
-    assert lead["lead_type"] == "hard"
+    assert lead["phone_number"] == "979-555-0100"
     assert lead["contact_status"] == "complete"
 
 
-def test_name_and_phone_also_make_a_hard_lead(capture):
-    lead = capture(name="Dave", phone="979-555-0100")
-    assert lead["phone_number"] == "979-555-0100"
-    assert lead["lead_type"] == "hard"
+def test_details_alone_are_not_a_hard_lead_until_the_team_is_emailed(capture):
+    """A way to reach them is not enough: the team has to have heard about them."""
+    lead = capture(name="Dave", email="dave@example.com")
+    assert lead["lead_type"] == "soft"
+    assert lead["contact_status"] == "complete"
 
 
-def test_a_name_alone_is_not_a_lead_yet(capture):
+def test_a_name_alone_is_partial_contact(capture):
     lead = capture(name="Dave")
     assert lead["lead_type"] == "soft"
     assert lead["contact_status"] == "partial"
-
-
-def test_contact_details_without_a_name_are_not_a_lead(capture):
-    lead = capture(email="dave@example.com")
-    assert lead["lead_type"] == "soft"
 
 
 def test_a_session_that_gives_nothing_stays_a_soft_lead(fake_llm):
@@ -60,6 +55,72 @@ def test_a_session_that_gives_nothing_stays_a_soft_lead(fake_llm):
     lead = load_lead("s1")
     assert lead["lead_type"] == "soft"
     assert lead["contact_status"] == "missing_contact"
+
+
+# ---------------------------------------------------------------------------- hard leads
+#
+# Hard = a team email went out about someone we can reach by email or phone. A name is not
+# required. Tested on the store directly, both the in-memory path and the Postgres one.
+EMAIL = [{"event_type": "results_shown_to_user", "payload": {}}]
+
+
+def _save(session_id="s1", *, contact=None, emailed=False):
+    from src.conversation_store import save_turn
+
+    save_turn(
+        session_id, conversation=[], state_snapshot={}, request_message="x", response={},
+        contact=contact, outbox_events=EMAIL if emailed else None,
+    )
+
+
+def test_an_email_to_the_team_about_someone_reachable_makes_a_hard_lead():
+    _save(contact={"email": "dave@example.com"}, emailed=True)
+    assert load_lead("s1")["lead_type"] == "hard", "a name is not required"
+
+
+def test_a_phone_number_counts_as_reachable():
+    _save(contact={"phone": "979-555-0100"}, emailed=True)
+    assert load_lead("s1")["lead_type"] == "hard"
+
+
+def test_details_without_a_team_email_stay_soft():
+    _save(contact={"name": "Dave"})
+    _save(contact={"name": "Dave", "phone": "979-555-0100"})
+    assert load_lead("s1")["lead_type"] == "soft"
+
+
+def test_once_hard_it_stays_hard():
+    _save(contact={"email": "dave@example.com"}, emailed=True)
+    _save(contact={"email": "dave@example.com"})
+    assert load_lead("s1")["lead_type"] == "hard"
+
+
+@pytest.mark.parametrize(
+    "lead_fields, contact, emailed, expected",
+    [
+        ({}, {"email": "d@x.com"}, True, "hard"),
+        ({}, {"phone": "979-555-0100"}, True, "hard"),
+        ({}, {"name": "Dave", "email": "d@x.com"}, False, "soft"),
+        ({}, {"name": "Dave"}, True, "soft"),
+        ({"email": "d@x.com"}, {}, True, "hard"),
+        ({"lead_type": "hard", "email": "d@x.com"}, {}, False, "hard"),
+    ],
+)
+def test_the_database_lead_follows_the_same_rule(lead_fields, contact, emailed, expected):
+    """_update_lead is the Postgres path, which the suite otherwise never reaches."""
+    from types import SimpleNamespace
+
+    from src.conversation_store import _update_lead
+
+    lead = SimpleNamespace(
+        psid=None, name=None, email=None, phone_number=None, lead_type="soft",
+        contact_status="missing_contact",
+    )
+    vars(lead).update(lead_fields)
+    sql = SimpleNamespace(get=lambda _model, _id: lead)
+
+    _update_lead(sql, "lead-1", contact, emailed=emailed)
+    assert lead.lead_type == expected
 
 
 # ------------------------------------------------------------------- asked once, then never
@@ -121,35 +182,6 @@ def test_details_are_never_overwritten_by_a_later_turn(fake_llm):
     state = state_after()
     assert state["contact"]["name"] == "Dave", "the lead keeps the details it qualified on"
     assert state["contact"]["email"] == "dave@x.com"
-
-
-def test_partial_details_across_two_turns_add_up_to_a_hard_lead(fake_llm):
-    fake_llm.push(turn_output(intent="contact_info_provided", name="Dave"))
-    run_turn("s1", "I'm Dave")
-    assert load_lead("s1")["lead_type"] == "soft"
-
-    fake_llm.push(turn_output(intent="contact_info_provided", phone="979-555-0100"))
-    run_turn("s1", "my number is 979-555-0100")
-    assert load_lead("s1")["lead_type"] == "hard"
-
-
-# ------------------------------------------------------------------------ item of interest
-def test_the_lead_records_what_they_are_shopping_for(fake_llm):
-    fake_llm.push(turn_output(category_mentioned="dump", intent="category_selection"))
-    run_turn("s1", "dump trailer")
-    fake_llm.push(turn_output(slots={"haul_item": "gravel"}, name="Dave", phone="979-555-0100"))
-    run_turn("s1", "gravel, I'm Dave on 979-555-0100")
-
-    lead = load_lead("s1")
-    assert "Dump" in lead["item_of_interest"]
-    assert "gravel" in lead["item_of_interest"]
-
-
-def test_a_session_with_nothing_yet_still_has_a_valid_item_of_interest(fake_llm):
-    """item_of_interest is NOT NULL, so it always resolves to something."""
-    fake_llm.push(turn_output(intent="smalltalk_other"))
-    run_turn("s1", "hi")
-    assert load_lead("s1")["item_of_interest"] == "Unspecified"
 
 
 # ------------------------------------------- a refusal stops the asking, not always the send

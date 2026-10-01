@@ -567,17 +567,16 @@ def test_the_catalogue_is_not_read_out_after_their_lead_is_logged(fake_llm, no_s
     assert "passed your request on to our team" in reply
 
 
-def test_the_lead_is_named_after_the_trailer_they_picked(fake_llm, no_search):
-    """The lead row's item_of_interest is what the team opens it to see. A customer who
-    asked about one trailer by stock number and said yes to it was filed under "no details
-    yet", because nothing he had said was a category or a slot."""
-    from src.conversation_store import describe_interest
+def test_the_email_about_the_trailer_they_picked_makes_them_a_hard_lead(fake_llm, no_search, mail):
+    """End to end: a team email about a customer we can reach is what makes a hard lead."""
+    from src.conversation_store import load_lead
 
     livestock_customer(fake_llm)
     fake_llm.push(listing_interest())
     run_turn("s1", "I like the first one")
 
-    assert describe_interest(state_after()) == "2026 P&amp;C Car Hauler"
+    assert bodies(mail), "the team was emailed"
+    assert load_lead("s1")["lead_type"] == "hard"
 
 
 def test_two_trailers_from_one_make_are_two_emails(fake_llm, no_search, mail):
