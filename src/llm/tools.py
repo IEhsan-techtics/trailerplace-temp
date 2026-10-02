@@ -350,9 +350,15 @@ class ToolRunner:
                 "these requirements. Present the ones you already have and do not search again."
             )
         self._remember(fresh)
+        dropped = outcome.get("aluminum_dropped")
+        aluminum_note = (
+            f"NO ALUMINUM {dropped.upper()}: we have none that match, so these are {dropped} trailers "
+            "that are NOT aluminum. The line before the first card says so."
+        ) if dropped and fresh else ""
         return "\n".join(
             part for part in (
-                self._match_quality(outcome, fresh), listing_block(fresh), self._all_types_note(fresh),
+                aluminum_note, self._match_quality(outcome, fresh), listing_block(fresh),
+                self._all_types_note(fresh),
             ) if part
         )
 

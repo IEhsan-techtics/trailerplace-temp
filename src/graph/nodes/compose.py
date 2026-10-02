@@ -1212,7 +1212,11 @@ def _render_listings(state: dict, outcome: dict) -> str:
     if not listings:
         return _no_results_line(state)
 
-    lines: list[str] = ["Here's what fits:"]
+    dropped_aluminum = outcome.get("aluminum_dropped")
+    lines: list[str] = [
+        f"We don't have an aluminum {dropped_aluminum.lower()} trailer that fits, so here are "
+        f"{dropped_aluminum.lower()} trailers in other materials:" if dropped_aluminum else "Here's what fits:"
+    ]
     for index, listing in enumerate(listings, start=1):
         lines.append(_listing_line(index, listing))
     # Same bookkeeping as the reply-pass path: these cards are numbered on their screen in

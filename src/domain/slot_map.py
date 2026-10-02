@@ -95,13 +95,17 @@ def normalize_subcategory_answer(raw_answer: Any) -> Any:
     text = str(raw_answer or "").strip()
     if not text:
         return None
-    matches = resolve_categories_from_text(text)
+    # Aluminum is the category this answers FOR, never the answer: live, "aluminum utility
+    # trailer" came back as the answer and its first match, Aluminum, replaced Utility - so
+    # the search looked for aluminum trailers built as aluminum and found none.
+    matches = [match for match in resolve_categories_from_text(text) if match != "Aluminum"]
     if matches:
         return matches[0]
-    # "utilty", "alluminum": the model quotes the customer, and people misspell these
-    # words constantly. Dropped, the answer counts as no preference and the choice they
-    # did make is lost.
-    return closest_category_name(text)
+    # "utilty", "dumpp": the model quotes the customer, and people misspell these words
+    # constantly. Dropped, the answer counts as no preference and the choice they did make
+    # is lost.
+    closest = closest_category_name(text)
+    return None if closest == "Aluminum" else closest
 
 
 # "I want it in Gooseneck" is a hitch. "I want a Gooseneck" is... also usually a hitch —

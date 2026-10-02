@@ -670,6 +670,13 @@ def _apply_several_types(state: dict, output: Any) -> bool:
             wanted.append(canonical)
     if len(wanted) < 2:
         return False
+    if ALUMINUM in wanted:
+        # "An aluminum utility trailer" is one choice, not two: Aluminum is the material we
+        # stock it under, and the other type is what they want made of it (base_category).
+        set_trailer_category(state, ALUMINUM)
+        _store_aluminum_base(state, next(c for c in wanted if c != ALUMINUM))
+        state["candidate_categories"] = []
+        return True
     if wanted != list(state.get("candidate_categories") or []):
         # Searched on the turn they are first named, or named differently - not again on
         # every later turn that repeats them.

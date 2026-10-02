@@ -95,6 +95,7 @@ more of OUR CATEGORIES -> category_mentioned = one of them, more_categories = th
   "a dump or an enclosed" -> Dump, more_categories ["Enclosed"]
 Read the whole conversation, not only this message. Name every type they point at, however
 many. Specs alone still choose nothing. A category already set -> more_categories = [].
+Aluminum with another type is NOT several types: it is the Aluminum rule below.
 
 SPECS ALONE NEVER CHOOSE A CATEGORY. Sizes, walls or sides, axles, lugs, tires, colour, a
 budget - with no trailer type named and no cargo or job - fit several of our categories ("a

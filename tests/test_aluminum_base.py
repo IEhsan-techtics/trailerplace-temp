@@ -79,3 +79,108 @@ def test_a_later_change_of_mind_still_goes_through_the_normal_path():
     _apply_category(state, _said("Aluminum enclosed trailer"), "an aluminum enclosed trailer")
 
     assert state["slots"]["base_category"] == "Utility", "not clobbered from here"
+
+
+# ------------------------------------------------- aluminum is never "several types"
+@pytest.mark.parametrize("mentioned, more", [
+    ("Aluminum", ["Utility"]),
+    ("Utility", ["Aluminum"]),
+])
+def test_aluminum_with_another_type_is_one_choice_not_two(fake_llm, mentioned, more):
+    from src.conversation_store import load_session
+    from src.graph.build import run_turn
+    from src.graph.state import from_snapshot
+    from tests.factories import complete_welcome, turn_output
+
+    complete_welcome(fake_llm)
+    fake_llm.push(turn_output(intent="category_selection", category_mentioned=mentioned, more_categories=more))
+    run_turn("s1", "I want an aluminum utility trailer")
+
+    state = from_snapshot("s1", load_session("s1")[0])
+    assert state["category"] == "Aluminum"
+    assert state["slots"]["base_category"] == "Utility"
+    assert state["candidate_categories"] == []
+
+
+# ------------------------------------------- no aluminum of that type: search the type
+@pytest.fixture
+def catalogue(monkeypatch):
+    """No aluminum utility trailers; plenty of steel utility ones. Records every call."""
+    from src.graph.nodes import search as search_module
+
+    calls = []
+
+    def fake_search_listings(*, category, metadata_filters, max_recommendations, **kwargs):
+        calls.append({"category": category, "filters": dict(metadata_filters or {}), **kwargs})
+        if category == "Aluminum":
+            return []
+        return [{"title": f"{category} {i}", "url": f"https://x/{i}", "category": category} for i in range(1, 4)]
+
+    monkeypatch.setattr(search_module, "search_listings", fake_search_listings)
+    return calls
+
+
+def _aluminum_utility_search(**slots):
+    from src.graph.nodes import search as search_module
+
+    state = {"session_id": "s1", "category": "Aluminum", "qualification_complete": True,
+             "slots": {"base_category": "Utility", **slots}, "slot_sources": {"base_category": "user"}}
+    search_module.search_node(state)
+    return state
+
+
+def test_no_aluminum_of_that_type_searches_the_type_itself(catalogue):
+    state = _aluminum_utility_search(length=16.0)
+
+    assert [call["category"] for call in catalogue][-1] == "Utility"
+    assert state["category"] == "Utility"
+    assert "base_category" not in state["slots"]
+    assert state["slots"]["length"] == 16.0, "everything else they told us is kept"
+    assert state["turn_outcome"]["aluminum_dropped"] == "Utility"
+    assert [l["category"] for l in state["turn_outcome"]["listings"]] == ["Utility"] * 3
+
+
+def test_aluminum_of_every_kind_is_never_shown_in_its_place(catalogue):
+    """The usual last resort keeps the category and drops the rest - for Aluminum that is
+    aluminum trailers of any kind, which is not what they asked for."""
+    _aluminum_utility_search(length=16.0)
+
+    assert not any(call["category"] == "Aluminum" and call.get("category_only_filters") for call in catalogue)
+
+
+def test_aluminum_of_that_type_in_stock_stays_aluminum(monkeypatch):
+    from src.graph.nodes import search as search_module
+
+    monkeypatch.setattr(search_module, "search_listings", lambda **kw: [{"title": "Alu", "url": "https://x/a"}])
+    state = _aluminum_utility_search()
+
+    assert state["category"] == "Aluminum" and state["slots"]["base_category"] == "Utility"
+    assert "aluminum_dropped" not in state["turn_outcome"]
+
+
+def test_the_reply_is_told_these_are_not_aluminum(catalogue):
+    from src.llm.respond import _state_line
+    from tests.factories import turn_output
+
+    state = _aluminum_utility_search()
+    text = _state_line(state, turn_output())
+    assert "NO aluminum Utility" in text
+
+
+def test_the_backstop_says_so_too(catalogue):
+    from src.graph.nodes.compose import _render_listings
+
+    state = _aluminum_utility_search()
+    assert _render_listings(state, state["turn_outcome"]).startswith("We don't have an aluminum utility trailer")
+
+
+@pytest.mark.parametrize("raw, base", [
+    ("aluminum utility trailer", "Utility"),     # live: Aluminum, the first match, won
+    ("utility", "Utility"),
+    ("alluminum dump", "Dump"),
+    ("aluminum", None),                          # the material alone answers nothing
+])
+def test_the_aluminum_sub_type_is_never_aluminum(raw, base):
+    from src.domain.slot_map import normalize_subcategory_answer
+
+    assert normalize_subcategory_answer(raw) == base

@@ -217,6 +217,13 @@ def _state_line(state: dict, turn: Any) -> str:
             "the first card, in your own words. After the last card, instead of the usual closing "
             "question, ask which of these types suits them better. That is the one question."
         )
+    dropped = (state.get("turn_outcome") or {}).get("aluminum_dropped")
+    if dropped:
+        # They asked for an aluminum <type>; we have none, so the search ran on the type.
+        lines.append(
+            f"- We have NO aluminum {dropped} trailers that match, so these are {dropped} trailers "
+            "that are NOT aluminum. Say that plainly in the line before the first card."
+        )
     idle = bool((state.get("turn_outcome") or {}).get("idle_results"))
     # Not on the idle turn: it follows their first message without one of its own, and live it
     # opened with the thanks a second time.

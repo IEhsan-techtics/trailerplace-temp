@@ -6,6 +6,7 @@ from typing import Any
 
 from src import turn_status
 from src.config import settings
+from src.tools.category import ALUMINUM
 from src.domain.slot_map import normalize_slot_targets, sanitize_non_metadata_features
 from src.search.listing_search import narrowing_filters_present, search_listings
 
@@ -94,7 +95,7 @@ def types_to_search(state: dict) -> list[str | None]:
 
 def _search_one(
     state: dict, category: str | None, max_recommendations: int,
-    requested_features: list[str], shown_urls: list[str],
+    requested_features: list[str], shown_urls: list[str], *, relax_to_category: bool = True,
 ) -> tuple[list[dict[str, Any]], dict[str, Any], bool, bool]:
     """One category's search, with the usual fallbacks. Returns the results, the filters, and
     whether the brand or the other hard filters had to be let go."""
@@ -140,7 +141,7 @@ def _search_one(
     # (sliding gates, a ramp), they only ever ranked rather than filtered, and they are cleared in
     # one place only: a category change.
     filters_relaxed = False
-    if not results and narrowing_filters_present(category, slots, metadata_filters):
+    if not results and relax_to_category and narrowing_filters_present(category, slots, metadata_filters):
         logger.info(
             "TOOL search: session=%s zero results, relaxing every filter except category=%r and retrying",
             state.get("session_id"), category,
@@ -156,6 +157,24 @@ def _search_one(
         )
         filters_relaxed = bool(results)
     return results, metadata_filters, brand_relaxed, filters_relaxed
+
+
+def _off_aluminum(state: dict, base: str) -> str:
+    """No aluminum trailers of the type they want: drop Aluminum and make that type the category.
+
+    Recorded on the outcome, so the reply tells them these are not aluminum.
+    """
+    from src.tools.category import normalize_category, set_trailer_category
+
+    canonical = normalize_category(base) or base
+    (state.get("slots") or {}).pop("base_category", None)
+    (state.get("slot_sources") or {}).pop("base_category", None)
+    set_trailer_category(state, canonical)
+    state.setdefault("turn_outcome", {})["aluminum_dropped"] = canonical
+    logger.info(
+        "TOOL search: session=%s no aluminum %s - searching %s instead", state.get("session_id"), canonical, canonical,
+    )
+    return canonical
 
 
 def search_node(state: dict) -> dict:
@@ -190,15 +209,28 @@ def search_node(state: dict) -> dict:
     brand_relaxed = filters_relaxed = False
     relaxed_labels: list[str] = []
     metadata_filters: dict[str, Any] = {}
+    searched: list[str] = []
     for category in types:
         logger.info(
             "TOOL search: session=%s category=%s filters=%s features=%s already_shown=%d",
             state.get("session_id"), category, _build_metadata_filters(state, category),
             requested_features, len(shown_urls),
         )
+        # Aluminum built as another type ("an aluminum utility trailer"): letting the type go
+        # would show aluminum trailers of every kind, so it is never relaxed away. If there are
+        # none, the type itself is searched instead, and the reply says so.
+        base = (state.get("slots") or {}).get("base_category") if category == ALUMINUM else None
+        base = None if base == ALUMINUM else base
         found, metadata_filters, brand_off, filters_off = _search_one(
-            state, category, per_type, requested_features, shown_urls,
+            state, category, per_type, requested_features, shown_urls, relax_to_category=not base,
         )
+        if not found and base:
+            category = _off_aluminum(state, base)
+            found, metadata_filters, brand_off, filters_off = _search_one(
+                state, category, per_type, requested_features, shown_urls,
+            )
+        if category:
+            searched.append(category)
         results.extend(found)
         brand_relaxed = brand_relaxed or brand_off
         if filters_off:
@@ -232,8 +264,7 @@ def search_node(state: dict) -> dict:
 
     if results:
         filter_desc = ", ".join(f"{key}={value}" for key, value in metadata_filters.items())
-        searched = ", ".join(category for category in types if category) or "All types"
-        description = f"Inventory search — {len(results)} results — {searched}"
+        description = f"Inventory search — {len(results)} results — {', '.join(searched) or 'All types'}"
         if filter_desc:
             description += f" ({filter_desc})"
         outcome.setdefault("system_email_triggers", []).append(
