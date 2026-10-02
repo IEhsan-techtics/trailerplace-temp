@@ -336,3 +336,102 @@ def test_choosing_a_type_after_every_type_was_shown_starts_that_type_fresh():
     state = {"category": None, "results_shown": True, "shown_urls": ["u1"], "slots": {}}
     set_trailer_category(state, "Dump")
     assert state["results_shown"] is False and state["shown_urls"] == []
+
+
+# ---- a new detail after the trailers: one more showing ----
+
+
+def test_a_new_detail_after_every_type_was_shown_re_opens_it():
+    state = _state(category=None, pending_slot=None, pending_type_question=False,
+                   results_categories=[idle_timer.ALL_TYPES])
+    idle_timer.allow_another_showing(state)
+
+    assert state["pending_type_question"] is True
+    assert idle_timer.plan(state, None, NOW)["category"] == idle_timer.ALL_TYPES
+
+
+def test_a_new_detail_on_a_chosen_category_re_opens_it_while_a_question_waits():
+    state = _state(results_categories=["Dump"])
+    idle_timer.allow_another_showing(state)
+
+    assert idle_timer.plan(state, None, NOW)["category"] == "Dump"
+
+
+def test_a_new_detail_with_no_question_waiting_still_arms_nothing():
+    state = _state(pending_slot=None, results_categories=["Dump"])
+    idle_timer.allow_another_showing(state)
+
+    assert idle_timer.plan(state, None, NOW) is None
+
+
+def test_several_types_are_one_timer_spent_by_one_showing_and_re_opened_by_a_detail():
+    state = _state(category=None, pending_slot=None, candidate_categories=["Equipment", "Car Hauler"])
+    assert idle_timer.plan(state, None, NOW)["category"] == "Equipment + Car Hauler"
+
+    idle_timer.note_results_shown(state)
+    assert idle_timer.plan(state, None, NOW) is None
+
+    idle_timer.allow_another_showing(state)
+    assert idle_timer.plan(state, None, NOW)["category"] == "Equipment + Car Hauler"
+
+
+def _shown_every_type(new_path, session="s-again"):
+    """Specs and no type, quiet for five minutes: shown trailers of every type."""
+    from src import idle_sweep
+    from src.graph.build import run_turn
+    from tests.factories import complete_welcome, turn_output
+
+    complete_welcome(new_path, session_id=session)
+    new_path.push(turn_output(intent="feature_request_no_category",
+                              extracted={"length": 36.0, "hitch_type": ["Gooseneck"]}))
+    run_turn(session, "36 ft gooseneck")
+    assert [r["status"] for r in idle_sweep.sweep(now=_later())] == ["fired"]
+
+
+def test_a_new_detail_after_the_timer_showed_them_trailers_brings_a_fresh_set(new_path, no_search):
+    """Live: shown every type, then "heavy equipment and cars", then "14k GVWR" - and nothing."""
+    from src import conversation_store, idle_sweep
+    from src.graph.build import run_turn
+    from src.graph.state import from_snapshot
+    from tests.factories import turn_output
+
+    _shown_every_type(new_path)
+    seen = list(from_snapshot("s-again", conversation_store.load_session("s-again")[0])["shown_urls"])
+    assert seen
+
+    new_path.push(turn_output(intent="qualification_answer",
+                              extracted={"total_axle_capacity_lbs": 14000.0, "axle_capacity_basis": "total"}))
+    run_turn("s-again", "I need 14k GVWR")
+
+    state = from_snapshot("s-again", conversation_store.load_session("s-again")[0])
+    assert state["shown_urls"] == seen, "what they saw stays seen, so the next set leaves it out"
+    assert conversation_store.armed_timer("s-again")["category"] == idle_timer.ALL_TYPES
+
+    searches = len(no_search)
+    assert [r["status"] for r in idle_sweep.sweep(now=_later())] == ["fired"]
+    assert len(no_search) == searches + 1
+    assert no_search[-1]["slots"]["total_axle_capacity_lbs"] == 14000.0
+
+
+def test_a_message_with_no_new_detail_brings_nothing_back(new_path, no_search):
+    from src import conversation_store
+    from src.graph.build import run_turn
+    from tests.factories import turn_output
+
+    _shown_every_type(new_path)
+    new_path.push(turn_output(intent="smalltalk_other"))
+    run_turn("s-again", "ok thanks")
+
+    assert conversation_store.armed_timer("s-again") is None
+
+
+def test_a_new_feature_counts_as_a_new_detail(new_path, no_search):
+    from src import conversation_store
+    from src.graph.build import run_turn
+    from tests.factories import turn_output
+
+    _shown_every_type(new_path)
+    new_path.push(turn_output(intent="qualification_answer", extracted={"non_metadata_features": ["winch"]}))
+    run_turn("s-again", "it needs a winch")
+
+    assert conversation_store.armed_timer("s-again")["category"] == idle_timer.ALL_TYPES

@@ -73,6 +73,7 @@ def apply_node(state: dict, output: Any, user_message: str = "") -> dict:
     outcome["user_message"] = user_message
     state["invalid_retry_slot"] = None
     state["invalid_retry_reason"] = None
+    features_before = len(state.get("non_metadata_features") or [])
 
     _apply_contact(state, output)
     _note_shared_platforms(state, user_message)
@@ -129,6 +130,7 @@ def apply_node(state: dict, output: Any, user_message: str = "") -> dict:
     _report_questions_we_gave_up_on(state)
     _apply_refined_search(state, output, result)
     _apply_results_gate(state, output)
+    _apply_new_detail(state, result, features_before)
 
     outcome["applied_slots"] = dict(result.stored)
     outcome["declined_this_turn"] = list(result.no_preference)
@@ -1126,12 +1128,36 @@ def _apply_refined_search(state: dict, output: Any, result: Any) -> None:
     if not changed and intent not in {"requirement_change", "drop_requirements"}:
         return
 
+    # Kept aside: when this turn does not search after all, what they saw is still seen.
+    state["turn_outcome"]["shown_before_refine"] = list(state.get("shown_urls") or [])
     state["shown_urls"] = []
     state["turn_outcome"]["search_refined"] = True
     logger.info(
         "SEARCH refine: session=%s changed=%s dropped=%s - clearing shown history",
         state.get("session_id"), sorted(result.stored), getattr(output, "dropped_fields", None),
     )
+
+
+def _apply_new_detail(state: dict, result: Any, features_before: int) -> None:
+    """A new detail after they have seen trailers earns one more showing (src/idle_timer.py).
+
+    Only a detail counts - a size, a weight, a feature, their cargo. Nothing stored means
+    nothing new, so "ok thanks" or a question about our hours never brings the trailers back.
+    """
+    if not state.get("results_shown"):
+        return
+    added_feature = len(state.get("non_metadata_features") or []) > features_before
+    if not (result.stored or added_feature):
+        return
+    from src import idle_timer
+
+    idle_timer.allow_another_showing(state)
+    outcome = state["turn_outcome"]
+    if not state.get("qualification_complete") and "shown_before_refine" in outcome:
+        # No search this turn, so the refinement's fresh start is not needed: the showing the
+        # timer brings leaves out what they have already seen.
+        state["shown_urls"] = outcome.pop("shown_before_refine")
+    logger.info("IDLE another showing allowed: session=%s new=%s", state.get("session_id"), sorted(result.stored))
 
 
 # --------------------------------------------------------------------- 8. results gate
