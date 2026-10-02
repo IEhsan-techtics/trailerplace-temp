@@ -285,7 +285,11 @@ class ToolRunner:
         """
         from src.graph.nodes import greeting
 
-        if not self.state.get("category") and not (self.state.get("turn_outcome") or {}).get("all_types"):
+        if (
+            not self.state.get("category")
+            and not self.state.get("candidate_categories")
+            and not (self.state.get("turn_outcome") or {}).get("all_types")
+        ):
             return (
                 "NO SEARCH RAN: no trailer category has been chosen yet, so there is nothing to "
                 "search. This says NOTHING about our stock. Ask which type of trailer they want."
@@ -358,6 +362,13 @@ class ToolRunner:
         Travels with the results: said only in the state block, the model ended the reply on
         the cards in one live run and listed the types without asking anything in another.
         """
+        several = (self.state.get("turn_outcome") or {}).get("several_types")
+        if listings and several:
+            return (
+                f"SEVERAL TYPES: they want {', '.join(several)}, so these are the best of EACH type, "
+                "ranked separately, in that order. The line before the first card says so. After "
+                "the last card, END with ONE question: which of these types suits them better?"
+            )
         if not listings or not (self.state.get("turn_outcome") or {}).get("all_types"):
             return ""
         return (

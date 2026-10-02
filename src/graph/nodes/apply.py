@@ -87,15 +87,20 @@ def apply_node(state: dict, output: Any, user_message: str = "") -> dict:
     _apply_off_topic(state, output)
     handled = _apply_pending_confirmations(state, output, user_message)
     _apply_gooseneck(state, output, user_message)
-    if not handled:
+    if not handled and not _apply_several_types(state, output):
         _apply_category(state, output, user_message)
+    if state.get("category"):
+        state["candidate_categories"] = []
     # Specs with no type ("7x14, 4 ft walls, 14 ply tires") fit several categories, so the
     # model asks which one they want instead of guessing. Read by reply_check, which holds
     # the reply to asking it.
     # "Show me what you have" with no type is the same: there is nothing to search yet, so the
     # types are named and they are asked which one - never sent to the website.
-    outcome["type_owed"] = not state.get("category") and getattr(output, "intent", "") in (
-        {"feature_request_no_category"} | _SHOW_RESULTS_INTENTS
+    # Not when they want several types: those are searched, and the reply asks which suits.
+    outcome["type_owed"] = (
+        not state.get("category")
+        and not state.get("candidate_categories")
+        and getattr(output, "intent", "") in ({"feature_request_no_category"} | _SHOW_RESULTS_INTENTS)
     )
     # Kept until they choose a type: while it is open, a quiet customer is shown trailers of
     # every type after five minutes, ranked on the specs they gave (src/idle_timer.py).
@@ -645,6 +650,32 @@ def _apply_category(state: dict, output: Any, user_message: str = "") -> None:
     _store_aluminum_base(state, base)
 
 
+def _apply_several_types(state: dict, output: Any) -> bool:
+    """Two or more types at once, before any is chosen. True when it took the turn.
+
+    Live, "I'm towing heavy equipment and cars" and then "Both" (to "Equipment or Car
+    Hauler?") set nothing - one type was all the session could hold - so no search ran and
+    the conversation stopped on an echo. Now every type they point at is kept, and the search
+    runs once per type (src/graph/nodes/search.py). Choosing one later clears the list.
+    """
+    if state.get("category") or getattr(output, "is_category_info_only", False):
+        return False
+    wanted: list[str] = []
+    for name in [getattr(output, "category_mentioned", None), *(getattr(output, "more_categories", None) or [])]:
+        canonical = normalize_category(name) if name else None
+        if canonical and canonical not in wanted:
+            wanted.append(canonical)
+    if len(wanted) < 2:
+        return False
+    if wanted != list(state.get("candidate_categories") or []):
+        # Searched on the turn they are first named, or named differently - not again on
+        # every later turn that repeats them.
+        state["turn_outcome"]["types_named"] = True
+    state["candidate_categories"] = wanted
+    logger.info("CATEGORY several wanted: session=%s %s", state.get("session_id"), wanted)
+    return True
+
+
 def _store_aluminum_base(state: dict, base: str | None) -> None:
     """File the type they want in aluminum, so ``base_category`` is never asked again.
 
@@ -1168,8 +1199,15 @@ def _apply_results_gate(state: dict, output: Any) -> None:
             asked_for_results = False
         wants_search = asked_for_results or complete
 
+    # Several types and none chosen: there are no questions to finish, so they are searched
+    # on the information already given - the turn the types are named, when a detail changes
+    # after they have seen trailers, or when they ask to see them.
+    several = not state.get("category") and bool(state.get("candidate_categories"))
+    if several:
+        wants_search = bool(state["turn_outcome"].get("types_named")) or refined or requested_results
+
     state["qualification_complete"] = (
-        bool(state.get("category")) and not awaiting_answer and wants_search
+        (bool(state.get("category")) or several) and not awaiting_answer and wants_search
     )
     state["turn_outcome"]["wants_results"] = requested_results
     state["turn_outcome"]["qualification_just_completed"] = complete and not asked_for_results

@@ -81,6 +81,9 @@ class SessionState(TypedDict, total=False):
     # We asked which type of trailer they want, after specs with no type. Arms the 5-minute
     # timer for a search across every type (src/idle_timer.py ALL_TYPES).
     pending_type_question: bool
+    # Two or three types they want at once, before choosing one ("heavy equipment and cars"
+    # -> Equipment, Car Hauler). Each is searched on its own; choosing one clears this.
+    candidate_categories: list[str]
     # An axle capacity whose wording says neither per-axle nor total ("14,000 lbs of axle
     # capacity"): {"value": 14000.0, "asks": 1}. Held here, stored nowhere, until they say.
     pending_axle_basis: dict | None
@@ -162,6 +165,7 @@ def new_state(session_id: str) -> SessionState:
         pending_gooseneck_clarification=None,
         gooseneck_asks=0,
         pending_type_question=False,
+        candidate_categories=[],
         pending_axle_basis=None,
         pending_axle_count=None,
         contact={

@@ -50,7 +50,7 @@ def _relaxed_filter_labels(state: dict, metadata_filters: dict[str, Any]) -> lis
     return labels
 
 
-def _build_metadata_filters(state: dict) -> dict[str, Any]:
+def _build_metadata_filters(state: dict, category: str | None = None) -> dict[str, Any]:
     """Translate answered slots into SQL filter targets.
 
     Only category/make/hitch_type/subcategory/min-length become hard filters
@@ -58,7 +58,7 @@ def _build_metadata_filters(state: dict) -> dict[str, Any]:
     rerank to weigh but are never gated on in the query itself
     (milestone.md M6 step 2).
     """
-    category = state.get("category") or ""
+    category = category or state.get("category") or ""
     slots = state.get("slots", {}) or {}
     filters: dict[str, Any] = {}
     for slot_name, value in slots.items():
@@ -76,33 +76,30 @@ def _build_metadata_filters(state: dict) -> dict[str, Any]:
     return filters
 
 
-def search_node(state: dict) -> dict:
-    assert state.get("qualification_complete"), "search_node requires qualification_complete"
-    outcome = state.setdefault("turn_outcome", {})
-    category = state.get("category")
-    slots = state.get("slots", {}) or {}
-    metadata_filters = _build_metadata_filters(state)
-    # Every non-searchable preference they have voiced so far (sliding gates, tandem axle, ramp),
-    # not just this turn's — the feature reranker scores the customer's full spec, not their
-    # last line.
-    requested_features, _ = sanitize_non_metadata_features(
-        state.get("non_metadata_features", []) or []
-    )
-    # Repair feature phrases persisted by an older Analyze prompt as well:
-    # ["insulated", "insulated enclosed"] becomes ["insulated"].
-    state["non_metadata_features"] = requested_features
-    shown_urls = state.get("shown_urls", []) or []
+# Several types at once (state["candidate_categories"]): each is searched and ranked on its
+# own, and this many of each are shown - so one type's best never crowds out another's.
+# More types than this table covers are searched together instead, as every type.
+PER_TYPE_RESULTS = {2: 3, 3: 2}
 
-    logger.info(
-        "TOOL search: session=%s category=%s filters=%s features=%s already_shown=%d",
-        state.get("session_id"), category, metadata_filters, requested_features, len(shown_urls),
-    )
-    # Set here, beside the tool-call log line, so it exists if and only if a search really ran.
-    # Published to turn_status as well as the outcome: the outcome reaches the client when the
-    # turn ends, but the UI is waiting NOW and polls turn_status to show this during the search.
-    status_line = pick_search_status_line()
-    outcome["search_status_message"] = status_line
-    turn_status.publish(state.get("session_id"), status_line)
+
+def types_to_search(state: dict) -> list[str | None]:
+    """The categories this search covers: the chosen one, each wanted one, or None for all."""
+    if state.get("category"):
+        return [state["category"]]
+    wanted = list(state.get("candidate_categories") or [])
+    if len(wanted) in PER_TYPE_RESULTS:
+        return wanted
+    return [None]
+
+
+def _search_one(
+    state: dict, category: str | None, max_recommendations: int,
+    requested_features: list[str], shown_urls: list[str],
+) -> tuple[list[dict[str, Any]], dict[str, Any], bool, bool]:
+    """One category's search, with the usual fallbacks. Returns the results, the filters, and
+    whether the brand or the other hard filters had to be let go."""
+    slots = state.get("slots", {}) or {}
+    metadata_filters = _build_metadata_filters(state, category)
 
     results = search_listings(
         category=category,
@@ -110,7 +107,7 @@ def search_node(state: dict) -> dict:
         metadata_filters=metadata_filters,
         requested_features=requested_features,
         already_shown_urls=shown_urls,
-        max_recommendations=settings.search_max_recommendations,
+        max_recommendations=max_recommendations,
     )
 
     brand_relaxed = False
@@ -128,7 +125,7 @@ def search_node(state: dict) -> dict:
             metadata_filters=relaxed_filters,
             requested_features=requested_features,
             already_shown_urls=shown_urls,
-            max_recommendations=settings.search_max_recommendations,
+            max_recommendations=max_recommendations,
         )
         brand_relaxed = True
 
@@ -154,10 +151,62 @@ def search_node(state: dict) -> dict:
             metadata_filters=metadata_filters,
             requested_features=requested_features,
             already_shown_urls=shown_urls,
-            max_recommendations=settings.search_max_recommendations,
+            max_recommendations=max_recommendations,
             category_only_filters=True,
         )
         filters_relaxed = bool(results)
+    return results, metadata_filters, brand_relaxed, filters_relaxed
+
+
+def search_node(state: dict) -> dict:
+    assert state.get("qualification_complete"), "search_node requires qualification_complete"
+    outcome = state.setdefault("turn_outcome", {})
+    types = types_to_search(state)
+    if types == [None]:
+        # No type, or more of them than are searched one by one: every type, ranked on the specs.
+        outcome["all_types"] = True
+    if len(types) > 1:
+        outcome["several_types"] = list(types)
+    per_type = PER_TYPE_RESULTS.get(len(types), settings.search_max_recommendations)
+    # Every non-searchable preference they have voiced so far (sliding gates, tandem axle, ramp),
+    # not just this turn's — the feature reranker scores the customer's full spec, not their
+    # last line.
+    requested_features, _ = sanitize_non_metadata_features(
+        state.get("non_metadata_features", []) or []
+    )
+    # Repair feature phrases persisted by an older Analyze prompt as well:
+    # ["insulated", "insulated enclosed"] becomes ["insulated"].
+    state["non_metadata_features"] = requested_features
+    shown_urls = state.get("shown_urls", []) or []
+
+    # Set here, beside the tool-call log line, so it exists if and only if a search really ran.
+    # Published to turn_status as well as the outcome: the outcome reaches the client when the
+    # turn ends, but the UI is waiting NOW and polls turn_status to show this during the search.
+    status_line = pick_search_status_line()
+    outcome["search_status_message"] = status_line
+    turn_status.publish(state.get("session_id"), status_line)
+
+    results: list[dict[str, Any]] = []
+    brand_relaxed = filters_relaxed = False
+    relaxed_labels: list[str] = []
+    metadata_filters: dict[str, Any] = {}
+    for category in types:
+        logger.info(
+            "TOOL search: session=%s category=%s filters=%s features=%s already_shown=%d",
+            state.get("session_id"), category, _build_metadata_filters(state, category),
+            requested_features, len(shown_urls),
+        )
+        found, metadata_filters, brand_off, filters_off = _search_one(
+            state, category, per_type, requested_features, shown_urls,
+        )
+        results.extend(found)
+        brand_relaxed = brand_relaxed or brand_off
+        if filters_off:
+            filters_relaxed = True
+            relaxed_labels += [
+                label for label in _relaxed_filter_labels(state, metadata_filters)
+                if label not in relaxed_labels
+            ]
 
     logger.info(
         "TOOL search: session=%s results=%d brand_relaxed=%s filters_relaxed=%s urls=%s",
@@ -179,11 +228,12 @@ def search_node(state: dict) -> dict:
         outcome["brand_relaxed"] = True
     if filters_relaxed:
         outcome["filters_relaxed"] = True
-        outcome["relaxed_filters_dropped"] = _relaxed_filter_labels(state, metadata_filters)
+        outcome["relaxed_filters_dropped"] = relaxed_labels
 
     if results:
         filter_desc = ", ".join(f"{key}={value}" for key, value in metadata_filters.items())
-        description = f"Inventory search — {len(results)} results — {category or 'Unknown'}"
+        searched = ", ".join(category for category in types if category) or "All types"
+        description = f"Inventory search — {len(results)} results — {searched}"
         if filter_desc:
             description += f" ({filter_desc})"
         outcome.setdefault("system_email_triggers", []).append(

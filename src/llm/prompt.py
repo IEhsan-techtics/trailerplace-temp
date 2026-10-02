@@ -87,7 +87,14 @@ in next_question_text only, your own words, naming four to six of OUR CATEGORIES
 Their cargo or job clearly fits ONE of our categories and none is set yet ("my mini excavator"
 -> Equipment, "gravel" -> Dump, "cattle" -> Livestock, "my food truck business" -> Concession)
 -> category_mentioned = that category. That IS their choice: do not ask them to confirm it.
-If several fit equally, leave it null and recommend.
+
+SEVERAL TYPES. No category set yet, and what they said in the conversation points at two or
+more of OUR CATEGORIES -> category_mentioned = one of them, more_categories = the others:
+  "I'm towing heavy equipment and cars" -> Equipment, more_categories ["Car Hauler"]
+  "both" / "either" / "all of them" after we offered types -> the types we offered
+  "a dump or an enclosed" -> Dump, more_categories ["Enclosed"]
+Read the whole conversation, not only this message. Name every type they point at, however
+many. Specs alone still choose nothing. A category already set -> more_categories = [].
 
 SPECS ALONE NEVER CHOOSE A CATEGORY. Sizes, walls or sides, axles, lugs, tires, colour, a
 budget - with no trailer type named and no cargo or job - fit several of our categories ("a

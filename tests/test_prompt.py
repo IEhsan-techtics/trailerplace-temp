@@ -346,7 +346,10 @@ def test_the_configured_wording_of_every_remaining_question_is_given():
 #
 # Raised from 14,000 for listing_url and shared_link_interest (14,146): a customer pasting one
 # of our listing links, or a Facebook or Instagram post, had no field to land in.
-MAX_RESPONSE_SCHEMA_CHARS = 14_500
+#
+# Raised from 14,500 for more_categories (14,570): "heavy equipment and cars" and "Both" name
+# two types at once, and category_mentioned holds one.
+MAX_RESPONSE_SCHEMA_CHARS = 14_700
 
 
 def test_the_response_schema_stays_short():

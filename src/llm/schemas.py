@@ -171,6 +171,7 @@ class ChatbotTurnOutput(StrictBaseModel):
             "Null for none, 'not sure', or specs alone (sizes, walls, axles, tires, colour)."
         )
     )
+    more_categories: list[str] = Field(description="Other types they want too (SEVERAL TYPES), else [].")
     is_category_info_only: bool = Field(description="True when asking ABOUT a category, not choosing it.")
     unavailable_type_requested: str | None = Field(
         description="A trailer type they want that we do not stock, in their words, else null."

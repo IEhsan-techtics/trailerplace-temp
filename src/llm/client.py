@@ -64,6 +64,7 @@ def empty_output(reason: str = "") -> ChatbotTurnOutput:
         turn_summary=reason or "The assistant could not read this message.",
         intent="smalltalk_other",
         category_mentioned=None,
+        more_categories=[],
         is_category_info_only=False,
         extracted=ExtractedFields(
             length=None, width=None, height=None, payload_capacity=None,

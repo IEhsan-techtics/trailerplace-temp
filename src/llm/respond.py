@@ -208,6 +208,15 @@ def _state_line(state: dict, turn: Any) -> str:
             "ask whether any of these types interests them or whether they have a certain type "
             "in mind. That is the one question."
         )
+    several = (state.get("turn_outcome") or {}).get("several_types")
+    if several:
+        # They want more than one type, so each was searched and ranked on its own.
+        lines.append(
+            f"- They want more than one TYPE of trailer: {', '.join(several)}. The trailers are the "
+            "best few of EACH type, ranked separately, in that order. Say that in the line before "
+            "the first card, in your own words. After the last card, instead of the usual closing "
+            "question, ask which of these types suits them better. That is the one question."
+        )
     idle = bool((state.get("turn_outcome") or {}).get("idle_results"))
     # Not on the idle turn: it follows their first message without one of its own, and live it
     # opened with the thanks a second time.

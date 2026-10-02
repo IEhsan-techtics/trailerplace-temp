@@ -48,7 +48,7 @@ def _route(state: dict, output: Any) -> list[str]:
     """
     targets: list[str] = []
 
-    if state.get("qualification_complete") and state.get("category"):
+    if state.get("qualification_complete") and (state.get("category") or state.get("candidate_categories")):
         targets.append("search")
 
     # The structural gate, not just is_lookup+confidence: a bare make is a brand preference
