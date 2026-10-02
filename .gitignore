@@ -18,3 +18,6 @@ wheels/
 # Daily log files written by src/log_setup.py
 logs/
 ~$*
+
+# Customer chats pulled from the deployed bot - they hold real names, phones and emails
+deployed chat logs/
