@@ -121,6 +121,43 @@ def test_three_messages_in_a_row_become_ONE_turn():
     assert len(results) == 1 and bodies() == []
 
 
+def test_the_search_line_goes_out_only_on_the_turn_that_searched():
+    """Max Creed, 1 Oct: one search, then three more turns that each sent "Give me a moment".
+
+    The line the search published was never cleared on this path, so every later turn's
+    keep-alive found it and sent it again.
+    """
+    from src import turn_status
+
+    line = "Give me a moment - I'll check what matches your requirements."
+    sent = []
+
+    class Transport:
+        def send_text(self, _recipient, text):
+            sent.append(text)
+
+        def send_card(self, _recipient, _element):
+            pass
+
+        def send_action(self, _recipient, _action):
+            pass
+
+    messages = ["6x12 single axle utility", "max@example.com", "I'm at work", "Ok thanks"]
+
+    def answer(session_id, message, *, turn_id=None, abandon_if=None, channel_id=None):
+        if message == messages[0]:
+            turn_status.publish(session_id, line)  # only this turn searches
+        time.sleep(0.8)  # long enough for the keep-alive to look
+        return {"assistant_text": "Noted.", "listings": []}
+
+    for number, message in enumerate(messages):
+        record(f"max-{number}", message, seconds=number)
+        inbound.drain_inbound(PSID, answer=answer, transport=Transport())
+
+    assert sent.count(line) == 1
+    assert turn_status.peek(conversation_store.session_uuid_for(PSID)) is None
+
+
 def test_the_turn_runs_against_the_session_that_psid_maps_to():
     sessions = []
 

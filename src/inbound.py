@@ -413,13 +413,21 @@ def drain_inbound(
 @contextmanager
 def _keep_alive(turn_session: str, transport: Any, *, recipient_id: str | None = None):
     """Show them we are on it while the turn runs. Nothing at all without a transport."""
-    if transport is None:
-        yield None
-        return
-    from src.channel_delivery import TurnKeepAlive
+    from src import turn_status
 
-    with TurnKeepAlive(turn_session, transport, recipient_id=recipient_id) as alive:
-        yield alive
+    # Cleared at both ends, as the web chat does: a search line left over from an earlier
+    # turn would otherwise be sent again on every later turn, searching or not.
+    turn_status.clear(turn_session)
+    try:
+        if transport is None:
+            yield None
+            return
+        from src.channel_delivery import TurnKeepAlive
+
+        with TurnKeepAlive(turn_session, transport, recipient_id=recipient_id) as alive:
+            yield alive
+    finally:
+        turn_status.clear(turn_session)
 
 
 def _sends_for(channel: str, result: dict[str, Any]) -> list[tuple[str, Any]] | None:
