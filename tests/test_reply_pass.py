@@ -320,3 +320,69 @@ def test_pitch_features_treats_anything_but_a_list_as_none(empty):
     assert pitch_features(empty) == []
     assert pitch_features(np.float64("nan")) == []
     assert pitch_features(np.array(["Tarp kit", "Ramps"], dtype=object)) == ["Tarp kit", "Ramps"]
+
+
+# ------------------------------------------------------------- a link the model copied wrong
+REAL = "https://www.trailerplace.com/inventory/2026-pc-ta-utility-4k-77-x-12-52747/"
+OTHER = "https://www.trailerplace.com/inventory/2026-iron-bull-trailers-utility-13186/"
+
+
+def test_a_mistyped_link_is_replaced_by_the_real_one():
+    """Live: the model dropped "ta-" from this slug, so the link was dead and no card was drawn."""
+    from src.llm.respond import _with_real_links
+
+    typo = "https://www.trailerplace.com/inventory/2026-pc-utility-4k-77-x-12-52747/"
+    text = f"6. [2026 P&C TA Utility 4k 77\" x 12' - 52747]({typo})"
+    mended = _with_real_links([{"url": OTHER}, {"url": REAL}], text)
+    assert mended == f"6. [2026 P&C TA Utility 4k 77\" x 12' - 52747]({REAL})"
+
+
+def test_a_bare_mistyped_link_is_replaced_too():
+    from src.llm.respond import _with_real_links
+
+    typo = "https://www.trailerplace.com/inventory/pc-utility-52747"
+    assert _with_real_links([{"url": REAL}], f"See {typo} for photos.") == f"See {REAL} for photos."
+
+
+def test_correct_links_are_left_alone():
+    from src.llm.respond import _with_real_links
+
+    text = f"1. [A]({OTHER})\n2. [B]({REAL})"
+    assert _with_real_links([{"url": OTHER}, {"url": REAL}], text) == text
+
+
+@pytest.mark.parametrize("served", [
+    [],                                                       # no trailer has that stock number
+    [{"url": OTHER}],
+    [{"url": REAL}, {"url": REAL.replace("2026-pc-ta", "2027-pc-ta")}],   # two do: no guessing
+])
+def test_a_link_with_no_single_match_is_left_as_written(served):
+    from src.llm.respond import _with_real_links
+
+    text = "[X](https://www.trailerplace.com/inventory/something-else-52747/)"
+    assert _with_real_links(served, text) == text
+
+
+def test_the_mended_trailer_is_cited_and_goes_out_as_a_card(monkeypatch):
+    """End to end through the reply pass: the repair happens before the cited check, so the
+    trailer is recorded as shown and Messenger draws it as a card."""
+    from src.domain.cards import messenger_sends
+    from src.graph import agent
+    from src.llm import respond
+
+    listing = {"title": "2026 P&C TA Utility 4k 77\" x 12' - 52747", "url": REAL,
+               "price_display": "$2,850"}
+    typo = "https://www.trailerplace.com/inventory/2026-pc-utility-4k-77-x-12-52747/"
+
+    def fake_agent(runner, _prompt, _messages):
+        runner._remember([listing])
+        return f"Here's one that fits:\n\n1. [{listing['title']}]({typo})\n   - Price: $2,850"
+
+    monkeypatch.setattr(agent, "run_agent", fake_agent)
+    monkeypatch.setattr(respond, "build_system_prompt", lambda *_a: "")
+    reply = respond.respond_with_tools(_qualified_state(), turn_output(), "show me")
+
+    assert reply.cited_listing_urls == [REAL]
+    assert typo not in reply.assistant_text
+    sends = messenger_sends(reply.assistant_text, [listing], cards_enabled=True)
+    assert ("card" in [kind for kind, _ in sends])

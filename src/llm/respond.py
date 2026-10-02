@@ -364,6 +364,48 @@ def _messages(state: dict, user_message: str) -> list:
     return messages
 
 
+# A trailer link in the reply, and the stock number its slug ends on ("...-x-12-52747/").
+_INVENTORY_URL_RE = re.compile(r"https?://[^\s()<>\]]+/inventory/[^\s()<>\]]+")
+_STOCK_SUFFIX_RE = re.compile(r"-([0-9A-Za-z]+)/?$")
+
+
+def _stock_suffix(url: str) -> str | None:
+    match = _STOCK_SUFFIX_RE.search(str(url or "").strip())
+    return match.group(1).lower() if match else None
+
+
+def _with_real_links(listings: list, reply_text: str, session_id: Any = None) -> str:
+    """Put back the real link wherever the model copied one wrong.
+
+    Live, it wrote ".../2026-pc-utility-4k-77-x-12-52747/" for ".../2026-pc-ta-utility-...":
+    the customer got a dead link, and the trailer went out as plain text rather than a card
+    because nothing matched it. The stock number at the end of the slug is what identifies
+    the trailer, so a link is mended when exactly one trailer the tools returned ends on the
+    same one. Anything else is left as written.
+    """
+    served = [
+        str((listing.get("url") if isinstance(listing, dict) else None) or "").strip()
+        for listing in listings
+    ]
+    served = [url for url in served if url]
+    exact = {url.rstrip("/").lower() for url in served}
+
+    def _mend(match: re.Match) -> str:
+        written = match.group(0)
+        if written.rstrip("/").lower() in exact:
+            return written
+        stock = _stock_suffix(written)
+        candidates = [url for url in served if stock and _stock_suffix(url) == stock]
+        if len(candidates) != 1:
+            return written
+        logger.info(
+            "REPLY link mended: session=%s wrote=%s real=%s", session_id, written, candidates[0]
+        )
+        return candidates[0]
+
+    return _INVENTORY_URL_RE.sub(_mend, reply_text)
+
+
 def _cited_urls(listings: list, reply_text: str) -> list[str]:
     """Which of the trailers the tools returned actually made it into the reply.
 
@@ -507,6 +549,7 @@ def respond_with_tools(
         text = _with_the_types_closing(runner, system_prompt, messages, text, state)
 
     text = _with_a_lead_in(text)
+    text = _with_real_links(runner.served_listings, text, state.get("session_id"))
     cited = _cited_urls(runner.served_listings, text)
     logger.info(
         "REPLY written: session=%s tools=%s cited=%d",
