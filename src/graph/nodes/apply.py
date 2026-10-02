@@ -74,6 +74,7 @@ def apply_node(state: dict, output: Any, user_message: str = "") -> dict:
     state["invalid_retry_slot"] = None
     state["invalid_retry_reason"] = None
     features_before = len(state.get("non_metadata_features") or [])
+    held_before = bool(state.get("pending_axle_basis"))
 
     _apply_contact(state, output)
     _note_shared_platforms(state, user_message)
@@ -130,7 +131,7 @@ def apply_node(state: dict, output: Any, user_message: str = "") -> dict:
     _report_questions_we_gave_up_on(state)
     _apply_refined_search(state, output, result)
     _apply_results_gate(state, output)
-    _apply_new_detail(state, result, features_before)
+    _apply_new_detail(state, result, features_before, held_before)
 
     outcome["applied_slots"] = dict(result.stored)
     outcome["declined_this_turn"] = list(result.no_preference)
@@ -1138,25 +1139,27 @@ def _apply_refined_search(state: dict, output: Any, result: Any) -> None:
     )
 
 
-def _apply_new_detail(state: dict, result: Any, features_before: int) -> None:
+def _apply_new_detail(state: dict, result: Any, features_before: int, held_before: bool) -> None:
     """A new detail after they have seen trailers earns one more showing (src/idle_timer.py).
 
-    Only a detail counts - a size, a weight, a feature, their cargo. Nothing stored means
-    nothing new, so "ok thanks" or a question about our hours never brings the trailers back.
+    Only a detail counts - a size, a weight, a feature, their cargo, or an axle capacity we
+    are holding until they say per axle or total. Nothing new means nothing comes back, so
+    "ok thanks" or a question about our hours never brings the trailers back.
     """
+    outcome = state["turn_outcome"]
+    if not state.get("qualification_complete") and "shown_before_refine" in outcome:
+        # No search this turn, so the refinement's fresh start is not needed: what they have
+        # seen stays seen, and the next set leaves it out.
+        state["shown_urls"] = outcome.pop("shown_before_refine")
     if not state.get("results_shown"):
         return
     added_feature = len(state.get("non_metadata_features") or []) > features_before
-    if not (result.stored or added_feature):
+    newly_held = bool(state.get("pending_axle_basis")) and not held_before
+    if not (result.stored or added_feature or newly_held):
         return
     from src import idle_timer
 
     idle_timer.allow_another_showing(state)
-    outcome = state["turn_outcome"]
-    if not state.get("qualification_complete") and "shown_before_refine" in outcome:
-        # No search this turn, so the refinement's fresh start is not needed: the showing the
-        # timer brings leaves out what they have already seen.
-        state["shown_urls"] = outcome.pop("shown_before_refine")
     logger.info("IDLE another showing allowed: session=%s new=%s", state.get("session_id"), sorted(result.stored))
 
 

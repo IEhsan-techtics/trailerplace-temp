@@ -435,3 +435,47 @@ def test_a_new_feature_counts_as_a_new_detail(new_path, no_search):
     run_turn("s-again", "it needs a winch")
 
     assert conversation_store.armed_timer("s-again")["category"] == idle_timer.ALL_TYPES
+
+
+def test_an_axle_capacity_held_for_our_question_counts_as_a_new_detail(new_path, no_search):
+    """Live: Dump trailers shown, then "14,000 lbs of axle capacity" - held for "per axle or
+    total?" rather than stored, so it did not count and the timer never came back."""
+    from src import conversation_store, idle_sweep
+    from src.graph.build import run_turn
+    from src.graph.state import from_snapshot
+    from tests.factories import complete_welcome, turn_output
+
+    complete_welcome(new_path, session_id="s-held")
+    new_path.push(turn_output(intent="category_selection", category_mentioned="Dump"))
+    run_turn("s-held", "I need a dump trailer")
+    assert [r["status"] for r in idle_sweep.sweep(now=_later())] == ["fired"]
+    seen = from_snapshot("s-held", conversation_store.load_session("s-held")[0])["shown_urls"]
+
+    new_path.push(turn_output(intent="requirement_change", extracted={"axle_capacity": 14000.0}))
+    run_turn("s-held", "it needs 14,000 lbs of axle capacity")
+
+    state = from_snapshot("s-held", conversation_store.load_session("s-held")[0])
+    assert state["pending_axle_basis"]
+    assert state["shown_urls"] == seen, "no search ran, so what they saw stays seen"
+    assert conversation_store.armed_timer("s-held")["category"] == "Dump"
+
+
+def test_several_types_and_a_held_capacity_restart_their_timer(new_path, no_search):
+    from src import conversation_store
+    from src.graph.build import run_turn
+    from src.graph.state import from_snapshot
+    from tests.factories import complete_welcome, turn_output
+
+    complete_welcome(new_path, session_id="s-held2")
+    new_path.push(turn_output(intent="recommendation_request", category_mentioned="Equipment",
+                              more_categories=["Car Hauler"]))
+    run_turn("s-held2", "I'm towing heavy equipment and cars")
+    seen = from_snapshot("s-held2", conversation_store.load_session("s-held2")[0])["shown_urls"]
+    assert seen
+
+    new_path.push(turn_output(intent="requirement_change", extracted={"axle_capacity": 14000.0}))
+    run_turn("s-held2", "it needs 14,000 lbs of axle capacity")
+
+    state = from_snapshot("s-held2", conversation_store.load_session("s-held2")[0])
+    assert state["shown_urls"] == seen
+    assert conversation_store.armed_timer("s-held2")["category"] == "Equipment + Car Hauler"
