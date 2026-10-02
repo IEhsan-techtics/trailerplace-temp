@@ -781,6 +781,7 @@ def _apply_axles(state: dict, output: Any, user_message: str, result: Any) -> No
     if held:
         _resolve_held_capacity(state, held, user_message, model_basis, result)
     else:
+        _file_gvwr_as_the_total(state, user_message, result)
         _hold_unclear_capacity(state, output, user_message, model_basis, result)
 
     _apply_axle_count(state, output, user_message, result)
@@ -817,6 +818,28 @@ def _resolve_held_capacity(state: dict, held: dict, user_message: str,
     result.stored[slot] = value
     state["pending_axle_basis"] = None
     logger.info("AXLE capacity %s resolved as %s: session=%s", value, basis, state.get("session_id"))
+
+
+def _file_gvwr_as_the_total(state: dict, user_message: str, result: Any) -> None:
+    """A GVWR is the trailer's total rating, so it belongs in total_axle_capacity_lbs.
+
+    Live, "36 ft / I need 14k / Gvwr" was filed as the load weight on one read and dropped on
+    the next, while the reply told the customer it was noted. Whatever field the model put the
+    number in this turn, a message that names the GVWR has it moved to the total.
+    """
+    if not axles.names_gvwr(user_message) or "total_axle_capacity_lbs" in result.stored:
+        return
+    for slot in ("axle_capacity", "payload_capacity"):
+        if slot in result.stored:
+            value = float(result.stored[slot])
+            _unstore(state, slot, result)
+            state.setdefault("slots", {})["total_axle_capacity_lbs"] = value
+            mark_user_value(state, "total_axle_capacity_lbs")
+            result.stored["total_axle_capacity_lbs"] = value
+            logger.info(
+                "AXLE GVWR %s filed as the total, not %s: session=%s", value, slot, state.get("session_id")
+            )
+            return
 
 
 def _hold_unclear_capacity(state: dict, output: Any, user_message: str,

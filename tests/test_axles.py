@@ -309,3 +309,55 @@ def test_conventional_per_axle_wording_is_per_axle_even_when_the_model_says_uncl
     """Live: "5k axles" came back unclear and was held for a question it never needed."""
     assert axles.infer_basis("5k axles", "unclear") == "per_axle"
     assert axles.infer_basis("7,000 lb axles", None) == "per_axle"
+
+
+# ------------------------------------------------------------------------------ a GVWR
+def test_a_gvwr_is_a_total_whatever_the_model_says():
+    assert axles.infer_basis("36 ft\nI need 14k\nGvwr", "unclear") == "total"
+    assert axles.infer_basis("a 14,000 GVW trailer", "per_axle") == "total"
+    assert axles.infer_basis("14k gross vehicle weight rating", None) == "total"
+
+
+def test_gvwr_wording_is_recognised_and_ordinary_words_are_not():
+    assert axles.names_gvwr("14k GVWR") and axles.names_gvwr("gvw 10000")
+    assert not axles.names_gvwr("give me 14k of payload")
+
+
+def test_a_gvwr_the_model_filed_as_the_load_goes_to_the_total(fake_llm):
+    """Live: "36 ft / I need 14k / Gvwr" was read as the load weight, then dropped on a re-read."""
+    dump_trailer(fake_llm)
+    say(fake_llm, "36 ft\nI need 14k\nGvwr", extracted={"length": 36.0, "payload_capacity": 14000.0})
+
+    state = state_after()
+    assert state["slots"]["total_axle_capacity_lbs"] == 14000.0
+    assert "payload_capacity" not in state["slots"]
+    assert state["slot_sources"]["total_axle_capacity_lbs"] == "user"
+
+
+def test_a_gvwr_filed_as_an_unclear_axle_rating_is_the_total_and_not_asked_about(fake_llm):
+    dump_trailer(fake_llm)
+    say(fake_llm, "14k GVWR", extracted={"axle_capacity": 14000.0, "axle_capacity_basis": "unclear"})
+
+    state = state_after()
+    assert state["slots"]["total_axle_capacity_lbs"] == 14000.0
+    assert "axle_capacity" not in state["slots"]
+    assert not state.get("pending_axle_basis")
+    assert not state.get("pending_axle_count")
+
+
+def test_a_gvwr_is_kept_before_any_trailer_type_is_chosen(fake_llm):
+    """Imad had given no type yet; his 14k must still be held for the search."""
+    complete_welcome(fake_llm)
+    say(fake_llm, "36 ft\nI need 14k\nGvwr", extracted={"length": 36.0, "payload_capacity": 14000.0})
+
+    state = state_after()
+    assert state["category"] is None
+    assert state["slots"]["total_axle_capacity_lbs"] == 14000.0
+
+
+def test_the_model_filing_the_total_itself_is_left_as_it_is(fake_llm):
+    dump_trailer(fake_llm)
+    say(fake_llm, "14k GVWR",
+        extracted={"total_axle_capacity_lbs": 14000.0, "axle_capacity_basis": "total"})
+
+    assert state_after()["slots"]["total_axle_capacity_lbs"] == 14000.0

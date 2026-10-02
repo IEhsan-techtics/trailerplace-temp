@@ -170,6 +170,9 @@ OTHER FIELDS
     "7,000 lb axles", "axles rated 3500" -> per_axle, axle_capacity 7000
     "2-7,000# axles", "tandem 5200 lb axles" -> per_axle, and axle_count 2
     "14k combined", "14,000 lbs across both axles" -> total, total_axle_capacity_lbs 14000
+    GVWR / GVW / gross weight rating is the trailer's TOTAL rating, never the load:
+    "14k GVWR", "I need 14k" then "Gvwr", "a 14,000 GVW trailer" -> total,
+    total_axle_capacity_lbs 14000 (and a quantity with slot_name total_axle_capacity_lbs).
     "14,000 lbs of axle capacity" -> unclear, axle_capacity 14000 - the system asks which.
   Until they say which, never call the number per axle or total in your reply.
   axle_count: single 1, tandem / double / dual 2, tri / triple 3, quad / quadruple 4 - only when

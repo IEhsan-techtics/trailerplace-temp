@@ -41,12 +41,23 @@ _NO_PREFERENCE_RE = re.compile(
 )
 
 
+# "14k GVWR", "GVW", "gross weight rating" - the trailer's rating as a whole, so the total.
+_GVWR_RE = re.compile(r"\bgvw\s*r?\b|\bgross\s+(?:vehicle\s+)?weight\b", re.I)
+
+
+def names_gvwr(text: str) -> bool:
+    return bool(_GVWR_RE.search(str(text or "")))
+
+
 def infer_basis(text: str, model_basis: str | None) -> str | None:
     """The model's basis, unless the wording is a bare "axle capacity" with no marker.
 
     Only ever promotes to "unclear": wording that genuinely says which is left to the model.
+    The exception is a GVWR, which is a total by definition and never worth a question.
     """
     words = str(text or "")
+    if names_gvwr(words):
+        return "total"
     if _PER_AXLE_REPLY_RE.search(words) or _TOTAL_REPLY_RE.search(words):
         return model_basis
     if _PER_AXLE_WORDING_RE.search(words):
