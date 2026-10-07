@@ -79,10 +79,12 @@ class MessengerTransport:
     still go out. Losing one trailer is bad; losing the closing question with it is worse.
     """
 
-    def send_text(self, psid: str, text: str) -> None:
+    def send_text(self, psid: str, text: str) -> bool:
+        """True when Meta accepted it. The follow-up agent records a follow-up as sent only
+        then; every other caller ignores the result."""
         if not str(text or "").strip():
-            return
-        self._post({
+            return False
+        return self._post({
             "recipient": {"id": psid},
             "messaging_type": "RESPONSE",
             "message": {"text": text},
@@ -110,7 +112,7 @@ class MessengerTransport:
         """mark_seen / typing_on / typing_off. Cosmetic, so a failure is never fatal."""
         self._post({"recipient": {"id": psid}, "sender_action": action})
 
-    def _post(self, payload: dict) -> None:
+    def _post(self, payload: dict) -> bool:
         url = _GRAPH_URL.format(version=settings.messenger_graph_api_version)
         try:
             response = requests.post(
@@ -121,7 +123,7 @@ class MessengerTransport:
             )
         except requests.RequestException:
             logger.exception("MESSENGER send failed (network)")
-            return
+            return False
         if response.status_code >= 400:
             # The token and the recipient are the usual culprits. Log the body, never the
             # token - it is in the query string and would end up in the log file.
@@ -129,6 +131,8 @@ class MessengerTransport:
                 "MESSENGER send rejected: status=%s body=%s",
                 response.status_code, response.text[:500],
             )
+            return False
+        return True
 
 
 # ------------------------------------------------------- duplicate suppression

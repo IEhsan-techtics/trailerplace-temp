@@ -278,6 +278,35 @@ class ChatbotOutbox(Base):
     origin: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
+class ChatbotFollowup(Base):
+    """One follow-up decision for one silence (src/followup).
+
+    A silence is anchored on the customer's last turn, so a reply starts a new one. Up to two
+    attempts per silence. The row is written BEFORE the model is asked or anything is sent -
+    the unique key is what stops two runs messaging the same customer twice - and a row left
+    in "deciding" or "sending" by a run that died is never retried.
+    """
+
+    __tablename__ = "chatbot_followups"
+    __table_args__ = (
+        UniqueConstraint("session_id", "anchor_turn_id", "attempt", name="uq_chatbot_followups_attempt"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    psid: Mapped[str] = mapped_column(String(255), nullable=False)
+    anchor_turn_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False)
+    # deciding -> skipped | sending -> sent | failed
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    scenario: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class ChatbotQuestionRules(Base):
     """Versions of the question-rules document (src/rules). Every save is a new row.
 

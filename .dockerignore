@@ -21,6 +21,11 @@ __pycache__/
 # and one context feeds both builds.
 scripts/
 tests/
+# Customer conversations pulled from the deployed bot, and local benchmark output: personal
+# data and scratch, never something the image reads.
+deployed chat logs/
+benchmark_results/
+deploy/
 pytest.ini
 *.md
 ~$*

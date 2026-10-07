@@ -207,6 +207,25 @@ class Settings:
     # Send the "let me check what we have" line the moment the search starts, rather than
     # leaving the customer with nothing until the trailers land.
     messenger_send_search_status: bool = True
+    # ---- the follow-up agent (src/followup) ----
+    # Off by default, so a laptop pointed at the production database can never message a
+    # customer; only the Azure job turns it on. The idle clock taught that lesson: a local
+    # process took live customers' timers and could not deliver them.
+    followup_enabled: bool = False
+    # Hours after our last message before follow-up 1, and before follow-up 2 (same anchor).
+    followup_first_after_hours: float = 2.0
+    followup_second_after_hours: float = 4.0
+    # How many user/assistant exchanges the model reads.
+    followup_history_pairs: int = 7
+    # Facebook lets a page message someone freely only within 24 h of their last message;
+    # the margin keeps a slow run from landing just outside it.
+    followup_window_hours: float = 23.5
+    followup_model: str = "gpt-6-luna"
+    # A ceiling per run, so one bad hour cannot message everyone at once.
+    followup_max_per_run: int = 50
+    # Testing only: when set, a run considers this one Messenger PSID and nobody else - so the
+    # whole Azure path can be tried on our own account without touching a customer.
+    followup_only_psid: str = ""
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -294,6 +313,14 @@ class Settings:
             messenger_chunk_pause_seconds=_float(_env("MESSENGER_CHUNK_PAUSE_SECONDS"), 0.8),
             messenger_typing_refresh_seconds=_float(_env("MESSENGER_TYPING_REFRESH_SECONDS"), 10.0),
             messenger_send_search_status=_bool(_env("MESSENGER_SEND_SEARCH_STATUS"), True),
+            followup_enabled=_bool(_env("FOLLOWUP_ENABLED")),
+            followup_first_after_hours=_float(_env("FOLLOWUP_FIRST_AFTER_HOURS"), 2.0),
+            followup_second_after_hours=_float(_env("FOLLOWUP_SECOND_AFTER_HOURS"), 4.0),
+            followup_history_pairs=_int(_env("FOLLOWUP_HISTORY_PAIRS"), 7),
+            followup_window_hours=_float(_env("FOLLOWUP_WINDOW_HOURS"), 23.5),
+            followup_model=_env("FOLLOWUP_MODEL") or _env("CHAT_MODEL", "gpt-6-luna"),
+            followup_max_per_run=_int(_env("FOLLOWUP_MAX_PER_RUN"), 50),
+            followup_only_psid=_env("FOLLOWUP_ONLY_PSID", ""),
         )
 
 
