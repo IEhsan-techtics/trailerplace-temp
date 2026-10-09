@@ -20,6 +20,7 @@ from sqlalchemy.exc import IntegrityError
 
 from src import db
 from src.config import settings
+from src.conversation_store import COMMENT_HANDOFF_MARKER
 from src.db_models import (
     ChatbotConversation,
     ChatbotFollowup,
@@ -72,9 +73,13 @@ def _is_followup(request_message: str) -> bool:
     return str(request_message or "").startswith(FOLLOWUP_MARKER)
 
 
+def _is_comment_handoff(request_message: str) -> bool:
+    return str(request_message or "").startswith(COMMENT_HANDOFF_MARKER)
+
+
 def _is_customer_turn(request_message: str) -> bool:
     text = str(request_message or "")
-    return not (_is_followup(text) or text == _IDLE_MESSAGE)
+    return not (_is_followup(text) or text == _IDLE_MESSAGE or _is_comment_handoff(text))
 
 
 def find_candidates(now: datetime, *, ignore_timing: bool = False, lookback_hours: float | None = None) -> list[Candidate]:
@@ -142,6 +147,10 @@ def find_candidates(now: datetime, *, ignore_timing: bool = False, lookback_hour
             continue
         anchor = customer_turns[-1]
         ours = [t for t in history if not _is_followup(t.request_message)]
+        if ours and _is_comment_handoff(ours[-1].request_message):
+            # Our last word is the private reply to their comment. Meta allows nothing more
+            # until they answer it, so there is nobody here to follow up with yet.
+            continue
         last_bot_at = ours[-1].created_at
         last_sent, pending = inbound.get(lead.psid, (None, 0))
         last_customer_at = last_sent or anchor.created_at

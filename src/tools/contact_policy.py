@@ -7,7 +7,9 @@ worth something to the customer, every time one of them comes round, until we ha
 * we have just SHOWN them trailers - the team is told what they saw, and needs to know who;
 * we have just answered one of the STANDARD questions (hours, financing, trade-ins...);
 * they need our TEAM - a complaint, a callback, a quote, a type we do not stock, a trailer
-  they want.
+  they want;
+* their first answer to the DM we sent about their public comment - we wrote first, without
+  asking who they are, so this reply is where we do.
 
 Never otherwise, and never before the trailers: a customer asking for a dump trailer is shown
 dump trailers, and asked who they are after. A customer who declined is still asked at these
@@ -45,9 +47,18 @@ def moment(state: dict, output: Any) -> str | None:
         or outcome.get("link_interest")
     ):
         return "escalation"
+    if is_comment_reply_turn(state):
+        return "comment_handoff"
     if int(state.get("turn_index") or 0) <= 1 and not getattr(output, "about_trailers", True):
         return "first_message"
     return None
+
+
+def is_comment_reply_turn(state: dict) -> bool:
+    """Their first message after our private reply to their comment."""
+    origin = state.get("comment_origin") or {}
+    reply_turn = origin.get("reply_turn")
+    return bool(reply_turn) and int(state.get("turn_index") or 0) == int(reply_turn)
 
 
 def missing(state: dict) -> list[str]:

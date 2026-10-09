@@ -116,6 +116,10 @@ class SessionState(TypedDict, total=False):
     interest_listing: str | None
 
     turn_index: int
+    # Set when the conversation was opened by our private reply to their public Facebook
+    # comment (src/api/comment_handoff.py): the comment, its intent, and reply_turn - the turn
+    # their first answer to that DM will be, which is when it changes what we say.
+    comment_origin: dict[str, Any] | None
     # Whether listings have been put in front of them at least once. It changes what a
     # later requirement change means: the first search is a search, the second is a redo.
     results_shown: bool
@@ -187,6 +191,7 @@ def new_state(session_id: str) -> SessionState:
         listing_interest_logged=False,
         interest_listing=None,
         turn_index=0,
+        comment_origin=None,
         results_shown=False,
         results_categories=[],
     )

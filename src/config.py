@@ -88,6 +88,9 @@ class Settings:
     # Shared secret for POST /internal/idle-sweep, a manual trigger for the same sweep - the
     # clock needs no route. Empty means the route is not mounted at all.
     idle_sweep_token: str = ""
+    # Shared secret for POST /internal/comment-handoff, which the Omni Channel Agent calls
+    # after DMing someone who commented on a post. Empty means the route is not mounted.
+    comment_handoff_token: str = ""
     search_max_recommendations: int = 5
     feature_llm_rerank_enabled: bool = True
     feature_rerank_model: str = "gpt-5-nano-2025-08-07"
@@ -241,6 +244,7 @@ class Settings:
             idle_results_minutes=_float(_env("IDLE_RESULTS_MINUTES"), 5.0),
             idle_sweep_interval_seconds=_float(_env("IDLE_SWEEP_INTERVAL_SECONDS"), 60.0),
             idle_sweep_token=_env("IDLE_SWEEP_TOKEN", ""),
+            comment_handoff_token=_env("COMMENT_HANDOFF_TOKEN", ""),
             search_max_recommendations=_int(_env("SEARCH_MAX_RECOMMENDATIONS"), 5),
             feature_llm_rerank_enabled=_bool(_env("FEATURE_LLM_RERANK_ENABLED"), True),
             feature_rerank_model=_env("FEATURE_RERANK_MODEL", "gpt-5-nano-2025-08-07"),

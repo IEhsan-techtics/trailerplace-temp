@@ -673,6 +673,10 @@ def state_block(state: dict) -> str:
             f'word: "{greeting.OPENING}" Whatever else you say comes after it.'
         )
 
+    origin_line = _comment_origin_line(state)
+    if origin_line:
+        lines.append(origin_line)
+
     contact = state.get("contact") or {}
     if settings.llm_writes_reply:
         lines.append(_contact_line(state))
@@ -709,6 +713,32 @@ def state_block(state: dict) -> str:
     return "\n".join(lines)
 
 
+def _comment_origin_line(state: dict) -> str:
+    """Their first answer to the DM we sent about their public comment.
+
+    The comment and our DM are already in the transcript. What the model cannot see there is
+    that this is NOT a first contact: without this it greets them as one, and thanks them for
+    contacting us in reply to a message we sent them.
+    """
+    from src.tools import contact_policy
+
+    if not contact_policy.is_comment_reply_turn(state):
+        return ""
+    origin = state.get("comment_origin") or {}
+    platform = str(origin.get("platform") or "facebook").title()
+    line = (
+        f"- This conversation began with their public {platform} comment on our post. The last "
+        "message above is the private message WE sent them about it, and this is their answer. "
+        "Do NOT greet them or thank them for contacting TrailerPlace - carry on from our message."
+    )
+    if origin.get("intent") in {"complaint", "escalation"}:
+        line += (
+            " Their comment was a COMPLAINT: treat what they tell you as the complaint details "
+            "for our team (intent team_request_escalation)."
+        )
+    return line
+
+
 def _contact_line(state: dict) -> str:
     """The contact rule, stated for this turn (src/tools/contact_policy.py).
 
@@ -722,6 +752,13 @@ def _contact_line(state: dict) -> str:
     declined = " They declined earlier; still ask at these moments, lightly." if (
         (state.get("contact") or {}).get("declined")
     ) else ""
+    if contact_policy.is_comment_reply_turn(state):
+        return (
+            f"- Missing: {contact_policy.describe_missing(state)}.{declined} This turn IS a moment "
+            "to ask: it is their first answer to our message about their comment. Help with what "
+            "they said first, then ask for it as the LAST line, as ASKING FOR THEIR DETAILS says. "
+            "This overrides anything about contact details above."
+        )
     return (
         f"- Missing: {contact_policy.describe_missing(state)}.{declined} Ask for it as the LAST "
         "line, as ASKING FOR THEIR DETAILS says - ONLY when (a) this is their FIRST "

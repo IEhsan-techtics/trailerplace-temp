@@ -196,6 +196,132 @@ def load_session(session_id: str) -> tuple[dict[str, Any] | None, list[dict[str,
         return row.state_snapshot, list(row.conversation or []), str(row.lead_id)
 
 
+# ------------------------------------------------------------- comment handoff
+# How the seeded turn is recorded in chatbot_turns.request_message. The prefix is how the
+# follow-up agent tells it apart from a customer's own turn (src/followup/store.py).
+COMMENT_HANDOFF_MARKER = "(comment handoff"
+
+_HANDOFF_NAMESPACE = uuid.UUID("5b0f3c1e-2d7a-4e8b-9c41-7a2e6f1d3b90")
+
+
+def seed_from_comment(
+    psid: str,
+    *,
+    platform: str,
+    intent: str,
+    comment_text: str,
+    dm_text: str,
+    comment_id: str,
+    post_summary: str = "",
+    commenter_name: str | None = None,
+) -> dict[str, Any]:
+    """Open (or resume) a customer's conversation with our private reply to their comment.
+
+    The Omni Channel Agent DMs someone who commented on a post, then calls this with the PSID
+    Meta returned. Their comment and our DM go into the transcript, so when they answer the
+    bot already knows what they asked and does not greet them as a stranger.
+
+    A brand-new session starts at turn 1, so their answer is turn 2 and never "first". A
+    returning customer keeps their state and transcript - including any contact details,
+    which is what stops us asking again. Details on the lead row but not in the state are
+    copied across for the same reason.
+
+    Idempotent per comment: a repeated call finds its turn row and changes nothing.
+    """
+    from src.graph.nodes import greeting
+    from src.graph.state import from_snapshot, to_snapshot
+
+    session_id = session_uuid_for(psid)
+    session_uuid = _as_uuid(session_id)
+    turn_uuid = uuid.uuid5(_HANDOFF_NAMESPACE, f"{platform}:{comment_id}")
+    now = datetime.now(timezone.utc)
+    seeded = [
+        {"role": "user", "content": f"(Commented on our {platform.title()} post) {comment_text}",
+         "comment_origin": True},
+        {"role": "assistant", "content": dm_text, "comment_dm": True},
+    ]
+    request_message = f"{COMMENT_HANDOFF_MARKER}: {platform} comment) {comment_text}"
+
+    def _seed_state(snapshot: dict[str, Any] | None, conversation: list, lead: dict) -> tuple[dict, bool]:
+        new_session = not snapshot and not conversation
+        state = from_snapshot(session_id, snapshot)
+        if new_session:
+            state["turn_index"] = 1
+        contact = state.setdefault("contact", {})
+        if not greeting.contact_is_complete(contact):
+            for key, value in (("name", lead.get("name")), ("email", lead.get("email")),
+                               ("phone", lead.get("phone"))):
+                if value and not contact.get(key):
+                    contact[key] = value
+        state["comment_origin"] = {
+            "platform": platform,
+            "intent": intent,
+            "comment": comment_text,
+            "comment_id": comment_id,
+            "commenter_name": commenter_name,
+            "post_summary": post_summary,
+            "reply_turn": int(state.get("turn_index") or 0) + 1,
+            "at": now.isoformat(),
+        }
+        state["messages"] = list(conversation) + seeded
+        return state, new_session
+
+    def _result(state: dict, new_session: bool, duplicate: bool = False) -> dict[str, Any]:
+        return {
+            "session_id": session_id,
+            "known_contact": greeting.contact_is_complete(state.get("contact") or {}),
+            "new_session": new_session,
+            "duplicate": duplicate,
+        }
+
+    if not persistence_enabled():
+        ensure_session(session_id, psid)
+        record = _MEMORY[session_id]
+        turns = record.setdefault("turns", [])
+        if any(t["turn_id"] == str(turn_uuid) for t in turns):
+            return _result(from_snapshot(session_id, record["state_snapshot"]), False, duplicate=True)
+        held = record.get("contact") or {}
+        state, new_session = _seed_state(record["state_snapshot"], record["conversation"], held)
+        record["conversation"] = list(state["messages"])
+        record["state_snapshot"] = to_snapshot(state)
+        record["state_version"] += 1
+        record["psid"] = record.get("psid") or psid
+        turns.append({"turn_id": str(turn_uuid), "request_message": request_message,
+                      "response": {"assistant_text": dm_text, "listings": [], "comment_handoff": True}})
+        return _result(state, new_session)
+
+    ensure_session(session_id, psid)
+    with db.get_session_factory()() as sql:
+        row = sql.get(ChatbotConversation, session_uuid, with_for_update=True)
+        if sql.get(ChatbotTurn, (session_uuid, turn_uuid)) is not None:
+            return _result(from_snapshot(session_id, row.state_snapshot), False, duplicate=True)
+        lead_row = sql.get(ChatbotLead, row.lead_id)
+        lead = {
+            "name": lead_row.name if lead_row else None,
+            "email": lead_row.email if lead_row else None,
+            "phone": lead_row.phone_number if lead_row else None,
+        }
+        state, new_session = _seed_state(row.state_snapshot, list(row.conversation or []), lead)
+        row.conversation = list(state["messages"])
+        row.state_snapshot = to_snapshot(state)
+        row.state_version = (row.state_version or 0) + 1
+        row.updated_at = now
+        row.turns.append(
+            ChatbotTurn(
+                session_id=session_uuid,
+                turn_id=turn_uuid,
+                request_message=request_message[: settings.chat_max_message_chars],
+                response={"assistant_text": dm_text, "listings": [], "comment_handoff": True},
+            )
+        )
+        sql.commit()
+    logger.info(
+        "COMMENT handoff seeded: session=%s new=%s known_contact=%s intent=%s",
+        session_id, new_session, greeting.contact_is_complete(state.get("contact") or {}), intent,
+    )
+    return _result(state, new_session)
+
+
 # ------------------------------------------------------------------------------ writing
 def save_turn(
     session_id: str,

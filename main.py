@@ -97,6 +97,13 @@ if settings.idle_sweep_token:
 
     app.include_router(idle_router)
 
+# The comment handoff (src/api/comment_handoff.py). Mounted only with a token: it writes into
+# a customer's conversation, so a deploy without one exposes no such route at all.
+if settings.comment_handoff_token:
+    from src.api.comment_handoff import router as comment_handoff_router  # noqa: E402
+
+    app.include_router(comment_handoff_router)
+
 # The Facebook Messenger webhook (src/api/messenger.py). Always mounted; both routes 404
 # unless MESSENGER_ENABLED is on and the app secret and page token are configured, so a
 # deployment that is not the Messenger one has no webhook surface at all.
