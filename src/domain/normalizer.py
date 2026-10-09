@@ -51,7 +51,8 @@ _CONTACT_RE = re.compile(
     r"trailer\s*place|"
     r"financing\s+and\s+delivery\s+available|"
     r"2507\s+county\s+road\s+231(?:\s+wharton\s+tx\s+77488)?|"
-    r"wharton\s*tx\s*77488"
+    r"wharton\s*tx\s*77488|"
+    r"3709\s+(?:u\.?s\.?\s*)?(?:hwy|highway|-)?\s*59\s*s?(?:\s+rosenberg\s+tx\s+77471)?"
     r")",
     re.IGNORECASE,
 )

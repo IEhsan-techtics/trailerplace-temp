@@ -37,7 +37,7 @@ FAQ_ANSWERS: dict[str, str] = {
     "trade_in": f"Our sales team handles trade-in appraisals. Call {PHONE}.",
     "service_parts": f"Our service and parts team can help. Reach them at {PHONE}.",
     "store_info": (
-        f"We're located in Wharton, TX and open {HOURS}. Call {PHONE} or visit {WEBSITE}. "
+        f"We're located at {company.ADDRESS} and open {HOURS}. Call {PHONE} or visit {WEBSITE}. "
         "We also offer financing and delivery."
     ),
     "photos": (

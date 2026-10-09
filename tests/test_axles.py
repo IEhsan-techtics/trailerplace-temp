@@ -6,6 +6,8 @@ capacity", a halved re-read on the follow-up, a bare "Tandem." left unconverted.
 """
 from __future__ import annotations
 
+import pytest
+
 from src.conversation_store import load_session
 from src.domain import axles
 from src.graph.build import run_turn
@@ -361,3 +363,20 @@ def test_the_model_filing_the_total_itself_is_left_as_it_is(fake_llm):
         extracted={"total_axle_capacity_lbs": 14000.0, "axle_capacity_basis": "total"})
 
     assert state_after()["slots"]["total_axle_capacity_lbs"] == 14000.0
+
+
+@pytest.mark.parametrize("text,count", [
+    ("Two axles with single tires", 2),   # live: read as ONE - "single" was about the tires
+    ("single tires, two axles", 2),
+    ("two axles, dual wheels", 2),
+    ("2-axle", 2),
+    ("tri axle", 3),
+    ("single axle", 1),
+    ("tandem", 2),
+])
+def test_the_count_said_of_the_axles_wins(text, count):
+    assert axles.count_from_reply(text) == count
+
+
+def test_a_count_about_the_wheels_alone_is_not_an_axle_count():
+    assert axles.count_from_reply("dual wheels") is None

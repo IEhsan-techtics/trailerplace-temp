@@ -14,13 +14,15 @@ from src.config import settings
 
 NAME = "TrailerPlace"
 # The only location - confirmed with the dealership, and said to customers as such. Live, a
-# customer asked "Do you have a location in San Antonio?" and was given the Wharton address
-# and hours without ever hearing the answer, because the bot was never told there is no other.
-LOCATION = "Wharton, TX"
+# customer asked "Do you have a location in San Antonio?" and was given the address and
+# hours without ever hearing the answer, because the bot was never told there is no other.
+# Moved from Wharton to Rosenberg in October 2026.
+LOCATION = "Rosenberg, TX"
+ADDRESS = "3709 U.S. Hwy 59 S, Rosenberg, TX 77471"
 PHONE = "979-532-1486"
-# Stated to customers, so it is a fact and not a guess: the days and times the dealership gave
-# us. Sunday is not a work day, so we are closed then.
-HOURS = "Monday to Saturday, 8:00 AM to 6:00 PM"
+# Stated to customers, so it is a fact and not a guess: the hours on trailerplace.com.
+# Sunday is not a work day, so we are closed then.
+HOURS = "Monday to Friday, 8:00 AM to 6:00 PM, and Saturday, 8:00 AM to 2:00 PM"
 
 SERVICES = (
     "trailer sales",
@@ -45,7 +47,7 @@ def company_facts_block() -> str:
     return "\n".join(
         [
             "DEALERSHIP FACTS (the only business facts you may state)",
-            f"- {NAME}, {LOCATION}. Phone {PHONE}. Website {website()}.",
+            f"- {NAME}, {ADDRESS}. Phone {PHONE}. Website {website()}.",
             f"- {LOCATION} is our ONLY location. Asked about another city -> say so first: \"We "
             f"don't have a location in San Antonio - we're only in {LOCATION}.\" Then the details, "
             "and that we deliver.",
@@ -54,6 +56,8 @@ def company_facts_block() -> str:
             "handled by people: give the phone number, not details.",
             "- Never state a price, delivery date, restock date or stock level that is not in "
             "a listing you were given this turn.",
+            "- Asked something about the business you do not know -> say plainly you don't know, "
+            f"and that our team will be happy to guide them at {PHONE}. Never guess.",
         ]
     )
 
@@ -68,7 +72,7 @@ STANDARD_ANSWERS = (
     ("trade_in", "Trade-ins", f"Our sales team handles trade-in appraisals. Call {PHONE}."),
     ("service_parts", "Service or parts", f"Our service and parts team can help. Reach them at {PHONE}."),
     ("store_info", "Where we are / hours",
-     f"We're located in {LOCATION} and open {HOURS}. Call {PHONE} or visit {{website}}. "
+     f"We're located at {ADDRESS} and open {HOURS}. Call {PHONE} or visit {{website}}. "
      "We also offer financing and delivery."),
     ("contact_human", "Wanting a person",
      f"You can reach our team at {PHONE}. Happy to keep helping with your trailer search too."),

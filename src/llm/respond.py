@@ -331,6 +331,7 @@ def _lookup_hint(turn: Any) -> str:
 
 def build_system_prompt(state: dict, turn: Any) -> str:
     from src.config import settings
+    from src.domain import events
     from src.llm import voice
 
     # Everything before the customer line is identical on every turn, so the provider caches
@@ -350,6 +351,7 @@ def build_system_prompt(state: dict, turn: Any) -> str:
             _WHAT_YOU_CAN_DO.strip(),
             _SCOPE.strip(),
             company.company_facts_block(),
+            *([block] if (block := events.prompt_block()) else []),
             company.standard_answers_block(),
             "OUR CATEGORIES:\n" + categories.category_menu_block(),
             brands.make_prompt_block(),

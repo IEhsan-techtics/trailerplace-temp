@@ -41,7 +41,7 @@ def test_each_menu_line_carries_its_use_case():
 def test_company_block_states_the_real_dealership_details():
     block = company.company_facts_block()
     assert "TrailerPlace" in block
-    assert "Wharton, TX" in block
+    assert "3709 U.S. Hwy 59 S, Rosenberg, TX 77471" in block
     assert "979-532-1486" in block
 
 

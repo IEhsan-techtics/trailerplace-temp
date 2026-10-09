@@ -539,6 +539,11 @@ _AXLE_COUNT_WORDS = {
     "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
 }
 _AXLE_COUNT_NUMBER_RE = re.compile(r"(?<![\d.])(\d+)")
+# "two axles", "2-axle", "tri axle": the count that is said OF the axles. Checked first, so a
+# count said of something else in the same answer cannot win.
+_AXLE_PHRASE_RE = re.compile(r"\b([a-z]+|\d{1,2})[\s-]*axles?\b")
+# A count word describing the tires or wheels, not the axles: "single tires", "dual wheels".
+_NOT_THE_AXLES = r"(?![\s-]+(?:tires?|tyres?|wheels?))"
 
 
 def parse_axle_count_answer(value: Any) -> Any:
@@ -555,8 +560,14 @@ def parse_axle_count_answer(value: Any) -> Any:
     text = str(value or "").strip().lower()
     if not text:
         return None
+    # Live: "Two axles with single tires" was read as ONE axle - "single" comes first in the
+    # word list, and it was about the tires.
+    for match in _AXLE_PHRASE_RE.finditer(text):
+        token = match.group(1)
+        if token in _AXLE_COUNT_WORDS:
+            return _AXLE_COUNT_WORDS[token]
     for word, count in _AXLE_COUNT_WORDS.items():
-        if re.search(r"\b{}\b".format(re.escape(word)), text):
+        if re.search(r"\b{}\b{}".format(re.escape(word), _NOT_THE_AXLES), text):
             return count
     match = _AXLE_COUNT_NUMBER_RE.search(text.replace(",", ""))
     return int(match.group(1)) if match else None

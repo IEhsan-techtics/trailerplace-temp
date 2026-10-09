@@ -199,12 +199,45 @@ def _our_question_problem(state: dict, reply: _Reply) -> str | None:
     """
     which, wording = _our_question(state)
     if ASKED_OUR_QUESTION in reply.covers and reply.question_count == 1 and not reply.asked:
+        if not _asks_it(state, which, reply.text):
+            # Its own report says it asked ours; its words say otherwise. Live, "Which type of
+            # trailer are you looking for?" was reported as the gooseneck question, which was
+            # then counted as asked though the customer never saw it.
+            return (
+                f'it reports asking our own question but does not: ask it - once, in your own '
+                f'words, keeping this meaning: "{wording}"'
+            )
+        if which == "axle_count" and state.get("invalid_retry_slot") == "axle_count":
+            if "flagged_wrong_value" not in reply.covers:
+                return "it asks the axle count again without saying why (we did not catch their answer, or we only carry 1 to 4)"
+            if "thanked_them" in reply.covers:
+                return "it thanks them for, or notes, an axle answer that was turned down"
         return None
     return (
         f'our own question is still waiting on them and the reply does not ask it (or asks '
         f'something else too). Respond to what they said, then ask it - once, in your own '
         f'words, keeping this meaning: "{wording}"'
     )
+
+
+# Words any honest wording of each of our questions has to contain. A check on the model's own
+# report ("asked_our_question"), not a rule about how to word the question.
+_OUR_QUESTION_WORDS = {
+    "gooseneck": ("brand", "make", "manufacturer"),
+    "axle_count": ("axle",),
+    "axle_basis": ("per axle", "per-axle", "each axle", "total", "combined"),
+    "keep": ("keep",),
+}
+
+
+def _asks_it(state: dict, which: str, text: str) -> bool:
+    """Whether the reply's words really ask our question ``which``."""
+    lowered = text.lower()
+    if which == "switch":
+        suggested = str((state.get("pending_category_switch") or {}).get("suggested") or "")
+        return bool(suggested) and suggested.lower() in lowered
+    words = _OUR_QUESTION_WORDS.get(which)
+    return not words or any(word in lowered for word in words)
 
 
 def _opening_problem(state: dict, reply: _Reply) -> str | None:
@@ -231,8 +264,6 @@ def _pythons_turn(state: dict, situation: str) -> None:
     outcome = state.get("turn_outcome") or {}
     if situation == "unavailable":
         return
-    if state.get("invalid_retry_slot") == "axle_count":
-        raise _PythonsTurn("python asks this turn (axle count)")
     if outcome.get("search_ran"):
         raise _PythonsTurn("a search ran")
     if not state.get("category") and state.get("listing_interest_logged"):
@@ -397,11 +428,21 @@ def _needs(state: dict, situation: str, due: bool) -> str:
 
     ours = _our_question(state)
     if ours:
-        needs.append(
-            f'Respond to what they said, then ask this question of ours - once, in your own '
-            f'words, keeping its meaning: "{ours[1]}" Put {ASKED_OUR_QUESTION} in reply_covers, '
-            "leave asked_slots empty, and ask nothing else."
-        )
+        retry_reason = state.get("invalid_retry_reason") if state.get("invalid_retry_slot") == "axle_count" else None
+        if ours[0] == "axle_count" and retry_reason:
+            needs.append(
+                ("We only carry 1 to 4 axles: say so" if retry_reason == "axle_range" else
+                 "Their reply did not say how many axles: say briefly you did not catch it")
+                + " - do not thank them or treat their words as an answer (flagged_wrong_value in "
+                f'reply_covers) - then ask again, in your own words: "{ours[1]}" Put '
+                f"{ASKED_OUR_QUESTION} in reply_covers, leave asked_slots empty, and ask nothing else."
+            )
+        else:
+            needs.append(
+                f'Respond to what they said, then ask this question of ours - once, in your own '
+                f'words, keeping its meaning: "{ours[1]}" Put {ASKED_OUR_QUESTION} in reply_covers, '
+                "leave asked_slots empty, and ask nothing else."
+            )
         if due:
             from src.tools import contact_policy
 

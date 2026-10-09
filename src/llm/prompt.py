@@ -106,6 +106,10 @@ guess one, never tell them which one they want.
   "How much?" about a trailer they have not picked yet is ordinary shopping, not a person's
   job: every listing we show carries its price. Say the price comes with the trailers we show
   them, and ask the type. It is NOT "team_request_escalation".
+  "Do you have <a type we stock>?" - with or without a size ("car haulers around 20 ft?") - is
+  ordinary shopping too: yes, we carry them. Say so, say you can show what's in stock once you
+  know a bit more, and ask the next question. Never say you cannot confirm availability, and
+  never send them to the phone or website for it. A type we do NOT stock is the list below.
 
 They name a category -> category_mentioned = their words. Changing an existing one -> intent =
 "category_change". Only asking ABOUT a type -> is_category_info_only = true.
@@ -263,7 +267,8 @@ REPORT ON YOUR REPLY - truthfully; Python checks the report, not your wording:
 - reply_covers: every one of these the reply does - welcome (greets them or thanks them for
   getting in touch), thanked_for_contacting (says "Thanks/Thank you for contacting TrailerPlace"),
   greeted_by_name (opens with "Hi <their name>"), invited_questions (invites them to ask
-  anything else), declined_off_topic, flagged_wrong_value (tells them a number looks wrong),
+  anything else), declined_off_topic, flagged_wrong_value (tells them a number looks wrong, or
+  that you did not catch their answer),
   thanked_them (thanks them or says a value is noted), said_not_stocked, passed_to_team (says
   their request has gone to our team), gave_phone, asked_our_question (asks the question of
   ours the state block says is WAITING ON THEM).
@@ -292,7 +297,9 @@ def system_prompt() -> str:
     """
     from src.config import settings
 
-    return _system_prompt_for(rules_version(), settings.llm_writes_reply)
+    from src.domain import events
+
+    return _system_prompt_for(rules_version(), settings.llm_writes_reply, events.active())
 
 
 # The contact request quoted in THEIR FIRST MESSAGE is the fallback piece's, word for word. A
@@ -310,7 +317,9 @@ def _situations_writing_reply() -> str:
 
 
 @lru_cache(maxsize=4)
-def _system_prompt_for(version: int, writes_reply: bool = False) -> str:
+def _system_prompt_for(version: int, writes_reply: bool = False, event_on: bool = False) -> str:
+    from src.domain import events
+
     from src.llm import voice
 
     # Instructions first, reference data after: the data is what the rules point at.
@@ -337,6 +346,7 @@ def _system_prompt_for(version: int, writes_reply: bool = False) -> str:
             ),
             cargo_traits_block(),
             company.company_facts_block(),
+            *([events.prompt_block()] if event_on else []),
             company.standard_answers_block(with_keys=True),
             "OUR CATEGORIES and what each is for. Name AT MOST SIX in a reply, the ones that "
             "suit what they said, then \"and many more\" - unless they asked which types we "
@@ -375,7 +385,8 @@ def wrong_values_block() -> str:
     )
     return (
         "A WRONG VALUE in reply - a size, weight or rating that is negative, or outside these "
-        f"limits once converted: {limits}. Axle count is always 1 to 4, and is re-asked for you.\n"
+        f"limits once converted: {limits}. Axle count is always 1 to 4 - the state block says when "
+        "to ask it again.\n"
         "- Do NOT thank them for it or say it is noted. Say plainly what looks wrong - \"that came "
         "through as a negative number\", \"that seems unusual for a trailer, so I want to "
         "double-check it\" (flagged_wrong_value) - then ask that slot's question again in its "
@@ -469,6 +480,11 @@ def _format_value(value: Any) -> str:
     return str(value)
 
 
+def _was_asked(pending: dict | None) -> bool:
+    """A question of ours that has actually been put to them, not merely queued."""
+    return bool(pending) and int(pending.get("asks") or 0) > 0
+
+
 def _our_question_lines(state: dict) -> list[str]:
     """How to handle the question of ours that is open, when one is (see the lines above)."""
     from src.config import settings
@@ -490,6 +506,14 @@ def _our_question_lines(state: dict) -> list[str]:
         # Python closes it on this message if they do not answer: a third ask never goes out.
         return ["- You have asked that question twice. If this message does not answer it, "
                 "do NOT ask it again - we will go with the usual answer."]
+    if not asks:
+        # Queued behind another of our questions, so they have never seen it.
+        return [
+            "- A question of ours is QUEUED and has NOT been asked yet, so this message is not an "
+            "answer to it. Respond to what they said first, then ask it at the end in your own "
+            f'words - nothing else asked - keeping its meaning: "{wording}" Set '
+            "asked_our_question in reply_covers and leave asked_slots empty."
+        ]
     return [
         "- That question of yours is WAITING ON THEM. If this message does not answer it, "
         "respond to what they said first, then ask it again in your own words - once, nothing "
@@ -588,7 +612,18 @@ def state_block(state: dict) -> str:
             )
 
     retry = state.get("invalid_retry_slot")
-    if retry:
+    if retry == "axle_count":
+        if state.get("invalid_retry_reason") == "axle_range":
+            problem = "asked for a number of axles we do not carry - we only carry 1 to 4 axles. Say so"
+        else:
+            problem = ("did not say how many axles. Say briefly you did not catch it - never "
+                       "acknowledge, thank them for, or repeat their words as if they answered")
+        lines.append(
+            f"- Their answer to how many axles {problem} (flagged_wrong_value), then ask the axle "
+            "question again (asked_our_question). This overrides \"respond to what they said "
+            "first\"."
+        )
+    elif retry:
         reason = state.get("invalid_retry_reason")
         why = {
             "negative": "they gave a negative number",
@@ -597,8 +632,12 @@ def state_block(state: dict) -> str:
         }.get(str(reason), "that value did not work")
         lines.append(f"- Ask about {retry} once more: {why}.")
 
+    # Each line below says "you asked" - true only once that question has gone out. Several
+    # can be queued and only the first is asked each turn; a queued one is not mentioned here
+    # (_our_question_lines tells the model to ask it), or the model files an unrelated message
+    # as the answer to a question the customer has never seen.
     switch = state.get("pending_category_switch")
-    if switch:
+    if switch and _was_asked(switch):
         lines.append(
             f"- You suggested switching to {switch.get('suggested')} because they mentioned "
             f"\"{switch.get('from_haul_item')}\". They are answering that now - set "
@@ -606,14 +645,14 @@ def state_block(state: dict) -> str:
         )
 
     held = state.get("pending_axle_basis")
-    if held:
+    if held and _was_asked(held):
         lines.append(
             f"- You asked whether {_format_value(held.get('value'))} lbs is per axle or the total "
             "across all axles. They are answering that now (record it in axle_capacity_basis). "
             "Until they choose, call the number neither one; if they are unsure, just say that is "
             "fine - in plain words, never a field name."
         )
-    if state.get("pending_axle_count"):
+    if _was_asked(state.get("pending_axle_count")):
         lines.append(
             "- You asked how many axles they want (we carry 1 to 4). They are answering that now: "
             "set axle_count."
@@ -639,7 +678,7 @@ def state_block(state: dict) -> str:
         )
 
     keep = state.get("pending_keep_filters")
-    if keep:
+    if keep and _was_asked(keep):
         lines.append(
             f"- You asked whether to keep their earlier answers when moving to "
             f"{keep.get('new_category')}. They are answering that now - set "

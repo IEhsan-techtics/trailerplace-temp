@@ -166,6 +166,25 @@ def _superseded(abandon_if: Callable[[], bool] | None) -> bool:
         return False
 
 
+def _announce_event(state: dict) -> None:
+    """Tell a NEW customer about the current event, as a message of its own.
+
+    After our first reply only, so it is said once and never pushes their answer down. The
+    blank line is what makes it a separate bubble (src/domain/reply_chunks.py). It goes in
+    the transcript like any reply, so the model knows it has been said.
+    """
+    from src.domain import events
+
+    outcome = state.get("turn_outcome") or {}
+    text = str(outcome.get("assistant_text") or "").strip()
+    if int(state.get("turn_index") or 0) != 1 or not text:
+        return
+    news = events.announcement()
+    if news:
+        outcome["assistant_text"] = f"{text}\n\n{news}"
+        logger.info("EVENT announced: session=%s", state.get("session_id"))
+
+
 def run_turn(
     session_id: str,
     user_message: str,
@@ -245,6 +264,7 @@ def run_turn(
         # turn there is no second call at all and compose assembles the reply as before.
         _tools_and_reply(state, output, user_message)
         compose_node(state, output)
+        _announce_event(state)
 
         assistant_text = state["turn_outcome"].get("assistant_text", "")
         state["messages"] = list(conversation) + [

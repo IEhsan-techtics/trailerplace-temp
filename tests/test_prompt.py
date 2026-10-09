@@ -82,7 +82,7 @@ def test_the_system_prompt_is_cached_so_the_catalogue_is_not_re_read_per_turn():
 def test_it_names_the_real_dealership():
     prompt = system_prompt()
     assert "TrailerPlace" in prompt
-    assert "Wharton, TX" in prompt
+    assert "Rosenberg, TX" in prompt
     assert "979-532-1486" in prompt
 
 
@@ -155,7 +155,7 @@ def test_an_invalid_value_is_explained_in_plain_words():
 
 def test_a_pending_category_switch_is_explained():
     state = qualified_state(
-        pending_category_switch={"suggested": "Equipment", "from_haul_item": "a tractor"}
+        pending_category_switch={"suggested": "Equipment", "from_haul_item": "a tractor", "asks": 1}
     )
     block = state_block(state)
     assert "Equipment" in block and "a tractor" in block
@@ -163,7 +163,7 @@ def test_a_pending_category_switch_is_explained():
 
 
 def test_a_pending_keep_filters_question_is_explained():
-    state = qualified_state(pending_keep_filters={"new_category": "Equipment"})
+    state = qualified_state(pending_keep_filters={"new_category": "Equipment", "asks": 1})
     assert "keep_fields_answer" in state_block(state)
 
 
@@ -296,9 +296,9 @@ def test_it_states_the_opening_hours_it_was_given():
 
 
 def test_it_states_which_days_we_open():
-    """The dealership gave us the days too: Monday to Saturday, closed on Sunday."""
+    """The days and hours on trailerplace.com: Saturday is a short day, closed on Sunday."""
     prompt = system_prompt()
-    assert "Monday to Saturday, 8:00 AM to 6:00 PM" in prompt
+    assert "Monday to Friday, 8:00 AM to 6:00 PM, and Saturday, 8:00 AM to 2:00 PM" in prompt
     assert "Closed on Sunday" in prompt
 
 

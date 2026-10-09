@@ -253,12 +253,48 @@ def test_a_re_ask_that_does_not_say_what_was_wrong_is_turned_down(rewrites):
     assert _turned_down(_retry(), _output("What's the rough haul weight per load?", ["payload_capacity"]), rewrites)
 
 
-def test_the_axle_count_is_still_re_asked_by_python(rewrites):
-    state = _state(invalid_retry_slot="axle_count", invalid_retry_reason="axle_range",
-                   required_slots=["haul_item", "axle_count"])
-    output = _output("That seems off. How many axles?", ["axle_count"], covers=["flagged_wrong_value"])
-    assert _send(state, output)["assistant_text"] != output.reply
-    assert rewrites.calls == []
+def _axle_retry(reason="unclear"):
+    """We asked how many axles; their answer was turned down."""
+    return _state(invalid_retry_slot="axle_count", invalid_retry_reason=reason,
+                  slots={"axle_capacity": 7000.0}, slot_sources={"axle_capacity": "user"},
+                  pending_axle_count={"asks": 1})
+
+
+def test_the_axle_retry_is_the_models_own_words():
+    """It used to be compose's, which kept the model's "Purple noted." in front of "Sorry,
+    I didn't catch that." - acknowledging the very answer it said it did not understand."""
+    state = _axle_retry()
+    reply = "Sorry, I didn't quite catch that. How many axles would you like - single, tandem, or triple?"
+    assert _sent_as_written(state, _output(reply, questions=1, covers=["flagged_wrong_value", "asked_our_question"]))
+    assert state["pending_axle_count"]["asks"] == 2
+
+
+def test_an_axle_retry_that_notes_their_answer_is_turned_down(rewrites):
+    reply = "Purple noted. And how many axles should the trailer have?"
+    assert _turned_down(_axle_retry(), _output(
+        reply, questions=1, covers=["flagged_wrong_value", "thanked_them", "asked_our_question"]), rewrites)
+
+
+def test_an_axle_retry_that_does_not_say_why_is_turned_down(rewrites):
+    reply = "How many axles should the trailer have - single, tandem, or triple?"
+    assert _turned_down(_axle_retry("axle_range"), _output(reply, questions=1, covers=["asked_our_question"]), rewrites)
+    assert "1 to 4" in rewrites.calls[0]["needs"]
+
+
+def test_a_reply_that_only_claims_to_ask_our_question_is_turned_down(rewrites):
+    """Live: "Which type of trailer?" was reported as the gooseneck question and counted."""
+    state = _state(category=None, pending_gooseneck_clarification="a gooseneck trailer",
+                   gooseneck_asks=0)
+    reply = "Which type of trailer are you looking for - Equipment, Flatbed or Utility?"
+    assert _turned_down(state, _output(reply, questions=1, covers=["asked_our_question"]), rewrites)
+
+
+def test_a_reply_that_really_asks_our_question_counts_it():
+    state = _state(category=None, pending_gooseneck_clarification="a gooseneck trailer",
+                   gooseneck_asks=0)
+    reply = "Quick check - do you mean a gooseneck hitch, or the Gooseneck trailer brand?"
+    assert _sent_as_written(state, _output(reply, questions=1, covers=["asked_our_question"]))
+    assert state["gooseneck_asks"] == 1
 
 
 def test_a_rejected_value_already_asked_twice_is_not_asked_again(rewrites):

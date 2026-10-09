@@ -461,6 +461,9 @@ def _apply_gooseneck_answer(state: dict, output: Any, user_message: str) -> bool
 def _apply_category_switch_answer(state: dict, output: Any) -> bool:
     """They are answering "Equipment suits that better - want to switch?"."""
     pending = state.get("pending_category_switch")
+    if pending and not int(pending.get("asks") or 0):
+        # Queued behind another question of ours and never asked: nothing to answer yet.
+        return False
     answer = getattr(output, "category_confirm_answer", None)
     if pending and answer is None and _asked_out(pending):
         # Asked twice, never answered: they stay where they are, and it is not suggested
@@ -504,6 +507,9 @@ def _haul_item_restated(output: Any) -> bool:
 def _apply_keep_filters_answer(state: dict, output: Any) -> bool:
     """They are answering "keep what you have already told me?" after a category change."""
     pending = state.get("pending_keep_filters")
+    if pending and not int(pending.get("asks") or 0):
+        # Queued behind another question of ours and never asked: nothing to answer yet.
+        return False
     answer = getattr(output, "keep_fields_answer", None)
     if pending and answer is None and _asked_out(pending):
         # Asked twice, never answered: what they told us is what we know, so it is kept -
@@ -937,6 +943,13 @@ def _close_axle_count(state: dict, pending: dict, output: Any, user_message: str
         return
     if "axle_count" in result.no_preference or "axle_count" in (state.get("declined_slots") or []):
         state["pending_axle_count"] = None
+        return
+    if not asks and state.get("invalid_retry_slot") != "axle_count":
+        # Queued but never asked: another question of ours went out first. Their message
+        # answers THAT one, so it is not a reply to this - judged as one, "Hitch" (to the
+        # gooseneck question) came back "Sorry, I didn't catch that. How many axles...?",
+        # replacing the model's correct reply. A count they volunteer is already stored
+        # above; otherwise it simply waits to be asked.
         return
 
     reason = state.get("invalid_retry_reason") if state.get("invalid_retry_slot") == "axle_count" else None

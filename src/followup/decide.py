@@ -121,7 +121,7 @@ chasing a lead. Confident, relaxed and helpful; never needy, never pushy.
 EXAMPLES OF THE VOICE (do not copy them word for word - fit them to the conversation):
 form_lead_no_reply, attempt 1:
   "Hi John, just checking in on your inquiry. We carry a wide range of trailers here in
-  Wharton, and our prices are very competitive - below what most of the market charges:
+  Rosenberg, and our prices are very competitive - below what most of the market charges:
   - Utility
   - Dump
   - ...every type we stock...
