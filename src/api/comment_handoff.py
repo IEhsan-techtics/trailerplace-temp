@@ -32,6 +32,9 @@ class CommentHandoff(BaseModel):
     commenter_name: str | None = Field(default=None, max_length=255)
     post_id: str | None = Field(default=None, max_length=255)
     post_summary: str = Field(default="", max_length=1000)
+    # The one trailer the post is about ("Aluma 6310H-TG"), when it is about one. Interest in
+    # it is logged and the team gets a Listing Interest ticket.
+    post_trailer: str | None = Field(default=None, max_length=200)
     dm_text: str = Field(min_length=1, max_length=2000)
 
 
@@ -53,4 +56,6 @@ def comment_handoff(
         comment_id=body.comment_id,
         post_summary=body.post_summary,
         commenter_name=body.commenter_name,
+        post_trailer=body.post_trailer,
+        post_id=body.post_id,
     )

@@ -13,6 +13,7 @@ in the graph knows the difference.
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -203,6 +204,30 @@ COMMENT_HANDOFF_MARKER = "(comment handoff"
 
 _HANDOFF_NAMESPACE = uuid.UUID("5b0f3c1e-2d7a-4e8b-9c41-7a2e6f1d3b90")
 
+# What a returning customer keeps when a comment opens a new enquiry: who they are, the turn
+# count, and what the team is waiting to hear about them. Everything else is the old search -
+# live, a customer who once asked about a 20 ft livestock trailer commented "interested" on an
+# Aluma utility post, asked "what is the use of such trailers?" and was told about livestock.
+_KEPT_ON_HANDOFF = (
+    "contact", "turn_index", "pending_email_actions", "contact_followup_pending",
+    "shared_platforms", "listing_interest_keys", "gave_up_reported",
+)
+
+# How much of the post's caption goes into the transcript.
+_CAPTION_CHARS = 400
+
+
+def _post_caption(post_summary: str) -> str:
+    """The caption out of the Omni agent's post context ("Post caption: ...", then attachments)."""
+    text = str(post_summary or "")
+    match = re.search(r"Post caption:\s*(.*?)(?:\n|$)", text, re.DOTALL)
+    caption = " ".join((match.group(1) if match else "").split())
+    if caption.lower() in {"", "(none)"}:
+        return ""
+    if len(caption) > _CAPTION_CHARS:
+        caption = caption[:_CAPTION_CHARS].rsplit(" ", 1)[0] + "..."
+    return caption
+
 
 def seed_from_comment(
     psid: str,
@@ -214,37 +239,67 @@ def seed_from_comment(
     comment_id: str,
     post_summary: str = "",
     commenter_name: str | None = None,
+    post_trailer: str | None = None,
+    post_id: str | None = None,
 ) -> dict[str, Any]:
     """Open (or resume) a customer's conversation with our private reply to their comment.
 
     The Omni Channel Agent DMs someone who commented on a post, then calls this with the PSID
-    Meta returned. Their comment and our DM go into the transcript, so when they answer the
-    bot already knows what they asked and does not greet them as a stranger.
+    Meta returned. Their comment - with the post's caption, so the bot knows what they were
+    looking at - and our DM go into the transcript, so when they answer the bot already knows
+    what they asked and does not greet them as a stranger.
 
-    A brand-new session starts at turn 1, so their answer is turn 2 and never "first". A
-    returning customer keeps their state and transcript - including any contact details,
-    which is what stops us asking again. Details on the lead row but not in the state are
-    copied across for the same reason.
+    A comment is a new enquiry: a returning customer keeps their transcript and contact
+    details (which is what stops us asking again) but not their old search. Details on the
+    lead row but not in the state are copied across. A brand-new session starts at turn 1, so
+    their answer is turn 2 and never "first".
+
+    Interest in a post about ONE trailer (``post_trailer``, read by the Omni agent) is logged
+    and the team is sent a Listing Interest ticket - now when we can reach them, otherwise
+    held until they give a phone or email, like every other lead.
 
     Idempotent per comment: a repeated call finds its turn row and changes nothing.
     """
     from src.graph.nodes import greeting
-    from src.graph.state import from_snapshot, to_snapshot
+    from src.graph.state import from_snapshot, new_state, to_snapshot
+    from src.tools import team_notify
 
     session_id = session_uuid_for(psid)
     session_uuid = _as_uuid(session_id)
     turn_uuid = uuid.uuid5(_HANDOFF_NAMESPACE, f"{platform}:{comment_id}")
     now = datetime.now(timezone.utc)
+    where = platform.title()
+    caption = _post_caption(post_summary)
+    said = f'(Commented on our {where} post: "{caption}") ' if caption else f"(Commented on our {where} post) "
     seeded = [
-        {"role": "user", "content": f"(Commented on our {platform.title()} post) {comment_text}",
-         "comment_origin": True},
+        {"role": "user", "content": f"{said}{comment_text}", "comment_origin": True},
         {"role": "assistant", "content": dm_text, "comment_dm": True},
     ]
     request_message = f"{COMMENT_HANDOFF_MARKER}: {platform} comment) {comment_text}"
+    trailer = " ".join(str(post_trailer or "").split())[:200]
+
+    def _log_post_interest(state: dict) -> None:
+        key = f"post:{post_id or trailer.lower()}"
+        recorded = state.setdefault("listing_interest_keys", [])
+        state["interest_listing"] = trailer
+        state["listing_interest_logged"] = True
+        if key in recorded:
+            state["comment_origin"]["interest_status"] = "repeat"
+            return
+        recorded.append(key)
+        # The team's line is cut to a few words, so the trailer leads; the comment itself is in
+        # the chat the email links to.
+        description = f"Wants the {trailer} ({where} comment)"
+        status = team_notify.record(state, reason="Listing Interest", description=description)
+        state["comment_origin"]["interest_status"] = status
+        logger.info("COMMENT interest: session=%s trailer=%r status=%s", session_id, trailer, status)
 
     def _seed_state(snapshot: dict[str, Any] | None, conversation: list, lead: dict) -> tuple[dict, bool]:
         new_session = not snapshot and not conversation
-        state = from_snapshot(session_id, snapshot)
+        old = from_snapshot(session_id, snapshot)
+        state = new_state(session_id)
+        for key in _KEPT_ON_HANDOFF:
+            state[key] = old.get(key, state.get(key))
         if new_session:
             state["turn_index"] = 1
         contact = state.setdefault("contact", {})
@@ -260,10 +315,14 @@ def seed_from_comment(
             "comment_id": comment_id,
             "commenter_name": commenter_name,
             "post_summary": post_summary,
+            "post_trailer": trailer or None,
             "reply_turn": int(state.get("turn_index") or 0) + 1,
             "at": now.isoformat(),
         }
         state["messages"] = list(conversation) + seeded
+        state["turn_outcome"] = {}
+        if intent == "product_interest" and trailer:
+            _log_post_interest(state)
         return state, new_session
 
     def _result(state: dict, new_session: bool, duplicate: bool = False) -> dict[str, Any]:
@@ -272,6 +331,7 @@ def seed_from_comment(
             "known_contact": greeting.contact_is_complete(state.get("contact") or {}),
             "new_session": new_session,
             "duplicate": duplicate,
+            "interest": (state.get("comment_origin") or {}).get("interest_status"),
         }
 
     if not persistence_enabled():
@@ -288,6 +348,7 @@ def seed_from_comment(
         record["psid"] = record.get("psid") or psid
         turns.append({"turn_id": str(turn_uuid), "request_message": request_message,
                       "response": {"assistant_text": dm_text, "listings": [], "comment_handoff": True}})
+        _MEMORY_TIMERS[session_id] = None
         return _result(state, new_session)
 
     ensure_session(session_id, psid)
@@ -302,6 +363,7 @@ def seed_from_comment(
             "phone": lead_row.phone_number if lead_row else None,
         }
         state, new_session = _seed_state(row.state_snapshot, list(row.conversation or []), lead)
+        outbox = list(state["turn_outcome"].pop("outbox_events", []) or [])
         row.conversation = list(state["messages"])
         row.state_snapshot = to_snapshot(state)
         row.state_version = (row.state_version or 0) + 1
@@ -314,10 +376,30 @@ def seed_from_comment(
                 response={"assistant_text": dm_text, "listings": [], "comment_handoff": True},
             )
         )
+        sql.flush()
+        # The ticket commits with the handoff, exactly as a turn's emails commit with the turn.
+        for event in outbox:
+            sql.add(
+                ChatbotOutbox(
+                    session_id=session_uuid,
+                    turn_id=turn_uuid,
+                    event_key=str(event.get("event_key") or uuid.uuid4()),
+                    event_type=str(event.get("event_type") or "listing_interest")[:64],
+                    payload=dict(event.get("payload") or {}),
+                    origin=settings.outbox_origin,
+                )
+            )
+        if outbox:
+            _update_lead(sql, row.lead_id, state.get("contact") or {}, psid, emailed=True)
+        # An old search's 5-minute timer must not fire into the new enquiry.
+        _write_timer(sql, session_uuid, None)
         sql.commit()
+    if outbox:
+        deliver_pending_outbox_async()
     logger.info(
-        "COMMENT handoff seeded: session=%s new=%s known_contact=%s intent=%s",
+        "COMMENT handoff seeded: session=%s new=%s known_contact=%s intent=%s interest=%s",
         session_id, new_session, greeting.contact_is_complete(state.get("contact") or {}), intent,
+        (state.get("comment_origin") or {}).get("interest_status"),
     )
     return _result(state, new_session)
 

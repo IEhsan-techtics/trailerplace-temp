@@ -142,3 +142,93 @@ def test_the_route_seeds_the_conversation(client):
     assert response.json()["session_id"] == session_uuid_for(PSID)
     _state, conversation = state_now()
     assert conversation[-1]["content"] == DM
+
+
+# ---------------------------------------------------------------- a comment is a new enquiry
+ALUMA_POST = ("Post caption: The Aluma 6310H-TG (standard tailgate) utility trailer comes with a "
+              "3500# rubber torsion axle and LED lights.\nAttachment title: Photos from Trailer Place")
+
+
+def test_a_returning_customers_old_search_does_not_carry_over(fake_llm):
+    """Live: an old livestock search answered "what is the use of such trailers?"."""
+    session_id = session_uuid_for(PSID)
+    fake_llm.push(turn_output(intent="category_selection", category_mentioned="livestock",
+                              name="Dave", email="dave@x.com", slots={"length": "20 ft"}))
+    run_turn(session_id, "Dave, dave@x.com - a 20 ft livestock trailer", channel_id=PSID)
+    assert state_now()[0]["category"] == "Livestock"
+
+    seed(comment_text="Interested In this trailer", post_summary=ALUMA_POST, comment_id="c_old")
+    state, conversation = state_now()
+
+    assert state["category"] is None
+    assert not state["slots"] and not state["shown_urls"]
+    assert state["contact"]["name"] == "Dave", "who they are is kept"
+    assert any("livestock" in m["content"].lower() for m in conversation), "the transcript is kept"
+
+
+def test_the_post_caption_is_in_the_transcript():
+    seed(comment_text="Interested In this trailer", post_summary=ALUMA_POST)
+    _state, conversation = state_now()
+    assert conversation[0]["content"].startswith(
+        '(Commented on our Facebook post: "The Aluma 6310H-TG (standard tailgate) utility trailer')
+    assert conversation[0]["content"].endswith("Interested In this trailer")
+    assert "Attachment" not in conversation[0]["content"]
+
+
+def test_interest_in_a_single_trailer_post_tickets_the_team(monkeypatch, fake_llm):
+    from src.tools import email_sender
+
+    sent = []
+    monkeypatch.setattr(email_sender, "send_email", lambda subject, body: sent.append((subject, body)) or True)
+    session_id = session_uuid_for(PSID)
+    fake_llm.push(turn_output(intent="contact_info_provided", name="Dave", email="dave@x.com"))
+    run_turn(session_id, "I'm Dave, dave@x.com", channel_id=PSID)
+
+    result = seed(comment_text="Interested In this trailer", post_summary=ALUMA_POST,
+                  post_trailer="Aluma 6310H-TG", comment_id="c_t1")
+    state, _ = state_now()
+
+    assert result["interest"] == "sent"
+    assert state["listing_interest_logged"] and state["interest_listing"] == "Aluma 6310H-TG"
+    assert len(sent) == 1 and "Listing Interest" in sent[0][0]
+    assert "Wants the Aluma 6310H-TG (Facebook comment)" in sent[0][1]
+    assert "shared a Facebook link" not in sent[0][1]
+
+
+def test_without_a_way_to_reach_them_the_ticket_waits(monkeypatch):
+    from src.tools import email_sender
+
+    sent = []
+    monkeypatch.setattr(email_sender, "send_email", lambda subject, body: sent.append(subject) or True)
+    result = seed(comment_text="how much?", post_summary=ALUMA_POST, post_trailer="Aluma 6310H-TG")
+    state, _ = state_now()
+
+    assert result["interest"] == "stashed" and not sent
+    assert state["pending_email_actions"], "sent the moment they give a phone or email"
+
+
+def test_a_post_about_several_trailers_logs_nothing(monkeypatch):
+    from src.tools import email_sender
+
+    sent = []
+    monkeypatch.setattr(email_sender, "send_email", lambda subject, body: sent.append(subject) or True)
+    result = seed(comment_text="price?", post_summary="Post caption: Huge selection of dump trailers!")
+    assert result["interest"] is None and not sent
+    assert not state_now()[0]["listing_interest_logged"]
+
+
+def test_a_complaint_never_logs_interest():
+    result = seed(intent="complaint", comment_text="nobody called me back",
+                  post_summary=ALUMA_POST, post_trailer="Aluma 6310H-TG")
+    assert result["interest"] is None
+
+
+def test_the_model_is_told_the_ticket_already_went(monkeypatch, fake_llm):
+    monkeypatch.setattr(config, "settings", replace(config.settings, llm_writes_reply=True))
+    session_id = session_uuid_for(PSID)
+    fake_llm.push(turn_output(intent="contact_info_provided", name="Dave", email="dave@x.com"))
+    run_turn(session_id, "I'm Dave, dave@x.com", channel_id=PSID)
+    seed(comment_text="Interested", post_summary=ALUMA_POST, post_trailer="Aluma 6310H-TG", comment_id="c_t2")
+    state, _ = state_now()
+    state["turn_index"] += 1
+    assert "ALREADY been sent to our team" in state_block(state)

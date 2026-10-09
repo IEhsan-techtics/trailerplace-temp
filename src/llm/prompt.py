@@ -770,6 +770,18 @@ def _comment_origin_line(state: dict) -> str:
         "message above is the private message WE sent them about it, and this is their answer. "
         "Do NOT greet them or thank them for contacting TrailerPlace - carry on from our message."
     )
+    trailer = origin.get("post_trailer")
+    status = origin.get("interest_status")
+    if trailer and status in {"sent", "repeat"}:
+        line += (
+            f" Their interest in the {trailer} from the post has ALREADY been sent to our team: "
+            "say so if it fits, and never escalate it again."
+        )
+    elif trailer and status == "stashed":
+        line += (
+            f" Their interest in the {trailer} from the post is logged; our team can follow up "
+            "once we have a way to reach them - that is why we ask for their details."
+        )
     if origin.get("intent") in {"complaint", "escalation"}:
         line += (
             " Their comment was a COMPLAINT: treat what they tell you as the complaint details "
